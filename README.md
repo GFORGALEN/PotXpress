@@ -5,7 +5,7 @@ PotXpress 是一个面向门店的桌台计时管理网页应用。项目按可�
 ## 当前进度
 
 - [x] 模块 1：后端基础、文件存储、事务恢复、身份认证
-- [ ] 模块 2：门店、桌台与布局数据接口
+- [x] 模块 2：门店、桌台与布局数据接口
 - [ ] 模块 3：计时器与历史记录接口
 - [ ] 模块 4：前端工程与登录页
 - [ ] 模块 5：桌台计时仪表盘
@@ -24,6 +24,16 @@ PotXpress 是一个面向门店的桌台计时管理网页应用。项目按可�
 - 一次性系统管理员初始化命令
 - 故障注入与 HTTP 集成测试
 
+## 模块 2 已包含
+
+- 门店创建、查看、更新、停用与跨文件默认数据初始化
+- 桌台单个/批量创建、自动无重叠落位、连续排序和软删除
+- 每店 200 张桌台上限、编号唯一性和活动计时删除保护
+- 门店设置读取与更新，门店时区和设置时区事务同步
+- 完整布局读取、成员集合校验和 `layoutVersion` 乐观锁保存
+- 门店/角色权限矩阵、停用门店写保护和关键操作审计
+- 并发编号冲突、布局冲突、空间不足与重启持久化集成测试
+
 ## 本地运行
 
 需要 Node.js 24 LTS 或更高版本。
@@ -38,6 +48,9 @@ npm run dev
 
 默认 API 地址为 `http://127.0.0.1:3001`，健康检查为
 `GET /api/health`。
+
+登录失败按 IP 与规范化用户名限制为 15 分钟内最多 5 次；超限响应
+`429 RATE_LIMITED` 并携带 `Retry-After`。
 
 当 `.env` 中 `SEED_DEMO_DATA=true` 时，会幂等创建以下开发账号：
 
@@ -75,6 +88,13 @@ $password | npm run create-admin -- --password-stdin --username admin --display-
 | `POST` | `/api/auth/login` | 登录 |
 | `GET` | `/api/auth/me` | 获取当前登录用户 |
 | `POST` | `/api/auth/logout` | 退出并记录审计日志 |
+| `GET/POST` | `/api/stores` | 列出/创建门店 |
+| `GET/PATCH` | `/api/stores/:storeId` | 查看/更新门店 |
+| `GET/POST` | `/api/stores/:storeId/tables` | 列出/创建桌台 |
+| `POST` | `/api/stores/:storeId/tables/batch` | 批量创建桌台 |
+| `PATCH/DELETE` | `/api/stores/:storeId/tables/:tableId` | 更新/软删除桌台 |
+| `GET/PATCH` | `/api/stores/:storeId/settings` | 查看/更新门店设置 |
+| `GET/PUT` | `/api/stores/:storeId/layout` | 查看/保存完整布局 |
 
 除健康检查与登录外，受保护接口使用
 `Authorization: Bearer <token>`。

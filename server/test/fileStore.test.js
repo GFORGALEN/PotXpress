@@ -18,7 +18,7 @@ test('并发 updateJSON 不会丢失写入', async (t) => {
   await store.initStorage();
 
   await Promise.all(
-    Array.from({ length: 40 }, (_, index) => (
+    Array.from({ length: 50 }, (_, index) => (
       store.updateJSON('stores.json', (stores) => {
         stores.push({ id: `store_${index}` });
       })
@@ -26,8 +26,8 @@ test('并发 updateJSON 不会丢失写入', async (t) => {
   );
 
   const stores = await store.readJSON('stores.json');
-  assert.equal(stores.length, 40);
-  assert.equal(new Set(stores.map((entry) => entry.id)).size, 40);
+  assert.equal(stores.length, 50);
+  assert.equal(new Set(stores.map((entry) => entry.id)).size, 50);
 });
 
 test('跨文件提交失败时按事务日志恢复原快照', async (t) => {

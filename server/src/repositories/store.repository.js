@@ -1,9 +1,12 @@
-import { fileStore } from '../storage/fileStore.js';
+import { BaseRepository } from './base.repository.js';
 
-class StoreRepository {
-  async findById(storeId) {
-    const stores = await fileStore.readJSON('stores.json');
-    return stores.find((store) => store.id === storeId) ?? null;
+class StoreRepository extends BaseRepository {
+  constructor() {
+    super('stores.json', { notFoundCode: 'STORE_NOT_FOUND' });
+  }
+
+  async findByStoreId(storeId) {
+    return this.findById(storeId);
   }
 }
 

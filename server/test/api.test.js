@@ -31,7 +31,11 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
   assert.equal(healthResponse.status, 200);
   assert.equal(healthBody.data.status, 'up');
   assert.equal(healthBody.data.storage, 'ok');
-  assert.equal(Number.isNaN(Date.parse(healthBody.data.timestamp)), false);
+  assert.equal(Number.isNaN(Date.parse(healthBody.data.time)), false);
+  const unknownQueryResponse = await fetch(
+    `${baseUrl}/api/health?unexpected=true`,
+  );
+  assert.equal(unknownQueryResponse.status, 400);
 
   const invalidResponse = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',
@@ -40,7 +44,30 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
   });
   const invalidBody = await invalidResponse.json();
   assert.equal(invalidResponse.status, 401);
-  assert.equal(invalidBody.error.code, 'INVALID_CREDENTIALS');
+  assert.equal(invalidBody.error.code, 'UNAUTHORIZED');
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'missing',
+        password: 'wrong-password',
+      }),
+    });
+    assert.equal(response.status, 401);
+  }
+
+  const rateLimitedResponse = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: 'missing',
+      password: 'wrong-password',
+    }),
+  });
+  assert.equal(rateLimitedResponse.status, 429);
+  assert.equal(rateLimitedResponse.headers.has('retry-after'), true);
 
   const loginResponse = await fetch(`${baseUrl}/api/auth/login`, {
     method: 'POST',

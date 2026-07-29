@@ -7,7 +7,19 @@ export async function loginController(req, res) {
 }
 
 export async function meController(req, res) {
-  return ok(res, { user: req.user }, '已获取当前用户');
+  return ok(
+    res,
+    {
+      user: {
+        id: req.user.userId,
+        username: req.user.username,
+        displayName: req.user.displayName,
+        role: req.user.role,
+        storeId: req.user.storeId,
+      },
+    },
+    '已获取当前用户',
+  );
 }
 
 export async function logoutController(req, res) {

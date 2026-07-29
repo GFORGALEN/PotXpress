@@ -51,8 +51,8 @@ function buildSeedTables(timestamp) {
     layout: {
       xRatio,
       yRatio,
-      widthRatio: 0.16,
-      heightRatio: 0.22,
+      widthRatio: 0.1,
+      heightRatio: 0.11,
       rotation: 0,
       zIndex: index + 1,
     },
