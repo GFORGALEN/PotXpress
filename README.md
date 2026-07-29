@@ -6,7 +6,7 @@ PotXpress 是一个面向门店的桌台计时管理网页应用。项目按可�
 
 - [x] 模块 1：后端基础、文件存储、事务恢复、身份认证
 - [x] 模块 2：门店、桌台与布局数据接口
-- [ ] 模块 3：计时器与历史记录接口
+- [x] 模块 3：计时器与历史记录接口
 - [ ] 模块 4：前端工程与登录页
 - [ ] 模块 5：桌台计时仪表盘
 - [ ] 模块 6：布局编辑器
@@ -33,6 +33,16 @@ PotXpress 是一个面向门店的桌台计时管理网页应用。项目按可�
 - 完整布局读取、成员集合校验和 `layoutVersion` 乐观锁保存
 - 门店/角色权限矩阵、停用门店写保护和关键操作审计
 - 并发编号冲突、布局冲突、空间不足与重启持久化集成测试
+
+## 模块 3 已包含
+
+- 无后台线程的实时计时状态计算，支持运行、预警、暂停和超时
+- 开始、暂停、继续、加减时、超时确认与清台状态机
+- 跨文件原子清台：先生成历史记录，再移除活动计时
+- 门店本地日期记录查询，覆盖 Pacific/Auckland 夏令时
+- 带 UTF-8 BOM、RFC 4180 转义与公式注入保护的 CSV 导出
+- 管理员操作日志查询和停用门店的受控查看/清台
+- 可注入测试时钟、同桌并发保护与服务器重启恢复测试
 
 ## 本地运行
 
@@ -95,6 +105,11 @@ $password | npm run create-admin -- --password-stdin --username admin --display-
 | `PATCH/DELETE` | `/api/stores/:storeId/tables/:tableId` | 更新/软删除桌台 |
 | `GET/PATCH` | `/api/stores/:storeId/settings` | 查看/更新门店设置 |
 | `GET/PUT` | `/api/stores/:storeId/layout` | 查看/保存完整布局 |
+| `GET` | `/api/stores/:storeId/timers` | 获取实时计算后的活动计时 |
+| `POST` | `/api/stores/:storeId/tables/:tableId/timer/:action` | 执行计时操作 |
+| `GET` | `/api/stores/:storeId/records` | 按门店日期查询记录 |
+| `GET` | `/api/stores/:storeId/records/export` | 导出记录 CSV |
+| `GET` | `/api/stores/:storeId/audit-logs` | 管理员查询操作日志 |
 
 除健康检查与登录外，受保护接口使用
 `Authorization: Bearer <token>`。

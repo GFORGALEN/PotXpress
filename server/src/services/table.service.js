@@ -161,8 +161,8 @@ async function createTablesInTransaction(storeId, specifications, user) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'tables.json', 'layouts.json'],
-      writeOrder: ['tables.json', 'layouts.json'],
+      resources: ['stores', 'tables', 'layouts'],
+      writeOrder: ['tables', 'layouts'],
     },
     ({ stores, tables, layouts }) => {
       assertEnabledStore(stores, storeId);
@@ -255,13 +255,13 @@ async function updateTableState(storeId, tableId, input, user, action) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: [
-        'stores.json',
-        'tables.json',
-        'layouts.json',
-        'activeTimers.json',
+      resources: [
+        'stores',
+        'tables',
+        'layouts',
+        'activeTimers',
       ],
-      writeOrder: ['tables.json', 'layouts.json'],
+      writeOrder: ['tables', 'layouts'],
     },
     ({ stores, tables, layouts, activeTimers }) => {
       assertEnabledStore(stores, storeId);

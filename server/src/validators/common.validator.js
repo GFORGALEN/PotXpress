@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const idSchema = z.string().min(1).max(100);
 export const emptyQuerySchema = z.object({}).strict();
+export const emptyBodySchema = z.object({}).strict().default({});
 
 export const storeParamsSchema = z.object({
   storeId: idSchema,
@@ -10,6 +11,11 @@ export const storeParamsSchema = z.object({
 export const storeTableParamsSchema = z.object({
   storeId: idSchema,
   tableId: idSchema,
+}).strict();
+
+export const storeRecordParamsSchema = z.object({
+  storeId: idSchema,
+  recordId: idSchema,
 }).strict();
 
 export function hasAtLeastOneField(value) {
