@@ -57,3 +57,12 @@ export async function writeAuditLog({
 
   return auditLog;
 }
+
+export async function writeAuditLogBestEffort(entry) {
+  try {
+    return await writeAuditLog(entry);
+  } catch (error) {
+    console.error(`审计日志写入失败（${entry.action}）：${error.message}`);
+    return null;
+  }
+}

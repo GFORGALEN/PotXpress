@@ -6,6 +6,10 @@ import { config } from './config.js';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
 import { authRouter } from './routes/auth.routes.js';
 import { healthRouter } from './routes/health.routes.js';
+import { layoutRouter } from './routes/layout.routes.js';
+import { settingRouter } from './routes/setting.routes.js';
+import { storeRouter } from './routes/store.routes.js';
+import { tableRouter } from './routes/table.routes.js';
 import { AppError } from './utils/appError.js';
 
 function corsOrigin(origin, callback) {
@@ -35,6 +39,10 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use('/api/health', healthRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/stores', storeRouter);
+  app.use('/api/stores/:storeId/tables', tableRouter);
+  app.use('/api/stores/:storeId/settings', settingRouter);
+  app.use('/api/stores/:storeId/layout', layoutRouter);
   app.use((req, res, next) => {
     next(new AppError(404, 'NOT_FOUND', '接口不存在'));
   });

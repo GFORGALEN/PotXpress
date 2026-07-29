@@ -9,7 +9,7 @@ const dummyHashPromise = hashPassword('potxpress-dummy-password');
 
 function toSafeUser(user) {
   return {
-    userId: user.id,
+    id: user.id,
     username: user.username,
     displayName: user.displayName,
     role: user.role,
@@ -37,7 +37,7 @@ export async function login({ username, password }) {
   }
 
   if (!user || !passwordMatches || !user.enabled || !storeEnabled) {
-    throw new AppError(401, 'INVALID_CREDENTIALS', '用户名或密码错误');
+    throw new AppError(401, 'UNAUTHORIZED', '用户名或密码错误');
   }
 
   const safeUser = toSafeUser(user);

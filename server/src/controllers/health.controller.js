@@ -1,15 +1,19 @@
-import { fileStore } from '../storage/fileStore.js';
+import { getHealthStatus } from '../services/health.service.js';
 
 export function healthController(req, res) {
-  const storage = fileStore.getStatus();
-  const healthy = storage !== 'fatal';
+  const {
+    healthy,
+    status,
+    storage,
+    time,
+  } = getHealthStatus();
 
   return res.status(healthy ? 200 : 503).json({
     success: healthy,
     data: {
-      status: healthy ? 'up' : 'down',
+      status,
       storage,
-      timestamp: new Date().toISOString(),
+      time,
     },
   });
 }
