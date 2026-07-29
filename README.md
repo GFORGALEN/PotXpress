@@ -1,0 +1,80 @@
+# PotXpress
+
+PotXpress 是一个面向门店的桌台计时管理网页应用。项目按可独立验收的模块逐步交付，每个模块对应独立提交。
+
+## 当前进度
+
+- [x] 模块 1：后端基础、文件存储、事务恢复、身份认证
+- [ ] 模块 2：门店、桌台与布局数据接口
+- [ ] 模块 3：计时器与历史记录接口
+- [ ] 模块 4：前端工程与登录页
+- [ ] 模块 5：桌台计时仪表盘
+- [ ] 模块 6：布局编辑器
+- [ ] 模块 7：计时提醒与声音
+- [ ] 模块 8：系统管理、移动端适配与发布检查
+
+## 模块 1 已包含
+
+- Express API、安全响应头和受控 CORS
+- JSON 文件存储、进程内写锁、原子替换和最近 5 份有效备份
+- 跨文件事务日志、启动恢复和失败回滚
+- 单 `DATA_DIR` 实例锁，避免两个进程同时写数据
+- 数据版本迁移、演示数据初始化和启动一致性检查
+- JWT 登录、角色上下文、`tokenVersion` 立即失效和登录限流
+- 一次性系统管理员初始化命令
+- 故障注入与 HTTP 集成测试
+
+## 本地运行
+
+需要 Node.js 24 LTS 或更高版本。
+
+```powershell
+Copy-Item .env.example .env
+Set-Location server
+npm install
+npm test
+npm run dev
+```
+
+默认 API 地址为 `http://127.0.0.1:3001`，健康检查为
+`GET /api/health`。
+
+当 `.env` 中 `SEED_DEMO_DATA=true` 时，会幂等创建以下开发账号：
+
+| 角色 | 用户名 | 密码 |
+| --- | --- | --- |
+| 系统管理员 | `admin` | `admin123` |
+| 门店管理员 | `demo_admin` | `admin123` |
+| 门店员工 | `demo_staff` | `staff123` |
+
+演示账号只能用于本地开发。生产环境必须关闭演示数据并设置至少 32
+字符的随机 `JWT_SECRET`。
+
+## 初始化首位系统管理员
+
+交互式创建：
+
+```powershell
+Set-Location server
+npm run create-admin
+```
+
+自动化环境可通过标准输入传入密码，密码不会出现在命令参数或日志中：
+
+```powershell
+$password | npm run create-admin -- --password-stdin --username admin --display-name "系统管理员"
+```
+
+如果已经存在启用的系统管理员，该命令会拒绝再次初始化。
+
+## 当前 API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/health` | 服务与存储状态 |
+| `POST` | `/api/auth/login` | 登录 |
+| `GET` | `/api/auth/me` | 获取当前登录用户 |
+| `POST` | `/api/auth/logout` | 退出并记录审计日志 |
+
+除健康检查与登录外，受保护接口使用
+`Authorization: Bearer <token>`。
