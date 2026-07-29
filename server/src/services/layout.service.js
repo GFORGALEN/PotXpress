@@ -76,7 +76,7 @@ function validateSubmittedTables(submittedTables, currentTables, canvas) {
 export async function getLayout(storeId) {
   return unitOfWorkRepository.run(
     {
-      lockFiles: ['layouts.json', 'tables.json'],
+      resources: ['layouts', 'tables'],
       writeOrder: [],
     },
     ({ layouts, tables }) => {
@@ -111,8 +111,8 @@ export async function saveLayout(storeId, input, user) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'layouts.json', 'tables.json'],
-      writeOrder: ['tables.json', 'layouts.json'],
+      resources: ['stores', 'layouts', 'tables'],
+      writeOrder: ['tables', 'layouts'],
     },
     ({ stores, layouts, tables }) => {
       const store = stores.findById(storeId);

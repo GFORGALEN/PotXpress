@@ -27,7 +27,7 @@ function toPublicStore(store) {
 export async function listStores(user) {
   return unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'tables.json', 'activeTimers.json'],
+      resources: ['stores', 'tables', 'activeTimers'],
       writeOrder: [],
     },
     ({ stores, tables, activeTimers }) => {
@@ -72,8 +72,8 @@ export async function createStore(input, user) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'settings.json', 'layouts.json'],
-      writeOrder: ['stores.json', 'settings.json', 'layouts.json'],
+      resources: ['stores', 'settings', 'layouts'],
+      writeOrder: ['stores', 'settings', 'layouts'],
     },
     ({ stores, settings, layouts }) => {
       if (
@@ -123,8 +123,8 @@ export async function updateStore(storeId, input, user) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'settings.json'],
-      writeOrder: ['stores.json', 'settings.json'],
+      resources: ['stores', 'settings'],
+      writeOrder: ['stores', 'settings'],
     },
     ({ stores, settings }) => {
       const current = stores.findById(storeId);

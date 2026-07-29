@@ -7,9 +7,17 @@ import { errorHandler } from './middleware/errorHandler.middleware.js';
 import { authRouter } from './routes/auth.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { layoutRouter } from './routes/layout.routes.js';
+import {
+  auditLogRouter,
+  recordRouter,
+} from './routes/record.routes.js';
 import { settingRouter } from './routes/setting.routes.js';
 import { storeRouter } from './routes/store.routes.js';
 import { tableRouter } from './routes/table.routes.js';
+import {
+  tableTimerRouter,
+  timerListRouter,
+} from './routes/timer.routes.js';
 import { AppError } from './utils/appError.js';
 
 function corsOrigin(origin, callback) {
@@ -43,6 +51,13 @@ export function createApp() {
   app.use('/api/stores/:storeId/tables', tableRouter);
   app.use('/api/stores/:storeId/settings', settingRouter);
   app.use('/api/stores/:storeId/layout', layoutRouter);
+  app.use('/api/stores/:storeId/timers', timerListRouter);
+  app.use(
+    '/api/stores/:storeId/tables/:tableId/timer',
+    tableTimerRouter,
+  );
+  app.use('/api/stores/:storeId/records', recordRouter);
+  app.use('/api/stores/:storeId/audit-logs', auditLogRouter);
   app.use((req, res, next) => {
     next(new AppError(404, 'NOT_FOUND', '接口不存在'));
   });

@@ -65,7 +65,26 @@ class TransactionRepository {
 }
 
 class UnitOfWorkRepository {
-  async run({ lockFiles, writeOrder = [] }, callback) {
+  async run({ resources, writeOrder = [] }, callback) {
+    const lockFiles = resources.map((name) => {
+      const definition = REPOSITORY_DEFINITIONS[name];
+
+      if (!definition) {
+        throw new Error(`未知的 unit of work 资源：${name}`);
+      }
+
+      return definition.filename;
+    });
+    const writeFiles = writeOrder.map((name) => {
+      const definition = REPOSITORY_DEFINITIONS[name];
+
+      if (!definition) {
+        throw new Error(`未知的 unit of work 写资源：${name}`);
+      }
+
+      return definition.filename;
+    });
+
     return fileStore.withFiles(
       lockFiles,
       async (drafts) => {
@@ -85,7 +104,7 @@ class UnitOfWorkRepository {
         const result = await callback(repositories);
         return { data: drafts, result };
       },
-      { writeOrder },
+      { writeOrder: writeFiles },
     );
   }
 }

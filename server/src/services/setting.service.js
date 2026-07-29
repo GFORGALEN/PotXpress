@@ -19,8 +19,8 @@ export async function updateSettings(storeId, input, user) {
 
   await unitOfWorkRepository.run(
     {
-      lockFiles: ['stores.json', 'settings.json'],
-      writeOrder: ['settings.json'],
+      resources: ['stores', 'settings'],
+      writeOrder: ['settings'],
     },
     ({ stores, settings }) => {
       const store = stores.findById(storeId);
