@@ -8,7 +8,7 @@ import {
 import {
   computeTimerState,
   getTableStatus,
-} from '../src/utils/timeCalculator.js';
+} from '../src/utils/timeCalculator.ts';
 
 function makeTimer(overrides = {}) {
   return {

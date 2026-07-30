@@ -1,4 +1,4 @@
-import { login, logout } from '../services/auth.service.js';
+import { changePassword, login, logout } from '../services/auth.service.js';
 import { ok } from '../utils/response.js';
 
 export async function loginController(req, res) {
@@ -25,4 +25,9 @@ export async function meController(req, res) {
 export async function logoutController(req, res) {
   await logout(req.user);
   return ok(res, null, '已退出登录');
+}
+
+export async function changePasswordController(req, res) {
+  await changePassword(req.user, req.body);
+  return ok(res, null, '密码已修改，请重新登录');
 }

@@ -44,6 +44,7 @@ function validateSubmittedTables(submittedTables, currentTables, canvas) {
     const { layout } = item;
     const width = layout.widthRatio * canvas.virtualWidth;
     const height = layout.heightRatio * canvas.virtualHeight;
+    const epsilon = 0.01;
 
     if (
       layout.xRatio + layout.widthRatio > 1.000001
@@ -58,10 +59,10 @@ function validateSubmittedTables(submittedTables, currentTables, canvas) {
     }
 
     if (
-      width < canvas.minTableWidth
-      || width > canvas.maxTableWidth
-      || height < canvas.minTableHeight
-      || height > canvas.maxTableHeight
+      width < canvas.minTableWidth - epsilon
+      || width > canvas.maxTableWidth + epsilon
+      || height < canvas.minTableHeight - epsilon
+      || height > canvas.maxTableHeight + epsilon
     ) {
       throw new AppError(
         400,
@@ -76,10 +77,10 @@ function validateSubmittedTables(submittedTables, currentTables, canvas) {
 export async function getLayout(storeId) {
   return unitOfWorkRepository.run(
     {
-      resources: ['layouts', 'tables'],
+      resources: ['layouts', 'tables', 'tableGroups'],
       writeOrder: [],
     },
-    ({ layouts, tables }) => {
+    ({ layouts, tables, tableGroups }) => {
       const layout = getLayoutOrThrow(layouts, storeId);
       const storeTables = tables.findByStoreId(storeId)
         .sort(
@@ -87,18 +88,35 @@ export async function getLayout(storeId) {
             left.sortOrder - right.sortOrder || left.number - right.number
           ),
         );
+      const groups = tableGroups.findByStoreId(storeId)
+        .filter((group) => group.enabled);
+      const groupByTableId = new Map(
+        groups.flatMap((group) => (
+          group.tableIds.map((tableId) => [tableId, group])
+        )),
+      );
 
       return {
         layoutVersion: layout.layoutVersion,
         canvas: layout.canvas,
+        decorations: layout.decorations ?? [],
         tables: storeTables.map((table) => ({
           tableId: table.id,
           name: table.name,
           number: table.number,
           enabled: table.enabled,
           sortOrder: table.sortOrder,
+          shape: table.shape,
+          capacity: table.capacity,
+          area: table.area,
+          note: table.note,
+          defaultDurationMinutes: table.defaultDurationMinutes,
+          groupId: groupByTableId.get(table.id)?.id ?? null,
+          groupName: groupByTableId.get(table.id)?.name ?? null,
+          groupType: groupByTableId.get(table.id)?.type ?? null,
           layout: table.layout,
         })),
+        groups,
       };
     },
   );
@@ -166,6 +184,7 @@ export async function saveLayout(storeId, input, user) {
       before = {
         layoutVersion: currentLayout.layoutVersion,
         canvas: currentLayout.canvas,
+        decorations: currentLayout.decorations ?? [],
         tableCount: storeTables.length,
       };
       savedVersion = currentLayout.layoutVersion + 1;
@@ -173,12 +192,14 @@ export async function saveLayout(storeId, input, user) {
         ...currentLayout,
         layoutVersion: savedVersion,
         canvas: nextCanvas,
+        decorations: input.decorations,
         updatedAt: timestamp,
         updatedBy: user.userId,
       });
       after = {
         layoutVersion: savedVersion,
         canvas: nextCanvas,
+        decorations: input.decorations,
         tableCount: storeTables.length,
       };
     },

@@ -15,6 +15,11 @@ function tableAuditSnapshot(table) {
     number: table.number,
     sortOrder: table.sortOrder,
     enabled: table.enabled,
+    shape: table.shape,
+    capacity: table.capacity,
+    area: table.area,
+    note: table.note,
+    defaultDurationMinutes: table.defaultDurationMinutes,
     layout: table.layout,
   };
 }
@@ -149,6 +154,11 @@ function planNewTables({
     number: specification.number,
     sortOrder: maxSortOrder + index + 1,
     enabled: true,
+    shape: specification.shape ?? 'rectangle',
+    capacity: specification.capacity ?? 4,
+    area: specification.area?.trim() || '大厅',
+    note: specification.note?.trim() || null,
+    defaultDurationMinutes: specification.defaultDurationMinutes ?? null,
     layout: placements[index],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -168,9 +178,23 @@ async function createTablesInTransaction(storeId, specifications, user) {
       assertEnabledStore(stores, storeId);
       const storeTables = tables.findByStoreId(storeId);
       const layoutRecord = getStoreLayout(layouts, storeId);
+      const nextInternalNumber = storeTables.reduce(
+        (maximum, table) => Math.max(maximum, table.number),
+        0,
+      ) + 1;
+      const resolvedSpecifications = specifications.map((specification, index) => ({
+        ...specification,
+        number: specification.autoNumber
+          ? nextInternalNumber + index
+          : specification.number,
+      }));
+
+      if (resolvedSpecifications.some((specification) => specification.number > 9999)) {
+        throw new AppError(409, 'TABLE_NUMBER_LIMIT', '内部桌台编号已达到上限');
+      }
       createdTables = planNewTables({
         storeId,
-        specifications,
+        specifications: resolvedSpecifications,
         storeTables,
         layoutRecord,
         timestamp,
@@ -214,19 +238,28 @@ export async function createTable(storeId, input, user) {
 export async function createTableBatch(storeId, input, user) {
   const pattern = input.namePattern ?? '{n}号桌';
   const specifications = Array.from({ length: input.count }, (_, index) => {
-    const number = input.startNumber + index;
-    const name = pattern.replaceAll('{n}', String(number)).trim();
+    const displayNumber = input.startNumber + index;
+    const name = input.areaCode
+      ? `${input.areaCode.trim().toUpperCase()}${displayNumber}`
+      : pattern.replaceAll('{n}', String(displayNumber)).trim();
 
     if (name.length < 1 || name.length > 50) {
       throw new AppError(
         400,
         'VALIDATION_ERROR',
         'namePattern 展开后的桌台名称长度必须为 1-50',
-        { number },
+        { number: displayNumber },
       );
     }
 
-    return { name, number };
+    return {
+      name,
+      number: displayNumber,
+      shape: input.shape,
+      capacity: input.capacity,
+      area: input.area,
+      autoNumber: Boolean(input.areaCode),
+    };
   });
   const tables = await createTablesInTransaction(storeId, specifications, user);
 
@@ -260,10 +293,11 @@ async function updateTableState(storeId, tableId, input, user, action) {
         'tables',
         'layouts',
         'activeTimers',
+        'tableGroups',
       ],
       writeOrder: ['tables', 'layouts'],
     },
-    ({ stores, tables, layouts, activeTimers }) => {
+    ({ stores, tables, layouts, activeTimers, tableGroups }) => {
       assertEnabledStore(stores, storeId);
       const current = tables.findById(tableId);
 
@@ -275,12 +309,29 @@ async function updateTableState(storeId, tableId, input, user, action) {
 
       if (
         disabling
-        && activeTimers.findOne((timer) => timer.tableId === tableId)
+        && activeTimers.findOne((timer) => (
+          (timer.memberTableIds ?? [timer.tableId]).includes(tableId)
+        ))
       ) {
         throw new AppError(
           409,
           'TABLE_HAS_ACTIVE_TIMER',
           '桌台存在活动计时，不能停用',
+        );
+      }
+
+      if (
+        disabling
+        && tableGroups.findOne((group) => (
+          group.enabled
+          && group.storeId === storeId
+          && group.tableIds.includes(tableId)
+        ))
+      ) {
+        throw new AppError(
+          409,
+          'TABLE_IN_GROUP',
+          '桌台属于拼桌组，请先解除拼桌',
         );
       }
 
@@ -303,6 +354,15 @@ async function updateTableState(storeId, tableId, input, user, action) {
         ...(input.number !== undefined ? { number: input.number } : {}),
         ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.shape !== undefined ? { shape: input.shape } : {}),
+        ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+        ...(input.area !== undefined ? { area: input.area.trim() } : {}),
+        ...(input.note !== undefined
+          ? { note: input.note?.trim() || null }
+          : {}),
+        ...(input.defaultDurationMinutes !== undefined
+          ? { defaultDurationMinutes: input.defaultDurationMinutes }
+          : {}),
         updatedAt: timestamp,
       });
 
@@ -363,4 +423,95 @@ export async function deleteTable(storeId, tableId, user) {
     user,
     'table.delete',
   );
+}
+
+export async function deleteTablesPermanent(storeId, tableIds, user) {
+  const uniqueIds = [...new Set(tableIds)];
+  let deleted;
+
+  await unitOfWorkRepository.run(
+    {
+      resources: [
+        'stores',
+        'tables',
+        'layouts',
+        'activeTimers',
+        'tableGroups',
+        'records',
+      ],
+      writeOrder: ['tables', 'layouts'],
+    },
+    ({
+      stores,
+      tables,
+      layouts,
+      activeTimers,
+      tableGroups,
+      records,
+    }) => {
+      assertEnabledStore(stores, storeId);
+      const targets = uniqueIds.map((id) => tables.findById(id));
+
+      if (targets.some((table) => !table || table.storeId !== storeId)) {
+        throw new AppError(404, 'TABLE_NOT_FOUND', '部分桌台不存在或不属于当前门店');
+      }
+
+      const activeTableIds = new Set(
+        activeTimers.findByStoreId(storeId).flatMap(
+          (timer) => timer.memberTableIds ?? [timer.tableId],
+        ),
+      );
+      const blockedByTimer = targets.filter((table) => activeTableIds.has(table.id));
+      if (blockedByTimer.length) {
+        throw new AppError(409, 'TABLE_HAS_ACTIVE_TIMER', '选中的桌台存在活动计时，不能删除', {
+          tableIds: blockedByTimer.map((table) => table.id),
+        });
+      }
+
+      const groupedIds = new Set(
+        tableGroups.findByStoreId(storeId)
+          .filter((group) => group.enabled)
+          .flatMap((group) => group.tableIds),
+      );
+      const blockedByGroup = targets.filter((table) => groupedIds.has(table.id));
+      if (blockedByGroup.length) {
+        throw new AppError(409, 'TABLE_IN_GROUP', '选中的桌台属于拼桌组，请先解除拼桌', {
+          tableIds: blockedByGroup.map((table) => table.id),
+        });
+      }
+
+      const recordedIds = new Set(
+        records.findByStoreId(storeId).flatMap(
+          (record) => record.memberTableIds ?? [record.tableId],
+        ),
+      );
+      const blockedByHistory = targets.filter((table) => recordedIds.has(table.id));
+      if (blockedByHistory.length) {
+        throw new AppError(
+          409,
+          'TABLE_HAS_HISTORY',
+          '选中的桌台已有计时记录，只能停用，不能永久删除',
+          { tableIds: blockedByHistory.map((table) => table.id) },
+        );
+      }
+
+      const timestamp = new Date().toISOString();
+      deleted = targets.map((table) => tables.delete(table.id));
+      reorderEnabledTables(tables, storeId, null, undefined, timestamp);
+      bumpLayout(layouts, storeId, user.userId, timestamp);
+    },
+  );
+
+  await writeAuditLogBestEffort({
+    userId: user.userId,
+    userNameSnapshot: user.displayName,
+    storeId,
+    action: uniqueIds.length > 1 ? 'table.batch_delete' : 'table.permanent_delete',
+    targetType: uniqueIds.length > 1 ? 'table_batch' : 'table',
+    targetId: uniqueIds.length > 1 ? null : uniqueIds[0],
+    dataBefore: deleted.map(tableAuditSnapshot),
+    dataAfter: null,
+  });
+
+  return deleted;
 }

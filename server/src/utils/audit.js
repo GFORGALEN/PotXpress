@@ -28,7 +28,7 @@ function sanitizeAuditValue(value, seen = new WeakSet()) {
   );
 }
 
-export async function writeAuditLog({
+export function buildAuditLog({
   userId,
   userNameSnapshot,
   storeId,
@@ -37,10 +37,10 @@ export async function writeAuditLog({
   targetId,
   dataBefore,
   dataAfter,
-}) {
-  const auditLog = {
+}, { timestamp = new Date().toISOString() } = {}) {
+  return {
     id: `audit_${uuidv4()}`,
-    timestamp: new Date().toISOString(),
+    timestamp,
     userId: userId ?? null,
     userNameSnapshot: userNameSnapshot ?? null,
     storeId: storeId ?? null,
@@ -50,6 +50,16 @@ export async function writeAuditLog({
     dataBefore: sanitizeAuditValue(dataBefore),
     dataAfter: sanitizeAuditValue(dataAfter),
   };
+}
+
+export function appendAuditLog(auditLogs, entry, options) {
+  const auditLog = buildAuditLog(entry, options);
+  auditLogs.create(auditLog);
+  return auditLog;
+}
+
+export async function writeAuditLog(entry) {
+  const auditLog = buildAuditLog(entry);
 
   await fileStore.updateJSON('auditLogs.json', (logs) => {
     logs.push(auditLog);

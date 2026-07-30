@@ -1,4 +1,32 @@
-function toMilliseconds(value) {
+import type {
+  ActiveTimer,
+  TimerStatus,
+} from '@potxpress/contracts';
+
+export type TimeInput = Date | number | string;
+
+export interface RawRemainingTime {
+  rawRemainingSeconds: number;
+  effectiveEndMilliseconds: number;
+}
+
+export interface ComputedTimerState {
+  status: TimerStatus;
+  remainingSeconds: number;
+  overtimeSeconds: number;
+  effectiveEndTime: string;
+}
+
+type TimerClockFields = Pick<
+  ActiveTimer,
+  | 'startTime'
+  | 'plannedDurationSeconds'
+  | 'status'
+  | 'pauseStartedAt'
+  | 'totalPausedSeconds'
+>;
+
+function toMilliseconds(value: TimeInput): number {
   if (value instanceof Date) {
     return value.getTime();
   }
@@ -10,13 +38,16 @@ function toMilliseconds(value) {
   return Date.parse(value);
 }
 
-export function computeRawRemainingSeconds(timer, now) {
+export function computeRawRemainingSeconds(
+  timer: TimerClockFields,
+  now: TimeInput,
+): RawRemainingTime {
   const nowMilliseconds = toMilliseconds(now);
   const startMilliseconds = Date.parse(timer.startTime);
   const currentPauseSeconds = timer.status === 'paused'
     ? Math.max(
       0,
-      (nowMilliseconds - Date.parse(timer.pauseStartedAt)) / 1000,
+      (nowMilliseconds - Date.parse(timer.pauseStartedAt ?? '')) / 1000,
     )
     : 0;
   const accumulatedPauseSeconds = (
@@ -34,12 +65,16 @@ export function computeRawRemainingSeconds(timer, now) {
   };
 }
 
-export function computeTimerState(timer, now, warningThresholdMinutes) {
+export function computeTimerState(
+  timer: TimerClockFields,
+  now: TimeInput,
+  warningThresholdMinutes: number,
+): ComputedTimerState {
   const {
     rawRemainingSeconds,
     effectiveEndMilliseconds,
   } = computeRawRemainingSeconds(timer, now);
-  let status;
+  let status: TimerStatus;
 
   if (timer.status === 'paused') {
     status = 'paused';
@@ -59,7 +94,11 @@ export function computeTimerState(timer, now, warningThresholdMinutes) {
   };
 }
 
-export function getTableStatus(timer, now, warningThresholdMinutes) {
+export function getTableStatus(
+  timer: TimerClockFields | null | undefined,
+  now: TimeInput,
+  warningThresholdMinutes: number,
+): TimerStatus | 'idle' {
   if (!timer) {
     return 'idle';
   }

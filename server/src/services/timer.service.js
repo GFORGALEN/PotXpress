@@ -1,14 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
 import { unitOfWorkRepository } from '../repositories/unitOfWork.repository.js';
+import { appendRealtimeEvent, getStoreEventVersion } from '../realtime/realtimeEvent.js';
+import { realtimeHub } from '../realtime/realtimeHub.js';
 import { AppError } from '../utils/appError.js';
-import { writeAuditLogBestEffort } from '../utils/audit.js';
+import { appendAuditLog } from '../utils/audit.js';
+import { runIdempotentMutation } from '../utils/idempotency.js';
 import {
   computeRawRemainingSeconds,
   computeTimerState,
-} from '../utils/timeCalculator.js';
+} from '../utils/timeCalculator.ts';
 
 const MIN_DURATION_SECONDS = 60;
 const MAX_DURATION_SECONDS = 28800;
+const TIMER_EVENT_TYPES = Object.freeze({
+  'timer.pause': 'timer.paused',
+  'timer.resume': 'timer.resumed',
+  'timer.adjust': 'timer.adjusted',
+  'timer.acknowledge_alert': 'timer.alert_acknowledged',
+});
 
 function getSettings(settings, storeId) {
   const entry = settings.findById(storeId);
@@ -55,12 +64,21 @@ function assertTimerContext(
     );
   }
 
-  return { store, table };
+  const group = repositories.tableGroups?.findOne((candidate) => (
+    candidate.enabled
+    && candidate.storeId === storeId
+    && candidate.tableIds.includes(tableId)
+  )) ?? null;
+
+  return { store, table, group };
 }
 
 function findTimer(activeTimers, storeId, tableId) {
   return activeTimers.findOne(
-    (timer) => timer.storeId === storeId && timer.tableId === tableId,
+    (timer) => (
+      timer.storeId === storeId
+      && (timer.memberTableIds ?? [timer.tableId]).includes(tableId)
+    ),
   );
 }
 
@@ -79,6 +97,9 @@ function timerAuditSnapshot(timer) {
   return {
     id: timer.id,
     tableId: timer.tableId,
+    targetType: timer.targetType,
+    groupId: timer.groupId,
+    memberTableIds: timer.memberTableIds,
     plannedDurationSeconds: timer.plannedDurationSeconds,
     status: timer.status,
     pauseStartedAt: timer.pauseStartedAt,
@@ -102,10 +123,10 @@ export class TimerService {
 
     return unitOfWorkRepository.run(
       {
-        resources: ['settings', 'activeTimers'],
+        resources: ['settings', 'activeTimers', 'realtimeEvents'],
         writeOrder: [],
       },
-      ({ settings, activeTimers }) => {
+      ({ settings, activeTimers, realtimeEvents }) => {
         const storeSettings = getSettings(settings, storeId);
         const timers = activeTimers.findByStoreId(storeId)
           .sort(
@@ -121,85 +142,144 @@ export class TimerService {
 
         return {
           serverTime: new Date(now).toISOString(),
+          eventVersion: getStoreEventVersion(realtimeEvents, storeId),
           timers,
         };
       },
     );
   }
 
-  async start({ storeId, tableId, durationMinutes, user }) {
+  async start({
+    storeId,
+    tableId,
+    durationMinutes,
+    idempotencyKey,
+    user,
+  }) {
     const now = this.nowProvider();
     const timestamp = new Date(now).toISOString();
-    let createdTimer;
-    let warningThresholdMinutes;
+    let committedEvent = null;
 
-    await unitOfWorkRepository.run(
+    const outcome = await unitOfWorkRepository.run(
       {
         resources: [
           'stores',
           'tables',
           'settings',
           'activeTimers',
+          'tableGroups',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
         ],
-        writeOrder: ['activeTimers'],
+        writeOrder: [
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
       },
-      (repositories) => {
-        const { table } = assertTimerContext(
-          repositories,
-          { storeId, tableId, user },
-        );
-        const storeSettings = getSettings(repositories.settings, storeId);
-        warningThresholdMinutes = storeSettings.warningThresholdMinutes;
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: 'timer.start',
+        request: { tableId, durationMinutes: durationMinutes ?? null },
+        now,
+        execute: () => {
+          const { table, group } = assertTimerContext(
+            repositories,
+            { storeId, tableId, user },
+          );
+          const storeSettings = getSettings(repositories.settings, storeId);
+          const memberTableIds = group?.tableIds ?? [tableId];
 
-        if (findTimer(repositories.activeTimers, storeId, tableId)) {
-          timerConflict('桌台已有活动计时');
-        }
+          if (memberTableIds.some((memberId) => (
+            findTimer(repositories.activeTimers, storeId, memberId)
+          ))) {
+            timerConflict(group ? '拼桌组已有活动计时' : '桌台已有活动计时');
+          }
 
-        const plannedDurationMinutes = (
-          durationMinutes ?? storeSettings.defaultDurationMinutes
-        );
-        createdTimer = {
-          id: `timer_${uuidv4()}`,
-          storeId,
-          tableId,
-          tableNameSnapshot: table.name,
-          tableNumberSnapshot: table.number,
-          startTime: timestamp,
-          plannedDurationSeconds: plannedDurationMinutes * 60,
-          status: 'running',
-          pauseStartedAt: null,
-          totalPausedSeconds: 0,
-          adjustments: [],
-          overtimeAcknowledged: false,
-          startedBy: user.userId,
-          startedByNameSnapshot: user.displayName,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        };
-        repositories.activeTimers.create(createdTimer);
-      },
+          const plannedDurationMinutes = (
+            durationMinutes
+            ?? table.defaultDurationMinutes
+            ?? storeSettings.defaultDurationMinutes
+          );
+          const primaryTable = group
+            ? repositories.tables.findById(group.tableIds[0])
+            : table;
+          const createdTimer = {
+            id: `timer_${uuidv4()}`,
+            storeId,
+            tableId: primaryTable.id,
+            targetType: group ? 'group' : 'table',
+            groupId: group?.id ?? null,
+            memberTableIds,
+            tableNameSnapshot: group?.name ?? table.name,
+            tableNumberSnapshot: primaryTable.number,
+            startTime: timestamp,
+            plannedDurationSeconds: plannedDurationMinutes * 60,
+            status: 'running',
+            pauseStartedAt: null,
+            totalPausedSeconds: 0,
+            adjustments: [],
+            overtimeAcknowledged: false,
+            startedBy: user.userId,
+            startedByNameSnapshot: user.displayName,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          };
+          repositories.activeTimers.create(createdTimer);
+          appendAuditLog(repositories.auditLogs, {
+            userId: user.userId,
+            userNameSnapshot: user.displayName,
+            storeId,
+            action: 'timer.start',
+            targetType: 'timer',
+            targetId: createdTimer.id,
+            dataBefore: null,
+            dataAfter: timerAuditSnapshot(createdTimer),
+          }, { timestamp });
+          committedEvent = appendRealtimeEvent(
+            repositories.realtimeEvents,
+            {
+              storeId,
+              type: 'timer.started',
+              entityType: 'timer',
+              entityId: createdTimer.id,
+              payload: {
+                tableId: createdTimer.tableId,
+                groupId: createdTimer.groupId,
+                memberTableIds: createdTimer.memberTableIds,
+              },
+              timestamp,
+            },
+          );
+
+          return timerResponse(
+            createdTimer,
+            now,
+            storeSettings.warningThresholdMinutes,
+          );
+        },
+      }),
     );
 
-    await writeAuditLogBestEffort({
-      userId: user.userId,
-      userNameSnapshot: user.displayName,
-      storeId,
-      action: 'timer.start',
-      targetType: 'timer',
-      targetId: createdTimer.id,
-      dataBefore: null,
-      dataAfter: timerAuditSnapshot(createdTimer),
-    });
-
-    return timerResponse(createdTimer, now, warningThresholdMinutes);
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
+    }
+    return outcome;
   }
 
-  async pause({ storeId, tableId, user }) {
+  async pause({ storeId, tableId, idempotencyKey, user }) {
     return this.updateTimer({
       storeId,
       tableId,
+      idempotencyKey,
       user,
       action: 'timer.pause',
+      request: { tableId },
       updater: (timer, now, timestamp) => {
         if (timer.status !== 'running') {
           timerConflict('计时器当前不是运行状态，不能暂停');
@@ -215,12 +295,14 @@ export class TimerService {
     });
   }
 
-  async resume({ storeId, tableId, user }) {
+  async resume({ storeId, tableId, idempotencyKey, user }) {
     return this.updateTimer({
       storeId,
       tableId,
+      idempotencyKey,
       user,
       action: 'timer.resume',
+      request: { tableId },
       updater: (timer, now, timestamp) => {
         if (timer.status !== 'paused') {
           timerConflict('计时器当前不是暂停状态，不能继续');
@@ -244,12 +326,25 @@ export class TimerService {
     });
   }
 
-  async adjust({ storeId, tableId, deltaSeconds, reason, user }) {
+  async adjust({
+    storeId,
+    tableId,
+    deltaSeconds,
+    reason,
+    idempotencyKey,
+    user,
+  }) {
     return this.updateTimer({
       storeId,
       tableId,
+      idempotencyKey,
       user,
       action: 'timer.adjust',
+      request: {
+        tableId,
+        deltaSeconds,
+        reason: reason?.trim() || null,
+      },
       updater: (timer, now, timestamp) => {
         const nextDuration = Math.min(
           MAX_DURATION_SECONDS,
@@ -303,12 +398,19 @@ export class TimerService {
     });
   }
 
-  async acknowledgeAlert({ storeId, tableId, user }) {
+  async acknowledgeAlert({
+    storeId,
+    tableId,
+    idempotencyKey,
+    user,
+  }) {
     return this.updateTimer({
       storeId,
       tableId,
+      idempotencyKey,
       user,
       action: 'timer.acknowledge_alert',
+      request: { tableId },
       auditWhenUnchanged: false,
       updater: (timer, now, timestamp, warningThresholdMinutes) => {
         const state = computeTimerState(
@@ -334,190 +436,272 @@ export class TimerService {
     });
   }
 
-  async reset({ storeId, tableId, user }) {
+  async reset({ storeId, tableId, idempotencyKey, user }) {
     const now = this.nowProvider();
     const timestamp = new Date(now).toISOString();
-    let timerBefore;
-    let record;
+    let committedEvent = null;
 
-    await unitOfWorkRepository.run(
+    const outcome = await unitOfWorkRepository.run(
       {
         resources: [
           'stores',
           'tables',
+          'tableGroups',
           'activeTimers',
           'records',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
         ],
-        writeOrder: ['records', 'activeTimers'],
+        writeOrder: [
+          'records',
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
       },
-      (repositories) => {
-        assertTimerContext(
-          repositories,
-          {
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: 'timer.reset',
+        request: { tableId },
+        now,
+        execute: () => {
+          assertTimerContext(
+            repositories,
+            {
+              storeId,
+              tableId,
+              user,
+              allowDisabledStore: true,
+            },
+          );
+          const timer = findTimer(
+            repositories.activeTimers,
             storeId,
             tableId,
-            user,
-            allowDisabledStore: true,
-          },
-        );
-        const timer = findTimer(
-          repositories.activeTimers,
-          storeId,
-          tableId,
-        );
+          );
 
-        if (!timer) {
-          timerConflict('桌台当前没有活动计时');
-        }
+          if (!timer) {
+            timerConflict('桌台当前没有活动计时');
+          }
 
-        if (
-          repositories.records.findOne(
-            (candidate) => candidate.timerId === timer.id,
-          )
-        ) {
-          timerConflict('该计时器已经生成历史记录');
-        }
+          if (
+            repositories.records.findOne(
+              (candidate) => candidate.timerId === timer.id,
+            )
+          ) {
+            timerConflict('该计时器已经生成历史记录');
+          }
 
-        timerBefore = structuredClone(timer);
-        const currentPauseSeconds = timer.status === 'paused'
-          ? Math.max(
+          const timerBefore = structuredClone(timer);
+          const currentPauseSeconds = timer.status === 'paused'
+            ? Math.max(
+              0,
+              Math.round((now - Date.parse(timer.pauseStartedAt)) / 1000),
+            )
+            : 0;
+          const totalPausedSeconds = (
+            timer.totalPausedSeconds + currentPauseSeconds
+          );
+          const elapsedSeconds = Math.max(
             0,
-            Math.round((now - Date.parse(timer.pauseStartedAt)) / 1000),
-          )
-          : 0;
-        const totalPausedSeconds = (
-          timer.totalPausedSeconds + currentPauseSeconds
-        );
-        const elapsedSeconds = Math.max(
-          0,
-          Math.round((now - Date.parse(timer.startTime)) / 1000),
-        );
-        const startMilliseconds = Date.parse(timer.startTime);
-        record = {
-          id: `record_${uuidv4()}`,
-          timerId: timer.id,
-          storeId,
-          tableId,
-          tableNameSnapshot: timer.tableNameSnapshot,
-          tableNumberSnapshot: timer.tableNumberSnapshot,
-          startTime: timer.startTime,
-          plannedEndTime: new Date(
-            startMilliseconds + timer.plannedDurationSeconds * 1000,
-          ).toISOString(),
-          effectiveEndTimeAtReset: new Date(
-            startMilliseconds + (
-              timer.plannedDurationSeconds + totalPausedSeconds
-            ) * 1000,
-          ).toISOString(),
-          actualEndTime: timestamp,
-          plannedDurationSeconds: timer.plannedDurationSeconds,
-          actualDurationSeconds: Math.max(
-            0,
-            elapsedSeconds - totalPausedSeconds,
-          ),
-          totalPausedSeconds,
-          adjustments: structuredClone(timer.adjustments),
-          startedBy: timer.startedBy,
-          startedByNameSnapshot: timer.startedByNameSnapshot,
-          resetBy: user.userId,
-          resetByNameSnapshot: user.displayName,
-          finalStatus: 'reset',
-          createdAt: timestamp,
-        };
-        repositories.records.create(record);
-        repositories.activeTimers.delete(timer.id);
-      },
+            Math.round((now - Date.parse(timer.startTime)) / 1000),
+          );
+          const startMilliseconds = Date.parse(timer.startTime);
+          const record = {
+            id: `record_${uuidv4()}`,
+            timerId: timer.id,
+            storeId,
+            tableId: timer.tableId,
+            targetType: timer.targetType,
+            groupId: timer.groupId,
+            memberTableIds: structuredClone(timer.memberTableIds),
+            tableNameSnapshot: timer.tableNameSnapshot,
+            tableNumberSnapshot: timer.tableNumberSnapshot,
+            startTime: timer.startTime,
+            plannedEndTime: new Date(
+              startMilliseconds + timer.plannedDurationSeconds * 1000,
+            ).toISOString(),
+            effectiveEndTimeAtReset: new Date(
+              startMilliseconds + (
+                timer.plannedDurationSeconds + totalPausedSeconds
+              ) * 1000,
+            ).toISOString(),
+            actualEndTime: timestamp,
+            plannedDurationSeconds: timer.plannedDurationSeconds,
+            actualDurationSeconds: Math.max(
+              0,
+              elapsedSeconds - totalPausedSeconds,
+            ),
+            totalPausedSeconds,
+            adjustments: structuredClone(timer.adjustments),
+            startedBy: timer.startedBy,
+            startedByNameSnapshot: timer.startedByNameSnapshot,
+            resetBy: user.userId,
+            resetByNameSnapshot: user.displayName,
+            finalStatus: 'reset',
+            createdAt: timestamp,
+          };
+          repositories.records.create(record);
+          repositories.activeTimers.delete(timer.id);
+          appendAuditLog(repositories.auditLogs, {
+            userId: user.userId,
+            userNameSnapshot: user.displayName,
+            storeId,
+            action: 'timer.reset',
+            targetType: 'timer',
+            targetId: timerBefore.id,
+            dataBefore: timerAuditSnapshot(timerBefore),
+            dataAfter: {
+              recordId: record.id,
+              actualDurationSeconds: record.actualDurationSeconds,
+              totalPausedSeconds: record.totalPausedSeconds,
+            },
+          }, { timestamp });
+          committedEvent = appendRealtimeEvent(
+            repositories.realtimeEvents,
+            {
+              storeId,
+              type: 'timer.reset',
+              entityType: 'timer',
+              entityId: timerBefore.id,
+              payload: {
+                tableId: timerBefore.tableId,
+                groupId: timerBefore.groupId,
+                memberTableIds: timerBefore.memberTableIds,
+                recordId: record.id,
+              },
+              timestamp,
+            },
+          );
+
+          return {
+            record,
+            tableStatus: 'idle',
+          };
+        },
+      }),
     );
 
-    await writeAuditLogBestEffort({
-      userId: user.userId,
-      userNameSnapshot: user.displayName,
-      storeId,
-      action: 'timer.reset',
-      targetType: 'timer',
-      targetId: timerBefore.id,
-      dataBefore: timerAuditSnapshot(timerBefore),
-      dataAfter: {
-        recordId: record.id,
-        actualDurationSeconds: record.actualDurationSeconds,
-        totalPausedSeconds: record.totalPausedSeconds,
-      },
-    });
-
-    return {
-      record,
-      tableStatus: 'idle',
-    };
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
+    }
+    return outcome;
   }
 
   async updateTimer({
     storeId,
     tableId,
+    idempotencyKey,
     user,
     action,
+    request,
     updater,
     auditWhenUnchanged = true,
   }) {
     const now = this.nowProvider();
     const timestamp = new Date(now).toISOString();
-    let before;
-    let updated;
-    let warningThresholdMinutes;
-
-    await unitOfWorkRepository.run(
+    let committedEvent = null;
+    const outcome = await unitOfWorkRepository.run(
       {
         resources: [
           'stores',
           'tables',
           'settings',
           'activeTimers',
+          'tableGroups',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
         ],
-        writeOrder: ['activeTimers'],
+        writeOrder: [
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
       },
-      (repositories) => {
-        assertTimerContext(
-          repositories,
-          { storeId, tableId, user },
-        );
-        const settings = getSettings(repositories.settings, storeId);
-        warningThresholdMinutes = settings.warningThresholdMinutes;
-        const timer = findTimer(
-          repositories.activeTimers,
-          storeId,
-          tableId,
-        );
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: action,
+        request,
+        now,
+        execute: () => {
+          assertTimerContext(
+            repositories,
+            { storeId, tableId, user },
+          );
+          const settings = getSettings(repositories.settings, storeId);
+          const timer = findTimer(
+            repositories.activeTimers,
+            storeId,
+            tableId,
+          );
 
-        if (!timer) {
-          timerConflict('桌台当前没有活动计时');
-        }
+          if (!timer) {
+            timerConflict('桌台当前没有活动计时');
+          }
 
-        before = structuredClone(timer);
-        const next = updater(
-          structuredClone(timer),
-          now,
-          timestamp,
-          warningThresholdMinutes,
-        );
-        updated = repositories.activeTimers.update(timer.id, next);
-      },
+          const before = structuredClone(timer);
+          const next = updater(
+            structuredClone(timer),
+            now,
+            timestamp,
+            settings.warningThresholdMinutes,
+          );
+          const updated = repositories.activeTimers.update(timer.id, next);
+          const changed = JSON.stringify(before) !== JSON.stringify(updated);
+
+          if (changed || auditWhenUnchanged) {
+            appendAuditLog(repositories.auditLogs, {
+              userId: user.userId,
+              userNameSnapshot: user.displayName,
+              storeId,
+              action,
+              targetType: 'timer',
+              targetId: updated.id,
+              dataBefore: timerAuditSnapshot(before),
+              dataAfter: timerAuditSnapshot(updated),
+            }, { timestamp });
+          }
+          if (changed) {
+            committedEvent = appendRealtimeEvent(
+              repositories.realtimeEvents,
+              {
+                storeId,
+                type: TIMER_EVENT_TYPES[action],
+                entityType: 'timer',
+                entityId: updated.id,
+                payload: {
+                  tableId: updated.tableId,
+                  groupId: updated.groupId,
+                  memberTableIds: updated.memberTableIds,
+                },
+                timestamp,
+              },
+            );
+          }
+
+          return timerResponse(
+            updated,
+            now,
+            settings.warningThresholdMinutes,
+          );
+        },
+      }),
     );
 
-    const changed = JSON.stringify(before) !== JSON.stringify(updated);
-
-    if (changed || auditWhenUnchanged) {
-      await writeAuditLogBestEffort({
-        userId: user.userId,
-        userNameSnapshot: user.displayName,
-        storeId,
-        action,
-        targetType: 'timer',
-        targetId: updated.id,
-        dataBefore: timerAuditSnapshot(before),
-        dataAfter: timerAuditSnapshot(updated),
-      });
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
     }
-
-    return timerResponse(updated, now, warningThresholdMinutes);
+    return outcome;
   }
 }
 

@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BellRing,
+  ArrowRightLeft,
   ChevronDown,
   Flame,
   LogOut,
   Menu,
   Volume2,
+  VolumeX,
+  KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { ROLE_LABELS } from '../../utils/navigation.js';
+import { useSound } from '../../contexts/SoundContext.jsx';
+import { ChangePasswordDialog } from '../auth/ChangePasswordDialog.jsx';
 
 function StoreClock({ store }) {
   const [now, setNow] = useState(() => new Date());
@@ -60,6 +65,15 @@ export function TopNavbar({ onOpenMenu }) {
     loading,
   } = useStore();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const {
+    authorized,
+    localEnabled,
+    reason: soundReason,
+    alertCounts,
+    enableSound,
+    toggleLocalSound,
+  } = useSound();
   const menuRef = useRef(null);
   const enabledStores = stores.filter((store) => store.enabled);
 
@@ -83,11 +97,12 @@ export function TopNavbar({ onOpenMenu }) {
   }, []);
 
   return (
+    <>
     <header className="relative z-30 flex h-[4.5rem] shrink-0 items-center gap-3 border-b border-stone-200 bg-white/90 px-3 backdrop-blur sm:px-5 lg:px-7">
       <button
         type="button"
         onClick={onOpenMenu}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 text-ink-900 transition hover:bg-stone-50 lg:hidden"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 text-ink-900 transition hover:bg-stone-50 xl:hidden"
         aria-label="打开导航"
       >
         <Menu size={20} />
@@ -97,7 +112,7 @@ export function TopNavbar({ onOpenMenu }) {
         <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink-900 text-ember-400 sm:flex">
           <Flame size={21} fill="currentColor" />
         </span>
-        <div className="min-w-0 max-w-[5.5rem] sm:max-w-none">
+        <div className="min-w-0">
           <p className="truncate text-sm font-bold tracking-tight text-ink-950 sm:text-base">
             PotXpress
             <span className="hidden font-medium text-stone-400 xl:inline">
@@ -105,13 +120,15 @@ export function TopNavbar({ onOpenMenu }) {
             </span>
           </p>
           {user.role === 'system_admin' ? (
-            <label className="mt-0.5 flex items-center gap-1 text-xs text-stone-500">
-              <span className="sr-only">选择门店</span>
+            <label className="mt-1 flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 shadow-sm transition hover:border-sky-300 hover:bg-sky-100">
+              <ArrowRightLeft className="shrink-0 text-sky-600" size={15} />
+              <span className="hidden shrink-0 font-black sm:inline">切换门店</span>
               <select
+                aria-label="选择门店"
                 value={selectedStoreId ?? ''}
                 disabled={loading || enabledStores.length === 0}
                 onChange={(event) => selectStore(event.target.value)}
-                className="max-w-[5.5rem] cursor-pointer appearance-none truncate bg-transparent pr-4 font-medium text-stone-600 outline-none disabled:cursor-default sm:max-w-[9.5rem]"
+                className="min-w-0 max-w-[7rem] cursor-pointer appearance-none truncate bg-transparent pr-5 font-bold text-sky-950 outline-none disabled:cursor-default sm:max-w-[13rem]"
               >
                 {enabledStores.length === 0 ? (
                   <option value="">暂无可用门店</option>
@@ -122,7 +139,7 @@ export function TopNavbar({ onOpenMenu }) {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="-ml-4 pointer-events-none" size={13} />
+              <ChevronDown className="-ml-6 pointer-events-none shrink-0 text-sky-600" size={14} />
             </label>
           ) : (
             <p className="truncate text-xs text-stone-500">
@@ -139,19 +156,30 @@ export function TopNavbar({ onOpenMenu }) {
       <div className="flex flex-none items-center justify-end gap-2 sm:ml-auto sm:flex-1">
         <button
           type="button"
-          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600 sm:flex"
-          title="声音控制将在提醒模块启用"
-          aria-label="声音控制，建设中"
+          onClick={authorized ? toggleLocalSound : enableSound}
+          className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600 sm:flex"
+          title={soundReason}
+          aria-label={authorized
+            ? (localEnabled ? '关闭本机声音提醒' : '开启本机声音提醒')
+            : '启用声音提醒'}
         >
-          <Volume2 size={19} />
+          {localEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}
+          {!authorized ? (
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+          ) : null}
         </button>
         <button
           type="button"
-          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 sm:flex"
-          title="提醒中心将在提醒模块启用"
-          aria-label="提醒中心，建设中"
+          className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 sm:flex"
+          title={`即将超时 ${alertCounts.warning}，已超时 ${alertCounts.overtime}`}
+          aria-label={`提醒中心，即将超时 ${alertCounts.warning}，已超时 ${alertCounts.overtime}`}
         >
           <BellRing size={18} />
+          {alertCounts.warning + alertCounts.overtime > 0 ? (
+            <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-black leading-5 text-white ring-2 ring-white">
+              {alertCounts.warning + alertCounts.overtime}
+            </span>
+          ) : null}
         </button>
 
         <div className="relative" ref={menuRef}>
@@ -191,6 +219,18 @@ export function TopNavbar({ onOpenMenu }) {
               </div>
               <button
                 type="button"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  setPasswordDialogOpen(true);
+                }}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+                role="menuitem"
+              >
+                <KeyRound size={17} />
+                修改密码
+              </button>
+              <button
+                type="button"
                 onClick={logout}
                 className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-red-600 transition hover:bg-red-50"
                 role="menuitem"
@@ -203,5 +243,10 @@ export function TopNavbar({ onOpenMenu }) {
         </div>
       </div>
     </header>
+    <ChangePasswordDialog
+      open={passwordDialogOpen}
+      onClose={() => setPasswordDialogOpen(false)}
+    />
+    </>
   );
 }

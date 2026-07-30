@@ -48,6 +48,11 @@ function buildSeedTables(timestamp) {
     number: index + 1,
     sortOrder: index + 1,
     enabled: true,
+    shape: 'rectangle',
+    capacity: 4,
+    area: '大厅',
+    note: null,
+    defaultDurationMinutes: null,
     layout: {
       xRatio,
       yRatio,
@@ -173,6 +178,7 @@ export async function initializeDemoData() {
           storeId: SEED_IDS.store,
           layoutVersion: 1,
           canvas: { ...DEFAULT_CANVAS },
+          decorations: [],
           updatedAt: timestamp,
           updatedBy: SEED_IDS.systemAdmin,
         });

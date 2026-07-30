@@ -27,3 +27,7 @@ export const auditLogQuerySchema = z.object({
   action: z.string().trim().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(200),
 }).strict();
+
+export const batchDeleteBodySchema = z.object({
+  ids: z.array(idSchema).min(1).max(500),
+}).strict();

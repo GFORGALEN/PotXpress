@@ -1,5 +1,7 @@
 node_modules/
 client/dist/
+packages/*/dist/
+*.tsbuildinfo
 .env*
 !.env.example
 

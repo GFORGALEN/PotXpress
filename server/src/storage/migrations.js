@@ -1,6 +1,6 @@
 import { fileStore, METADATA_FILE } from './fileStore.js';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 async function migrateVersionZeroToOne() {
   await fileStore.withFiles(
@@ -17,6 +17,84 @@ async function migrateVersionZeroToOne() {
     },
     {
       writeOrder: ['users.json', METADATA_FILE],
+    },
+  );
+}
+
+async function migrateVersionOneToTwo() {
+  await fileStore.withFiles(
+    [
+      'tables.json',
+      'tableGroups.json',
+      'activeTimers.json',
+      'records.json',
+      METADATA_FILE,
+    ],
+    (drafts) => {
+      drafts['tables.json'] = drafts['tables.json'].map((table) => ({
+        ...table,
+        shape: table.shape ?? 'rectangle',
+        capacity: table.capacity ?? 4,
+        area: table.area ?? '大厅',
+        note: table.note ?? null,
+        defaultDurationMinutes: table.defaultDurationMinutes ?? null,
+      }));
+      drafts['activeTimers.json'] = drafts['activeTimers.json'].map((timer) => ({
+        ...timer,
+        targetType: timer.targetType ?? 'table',
+        groupId: timer.groupId ?? null,
+        memberTableIds: timer.memberTableIds ?? [timer.tableId],
+      }));
+      drafts['records.json'] = drafts['records.json'].map((record) => ({
+        ...record,
+        targetType: record.targetType ?? 'table',
+        groupId: record.groupId ?? null,
+        memberTableIds: record.memberTableIds ?? [record.tableId],
+      }));
+      drafts[METADATA_FILE] = {
+        schemaVersion: 2,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    {
+      writeOrder: [
+        'tables.json',
+        'activeTimers.json',
+        'records.json',
+        METADATA_FILE,
+      ],
+    },
+  );
+}
+
+async function migrateVersionTwoToThree() {
+  await fileStore.withFiles(
+    ['idempotencyKeys.json', METADATA_FILE],
+    (drafts) => {
+      drafts['idempotencyKeys.json'] ??= [];
+      drafts[METADATA_FILE] = {
+        schemaVersion: 3,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    {
+      writeOrder: ['idempotencyKeys.json', METADATA_FILE],
+    },
+  );
+}
+
+async function migrateVersionThreeToFour() {
+  await fileStore.withFiles(
+    ['realtimeEvents.json', METADATA_FILE],
+    (drafts) => {
+      drafts['realtimeEvents.json'] ??= [];
+      drafts[METADATA_FILE] = {
+        schemaVersion: 4,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    {
+      writeOrder: ['realtimeEvents.json', METADATA_FILE],
     },
   );
 }
@@ -40,6 +118,24 @@ export async function runMigrations() {
     if (version === 0) {
       await migrateVersionZeroToOne();
       version = 1;
+      continue;
+    }
+
+    if (version === 1) {
+      await migrateVersionOneToTwo();
+      version = 2;
+      continue;
+    }
+
+    if (version === 2) {
+      await migrateVersionTwoToThree();
+      version = 3;
+      continue;
+    }
+
+    if (version === 3) {
+      await migrateVersionThreeToFour();
+      version = 4;
       continue;
     }
 

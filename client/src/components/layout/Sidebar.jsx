@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 import clsx from 'clsx';
 import { navigationForRole } from '../../utils/navigation.js';
 import { useAuth } from '../../contexts/AuthContext.jsx';
@@ -8,7 +8,7 @@ export function Sidebar() {
   const items = navigationForRole(user.role);
 
   return (
-    <aside className="hidden w-64 shrink-0 border-r border-white/10 bg-ink-900 px-4 py-5 text-stone-200 lg:block">
+    <aside className="hidden w-64 shrink-0 border-r border-white/10 bg-ink-900 px-4 py-5 text-stone-200 xl:block">
       <p className="px-3 pb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
         工作台
       </p>

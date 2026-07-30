@@ -14,6 +14,7 @@ import {
   TransformComponent,
   TransformWrapper,
 } from 'react-zoom-pan-pinch';
+import { Rnd } from 'react-rnd';
 import { useCanvasScale } from '../../hooks/useCanvasScale.js';
 import { TableNode } from '../tables/TableNode.jsx';
 
@@ -79,8 +80,16 @@ function ZoomControls({
 export function FloorCanvas({
   canvas,
   tables,
+  decorations = [],
   timezone,
   onTableClick,
+  editing = false,
+  selectedTableId = null,
+  onSelectTable,
+  onUpdateTableLayout,
+  selectedDecorationId = null,
+  onSelectDecoration,
+  onUpdateDecoration,
 }) {
   const viewportRef = useRef(null);
   const lastZoomUpdateRef = useRef(0);
@@ -112,6 +121,32 @@ export function FloorCanvas({
       backgroundSize: `${gridSize}px ${gridSize}px`,
     };
   }, [canvas.gridEnabled, canvas.gridSize, fitScale]);
+  const groupBounds = useMemo(() => {
+    const grouped = new Map();
+    for (const table of tables) {
+      if (!table.groupId) continue;
+      const current = grouped.get(table.groupId) ?? {
+        id: table.groupId,
+        name: table.groupName,
+        left: 1,
+        top: 1,
+        right: 0,
+        bottom: 0,
+      };
+      current.left = Math.min(current.left, table.layout.xRatio);
+      current.top = Math.min(current.top, table.layout.yRatio);
+      current.right = Math.max(
+        current.right,
+        table.layout.xRatio + table.layout.widthRatio,
+      );
+      current.bottom = Math.max(
+        current.bottom,
+        table.layout.yRatio + table.layout.heightRatio,
+      );
+      grouped.set(table.groupId, current);
+    }
+    return [...grouped.values()];
+  }, [tables]);
 
   useEffect(() => () => {
     if (zoomUpdateTimerRef.current) {
@@ -141,7 +176,11 @@ export function FloorCanvas({
   return (
     <div
       ref={viewportRef}
-      className="relative h-full min-h-0 w-full touch-none overflow-hidden rounded-[1.75rem] bg-ink-950 shadow-inner"
+      className="relative h-full min-h-0 w-full touch-none overflow-hidden rounded-[1.75rem] shadow-inner"
+      style={{
+        backgroundColor: canvas.backgroundColor,
+        ...gridStyle,
+      }}
       aria-label="门店桌台布局画布"
     >
       <TransformWrapper
@@ -156,9 +195,14 @@ export function FloorCanvas({
         panning={{
           disabled: false,
           velocityDisabled: false,
-          excluded: ['table-node', 'canvas-control'],
+          excluded: [
+            'table-node',
+            'canvas-control',
+            'potx-table-node',
+            'potx-decoration-node',
+          ],
         }}
-        pinch={{ excluded: ['table-node', 'canvas-control'] }}
+        pinch={{ excluded: ['table-node', 'canvas-control', 'potx-decoration-node'] }}
         wheel={{ step: 0.12, excluded: ['canvas-control'] }}
         onInit={(ref) => {
           scaleRef.current = ref.state.scale;
@@ -208,15 +252,193 @@ export function FloorCanvas({
                     : 1;
                   centerView(nextScale, 240, 'easeOut');
                 }}
+                onClick={(event) => {
+                  if (editing && event.target === event.currentTarget) {
+                    onSelectTable?.(null);
+                    onSelectDecoration?.(null);
+                  }
+                }}
               >
-                {tables.map((table) => (
-                  <TableNode
-                    key={table.tableId}
-                    {...table}
-                    timezone={timezone}
-                    onTableClick={onTableClick}
-                  />
-                ))}
+                {decorations.map((item) => {
+                  const content = (
+                    <div
+                      className={[
+                        'flex h-full w-full select-none items-center justify-center text-center font-black',
+                        item.type === 'wall' ? 'rounded-full bg-stone-700' : '',
+                        item.type === 'entrance' ? 'rounded-xl border-4 border-dashed border-emerald-600 bg-emerald-50 text-emerald-800' : '',
+                        item.type === 'cashier' ? 'rounded-xl border-2 border-amber-700 bg-amber-100 text-amber-950 shadow' : '',
+                        item.type === 'area' ? 'rounded-3xl border-2 border-dashed border-sky-400 bg-sky-100/20 text-sky-700' : '',
+                        selectedDecorationId === item.id ? 'ring-4 ring-sky-500 ring-offset-2' : '',
+                      ].join(' ')}
+                      style={{
+                        fontSize: 'clamp(10px, 1vw, 15px)',
+                        transform: `rotate(${item.rotation ?? 0}deg)`,
+                      }}
+                    >
+                      {item.type === 'wall' ? null : item.label}
+                    </div>
+                  );
+
+                  if (!editing) {
+                    return (
+                      <div
+                        key={item.id}
+                        className="pointer-events-none absolute"
+                        style={{
+                          left: `${item.xRatio * 100}%`,
+                          top: `${item.yRatio * 100}%`,
+                          width: `${item.widthRatio * 100}%`,
+                          height: `${item.heightRatio * 100}%`,
+                          zIndex: item.zIndex,
+                        }}
+                      >
+                        {content}
+                      </div>
+                    );
+                  }
+
+                  const gridStep = canvas.snapToGrid
+                    ? Math.max(1, canvas.gridSize * fitScale)
+                    : 1;
+                  return (
+                    <Rnd
+                      key={item.id}
+                      className="potx-decoration-node"
+                      bounds="parent"
+                      position={{
+                        x: item.xRatio * width,
+                        y: item.yRatio * height,
+                      }}
+                      size={{
+                        width: item.widthRatio * width,
+                        height: item.heightRatio * height,
+                      }}
+                      scale={transformScale}
+                      dragGrid={[gridStep, gridStep]}
+                      resizeGrid={[gridStep, gridStep]}
+                      minWidth={item.type === 'wall' ? 30 : 70}
+                      minHeight={item.type === 'wall' ? 8 : 35}
+                      style={{ zIndex: item.zIndex }}
+                      onMouseDown={() => onSelectDecoration?.(item.id)}
+                      onDragStop={(_, data) => onUpdateDecoration?.(item.id, {
+                        xRatio: data.x / width,
+                        yRatio: data.y / height,
+                      })}
+                      onResizeStop={(_, __, element, ___, position) => (
+                        onUpdateDecoration?.(item.id, {
+                          xRatio: position.x / width,
+                          yRatio: position.y / height,
+                          widthRatio: element.offsetWidth / width,
+                          heightRatio: element.offsetHeight / height,
+                        })
+                      )}
+                    >
+                      {content}
+                    </Rnd>
+                  );
+                })}
+                {groupBounds.map((group) => {
+                  const padding = 0.008;
+                  const left = Math.max(0, group.left - padding);
+                  const top = Math.max(0, group.top - padding);
+                  const right = Math.min(1, group.right + padding);
+                  const bottom = Math.min(1, group.bottom + padding);
+                  return (
+                    <div
+                      key={group.id}
+                      className="pointer-events-none absolute rounded-3xl border-2 border-dashed border-violet-500 bg-violet-500/5"
+                      style={{
+                        left: `${left * 100}%`,
+                        top: `${top * 100}%`,
+                        width: `${(right - left) * 100}%`,
+                        height: `${(bottom - top) * 100}%`,
+                        zIndex: 0,
+                      }}
+                    >
+                      <span className="absolute -top-6 left-2 rounded-full bg-violet-600 px-2 py-1 text-[10px] font-black text-white shadow">
+                        {group.name}
+                      </span>
+                    </div>
+                  );
+                })}
+                {tables.map((table) => {
+                  if (!editing) {
+                    return (
+                      <TableNode
+                        key={table.tableId}
+                        {...table}
+                        timezone={timezone}
+                        onTableClick={onTableClick}
+                      />
+                    );
+                  }
+
+                  const gridStep = canvas.snapToGrid
+                    ? Math.max(1, canvas.gridSize * fitScale)
+                    : 1;
+                  const position = {
+                    x: table.layout.xRatio * width,
+                    y: table.layout.yRatio * height,
+                  };
+                  const size = {
+                    width: table.layout.widthRatio * width,
+                    height: table.layout.heightRatio * height,
+                  };
+
+                  return (
+                    <Rnd
+                      key={table.tableId}
+                      className="potx-table-node"
+                      bounds="parent"
+                      position={position}
+                      size={size}
+                      scale={transformScale}
+                      dragGrid={[gridStep, gridStep]}
+                      resizeGrid={[gridStep, gridStep]}
+                      minWidth={canvas.minTableWidth * fitScale}
+                      minHeight={canvas.minTableHeight * fitScale}
+                      maxWidth={canvas.maxTableWidth * fitScale}
+                      maxHeight={canvas.maxTableHeight * fitScale}
+                      lockAspectRatio={
+                        ['round', 'square'].includes(table.shape) ? 1 : false
+                      }
+                      style={{ zIndex: table.layout.zIndex }}
+                      onDragStart={() => {
+                        onSelectTable?.(table.tableId);
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          bringToFront: true,
+                        });
+                      }}
+                      onDragStop={(_, data) => {
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          xRatio: data.x / width,
+                          yRatio: data.y / height,
+                        });
+                      }}
+                      onResizeStart={() => onSelectTable?.(table.tableId)}
+                      onResizeStop={(_, __, element, ___, nextPosition) => {
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          xRatio: nextPosition.x / width,
+                          yRatio: nextPosition.y / height,
+                          widthRatio: element.offsetWidth / width,
+                          heightRatio: element.offsetHeight / height,
+                          bringToFront: true,
+                        });
+                      }}
+                    >
+                      <TableNode
+                        {...table}
+                        embedded
+                        selected={selectedTableId === table.tableId}
+                        timezone={timezone}
+                        onTableClick={() => onSelectTable?.(table.tableId)}
+                      />
+                    </Rnd>
+                  );
+                })}
               </div>
             </TransformComponent>
             <ZoomControls

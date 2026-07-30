@@ -6,6 +6,20 @@ export const UNAUTHORIZED_EVENT = 'potxpress:unauthorized';
 
 let unauthorizedSignalSent = false;
 
+export function getStoredToken() {
+  return sessionStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function storeToken(token) {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function removeStoredToken() {
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
 export function resetUnauthorizedSignal() {
   unauthorizedSignalSent = false;
 }
@@ -27,8 +41,40 @@ export const apiClient = axios.create({
   },
 });
 
+function createIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return [
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2),
+    Math.random().toString(36).slice(2),
+  ].join('-');
+}
+
+export async function sendIdempotentRequest(config, { retries = 1 } = {}) {
+  const requestConfig = {
+    ...config,
+    headers: {
+      ...config.headers,
+      'Idempotency-Key': createIdempotencyKey(),
+    },
+  };
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await apiClient.request(requestConfig);
+    } catch (error) {
+      if (attempt >= retries || error.code !== 'NETWORK_ERROR') {
+        throw error;
+      }
+    }
+  }
+}
+
 apiClient.interceptors.request.use((request) => {
-  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  const token = getStoredToken();
   request.potxpressHadToken = Boolean(token);
 
   if (token) {
@@ -59,7 +105,7 @@ apiClient.interceptors.response.use(
       && !isLoginRequest
       && error.config?.potxpressHadToken
     ) {
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      removeStoredToken();
       emitUnauthorizedOnce();
     }
 
