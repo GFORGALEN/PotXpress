@@ -8,6 +8,11 @@ import {
 import { ArrowUpRight, Radio, RotateCw } from 'lucide-react';
 import { getLayout } from '../api/layout.js';
 import { listTimers } from '../api/timers.js';
+import { getSettings } from '../api/settings.js';
+import {
+  OvertimeAlertDialog,
+  WarningAlertDialog,
+} from '../components/alerts/AlertDialogs.jsx';
 import { TimerStatusBanner } from '../components/alerts/TimerStatusBanner.jsx';
 import { EmptyState } from '../components/common/EmptyState.jsx';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
@@ -15,12 +20,14 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner.jsx';
 import { FloorCanvas } from '../components/layout/FloorCanvas.jsx';
 import { EditorToolbar } from '../components/layout/EditorToolbar.jsx';
 import { LayoutConflictDialog } from '../components/layout/LayoutConflictDialog.jsx';
-import { TableDetailDialog } from '../components/tables/TableDetailDialog.jsx';
+import { TableActionDialog } from '../components/tables/TableActionDialog.jsx';
 import { TableFilter } from '../components/tables/TableFilter.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useStore } from '../contexts/StoreContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
 import { useLayoutEditor } from '../contexts/LayoutEditorContext.jsx';
+import { useSound } from '../contexts/SoundContext.jsx';
+import { useAlertWatcher } from '../hooks/useAlertWatcher.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { useSecondTick } from '../hooks/useSecondTick.js';
 import {
@@ -41,6 +48,12 @@ export function DashboardPage() {
   } = useStore();
   const { showToast } = useToast();
   const layoutEditor = useLayoutEditor();
+  const {
+    authorized: soundAuthorized,
+    enableSound,
+    reason: soundReason,
+    setStoreSettings,
+  } = useSound();
   const [layout, setLayout] = useState(null);
   const [timers, setTimers] = useState([]);
   const [layoutError, setLayoutError] = useState(null);
@@ -49,11 +62,37 @@ export function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [settings, setSettings] = useState(null);
   const clockOffsetRef = useRef(0);
   const timerPollCountRef = useRef(0);
   const timersLoadedRef = useRef(false);
   const pollingFailedRef = useRef(false);
   const now = useSecondTick(Boolean(selectedStoreId));
+
+  const loadSettings = useCallback(async () => {
+    if (!selectedStoreId) {
+      return null;
+    }
+
+    const controller = new AbortController();
+    const unregister = registerStoreRequest(controller);
+
+    try {
+      const result = await getSettings(selectedStoreId, {
+        signal: controller.signal,
+      });
+      setSettings(result);
+      setStoreSettings(result);
+      return result;
+    } catch (error) {
+      if (error.code !== 'REQUEST_CANCELED') {
+        setStoreSettings(null);
+      }
+      return null;
+    } finally {
+      unregister();
+    }
+  }, [registerStoreRequest, selectedStoreId, setStoreSettings]);
 
   useEffect(() => {
     setLayout(null);
@@ -61,11 +100,26 @@ export function DashboardPage() {
     setLayoutError(null);
     setTimersError(null);
     setSelectedTableId(null);
+    setSettings(null);
     clockOffsetRef.current = 0;
     timerPollCountRef.current = 0;
     timersLoadedRef.current = false;
     pollingFailedRef.current = false;
   }, [selectedStoreId, storeEpoch]);
+
+  useEffect(() => {
+    loadSettings();
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        loadSettings();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener(
+      'visibilitychange',
+      handleVisibilityChange,
+    );
+  }, [loadSettings]);
 
   useEffect(() => {
     if (!selectedStoreId) {
@@ -119,6 +173,8 @@ export function DashboardPage() {
       if (nextOffset !== null) {
         clockOffsetRef.current = nextOffset;
       }
+
+      loadSettings();
     }
 
     timerPollCountRef.current += 1;
@@ -131,7 +187,7 @@ export function DashboardPage() {
     }
 
     timersLoadedRef.current = true;
-  }, [showToast]);
+  }, [loadSettings, showToast]);
 
   const handleTimersError = useCallback((error) => {
     if (!timersLoadedRef.current) {
@@ -180,6 +236,7 @@ export function DashboardPage() {
           startTime: timer?.startTime ?? null,
           effectiveEndTime: timer?.effectiveEndTime ?? null,
           timerId: timer?.id ?? null,
+          timer,
         };
       })
   ), [correctedNow, displayTables, timerByTableId]);
@@ -246,6 +303,13 @@ export function DashboardPage() {
     setLayout(result);
     return result;
   }, [selectedStoreId]);
+  const alerts = useAlertWatcher(allTables, refreshTimers);
+
+  useEffect(() => {
+    if (alerts.overtimeDialogOpen) {
+      setSelectedTableId(null);
+    }
+  }, [alerts.overtimeDialogOpen]);
 
   const initialError = (!layout && layoutError)
     || (!timersLoadedRef.current && timersError);
@@ -309,6 +373,17 @@ export function DashboardPage() {
 
       {layoutEditor.mode !== 'view' ? <EditorToolbar /> : null}
 
+      {!soundAuthorized ? (
+        <button
+          type="button"
+          onClick={enableSound}
+          className="min-h-12 rounded-2xl border border-amber-300 bg-amber-100 px-4 text-left text-sm font-black text-amber-950 shadow-card"
+        >
+          🔔 启用声音提醒
+          <span className="ml-2 font-medium opacity-70">{soundReason}</span>
+        </button>
+      ) : null}
+
       <TimerStatusBanner
         status="overtime"
         tables={overtimeTables}
@@ -358,12 +433,33 @@ export function DashboardPage() {
         </>
       )}
 
-      <TableDetailDialog
+      <TableActionDialog
         table={layoutEditor.mode === 'view' ? selectedTable : null}
         timezone={currentStore?.timezone}
+        defaultDurationMinutes={settings?.defaultDurationMinutes ?? 90}
+        onRefresh={refreshTimers}
         onClose={handleCloseDialog}
       />
       <LayoutConflictDialog />
+      <WarningAlertDialog
+        tables={alerts.newWarningTables}
+        onClose={alerts.closeWarningDialog}
+      />
+      {alerts.overtimeDialogOpen ? (
+        <OvertimeAlertDialog
+          tables={alerts.unacknowledgedOvertime}
+          acknowledging={alerts.acknowledging}
+          onAcknowledge={alerts.acknowledgeAll}
+          onHandle={() => {
+            const firstTable = alerts.unacknowledgedOvertime[0];
+            alerts.goHandle();
+
+            if (firstTable) {
+              setSelectedTableId(firstTable.tableId);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

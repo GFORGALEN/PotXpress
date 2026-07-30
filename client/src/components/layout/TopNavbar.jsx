@@ -6,10 +6,12 @@ import {
   LogOut,
   Menu,
   Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { ROLE_LABELS } from '../../utils/navigation.js';
+import { useSound } from '../../contexts/SoundContext.jsx';
 
 function StoreClock({ store }) {
   const [now, setNow] = useState(() => new Date());
@@ -60,6 +62,14 @@ export function TopNavbar({ onOpenMenu }) {
     loading,
   } = useStore();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const {
+    authorized,
+    localEnabled,
+    reason: soundReason,
+    alertCounts,
+    enableSound,
+    toggleLocalSound,
+  } = useSound();
   const menuRef = useRef(null);
   const enabledStores = stores.filter((store) => store.enabled);
 
@@ -139,19 +149,30 @@ export function TopNavbar({ onOpenMenu }) {
       <div className="flex flex-none items-center justify-end gap-2 sm:ml-auto sm:flex-1">
         <button
           type="button"
-          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600 sm:flex"
-          title="声音控制将在提醒模块启用"
-          aria-label="声音控制，建设中"
+          onClick={authorized ? toggleLocalSound : enableSound}
+          className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600 sm:flex"
+          title={soundReason}
+          aria-label={authorized
+            ? (localEnabled ? '关闭本机声音提醒' : '开启本机声音提醒')
+            : '启用声音提醒'}
         >
-          <Volume2 size={19} />
+          {localEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}
+          {!authorized ? (
+            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+          ) : null}
         </button>
         <button
           type="button"
-          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 sm:flex"
-          title="提醒中心将在提醒模块启用"
-          aria-label="提醒中心，建设中"
+          className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 sm:flex"
+          title={`即将超时 ${alertCounts.warning}，已超时 ${alertCounts.overtime}`}
+          aria-label={`提醒中心，即将超时 ${alertCounts.warning}，已超时 ${alertCounts.overtime}`}
         >
           <BellRing size={18} />
+          {alertCounts.warning + alertCounts.overtime > 0 ? (
+            <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-red-600 px-1 text-center text-[10px] font-black leading-5 text-white ring-2 ring-white">
+              {alertCounts.warning + alertCounts.overtime}
+            </span>
+          ) : null}
         </button>
 
         <div className="relative" ref={menuRef}>
