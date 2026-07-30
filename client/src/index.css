@@ -63,6 +63,31 @@
   }
 }
 
+@keyframes table-overtime-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  50% {
+    filter: brightness(1.24);
+  }
+}
+
+.table-overtime {
+  animation: table-overtime-pulse 1s ease-in-out infinite;
+}
+
+.table-node-time {
+  display: none;
+}
+
+@container (min-width: 120px) and (min-height: 74px) {
+  .table-node-time {
+    display: block;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -71,5 +96,9 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .table-overtime {
+    filter: none;
   }
 }
