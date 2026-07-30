@@ -14,6 +14,7 @@ import {
   TransformComponent,
   TransformWrapper,
 } from 'react-zoom-pan-pinch';
+import { Rnd } from 'react-rnd';
 import { useCanvasScale } from '../../hooks/useCanvasScale.js';
 import { TableNode } from '../tables/TableNode.jsx';
 
@@ -81,6 +82,10 @@ export function FloorCanvas({
   tables,
   timezone,
   onTableClick,
+  editing = false,
+  selectedTableId = null,
+  onSelectTable,
+  onUpdateTableLayout,
 }) {
   const viewportRef = useRef(null);
   const lastZoomUpdateRef = useRef(0);
@@ -156,7 +161,11 @@ export function FloorCanvas({
         panning={{
           disabled: false,
           velocityDisabled: false,
-          excluded: ['table-node', 'canvas-control'],
+          excluded: [
+            'table-node',
+            'canvas-control',
+            'potx-table-node',
+          ],
         }}
         pinch={{ excluded: ['table-node', 'canvas-control'] }}
         wheel={{ step: 0.12, excluded: ['canvas-control'] }}
@@ -208,15 +217,87 @@ export function FloorCanvas({
                     : 1;
                   centerView(nextScale, 240, 'easeOut');
                 }}
+                onClick={(event) => {
+                  if (editing && event.target === event.currentTarget) {
+                    onSelectTable?.(null);
+                  }
+                }}
               >
-                {tables.map((table) => (
-                  <TableNode
-                    key={table.tableId}
-                    {...table}
-                    timezone={timezone}
-                    onTableClick={onTableClick}
-                  />
-                ))}
+                {tables.map((table) => {
+                  if (!editing) {
+                    return (
+                      <TableNode
+                        key={table.tableId}
+                        {...table}
+                        timezone={timezone}
+                        onTableClick={onTableClick}
+                      />
+                    );
+                  }
+
+                  const gridStep = canvas.snapToGrid
+                    ? Math.max(1, canvas.gridSize * fitScale)
+                    : 1;
+                  const position = {
+                    x: table.layout.xRatio * width,
+                    y: table.layout.yRatio * height,
+                  };
+                  const size = {
+                    width: table.layout.widthRatio * width,
+                    height: table.layout.heightRatio * height,
+                  };
+
+                  return (
+                    <Rnd
+                      key={table.tableId}
+                      className="potx-table-node"
+                      bounds="parent"
+                      position={position}
+                      size={size}
+                      scale={transformScale}
+                      dragGrid={[gridStep, gridStep]}
+                      resizeGrid={[gridStep, gridStep]}
+                      minWidth={canvas.minTableWidth * fitScale}
+                      minHeight={canvas.minTableHeight * fitScale}
+                      maxWidth={canvas.maxTableWidth * fitScale}
+                      maxHeight={canvas.maxTableHeight * fitScale}
+                      style={{ zIndex: table.layout.zIndex }}
+                      onDragStart={() => {
+                        onSelectTable?.(table.tableId);
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          bringToFront: true,
+                        });
+                      }}
+                      onDragStop={(_, data) => {
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          xRatio: data.x / width,
+                          yRatio: data.y / height,
+                        });
+                      }}
+                      onResizeStart={() => onSelectTable?.(table.tableId)}
+                      onResizeStop={(_, __, element, ___, nextPosition) => {
+                        onUpdateTableLayout?.(table.tableId, {
+                          ...table.layout,
+                          xRatio: nextPosition.x / width,
+                          yRatio: nextPosition.y / height,
+                          widthRatio: element.offsetWidth / width,
+                          heightRatio: element.offsetHeight / height,
+                          bringToFront: true,
+                        });
+                      }}
+                    >
+                      <TableNode
+                        {...table}
+                        embedded
+                        selected={selectedTableId === table.tableId}
+                        timezone={timezone}
+                        onTableClick={() => onSelectTable?.(table.tableId)}
+                      />
+                    </Rnd>
+                  );
+                })}
               </div>
             </TransformComponent>
             <ZoomControls

@@ -26,6 +26,8 @@ export const TableNode = memo(function TableNode({
   timezone,
   highlighted,
   onTableClick,
+  embedded = false,
+  selected = false,
 }) {
   const isIdle = status === 'idle';
   const duration = status === 'overtime'
@@ -37,11 +39,16 @@ export const TableNode = memo(function TableNode({
       type="button"
       data-table-node={tableId}
       className={clsx(
-        'table-node absolute flex select-none flex-col justify-between overflow-hidden rounded-2xl p-[clamp(0.25rem,1.2vw,0.75rem)] text-left outline-none transition-[filter,box-shadow] focus-visible:ring-4 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-900',
+        'table-node flex select-none flex-col justify-between overflow-hidden rounded-2xl p-[clamp(0.25rem,1.2vw,0.75rem)] text-left outline-none transition-[filter,box-shadow] focus-visible:ring-4 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-900',
+        embedded ? 'h-full w-full' : 'absolute',
         STATUS_STYLES[status],
         highlighted && 'ring-4 ring-ember-300 ring-offset-2',
+        selected && 'ring-4 ring-sky-400 ring-offset-2 ring-offset-white',
       )}
-      style={{
+      style={embedded ? {
+        fontSize: 'clamp(12px, 1.1vw, 16px)',
+        containerType: 'size',
+      } : {
         left: `${layout.xRatio * 100}%`,
         top: `${layout.yRatio * 100}%`,
         width: `${layout.widthRatio * 100}%`,
@@ -56,7 +63,7 @@ export const TableNode = memo(function TableNode({
         onTableClick(tableId);
       }}
       onDoubleClick={(event) => event.stopPropagation()}
-      aria-label={`${name}，${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${duration}`}`}
+      aria-label={`${name}，${embedded ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${duration}`}`}
     >
       <strong className="w-full shrink-0 truncate text-xs font-black leading-4 tracking-tight">
         {name}

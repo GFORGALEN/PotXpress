@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link } from 'react-router-dom';
 import { ArrowUpRight, Radio, RotateCw } from 'lucide-react';
 import { getLayout } from '../api/layout.js';
 import { listTimers } from '../api/timers.js';
@@ -14,11 +13,14 @@ import { EmptyState } from '../components/common/EmptyState.jsx';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.jsx';
 import { FloorCanvas } from '../components/layout/FloorCanvas.jsx';
+import { EditorToolbar } from '../components/layout/EditorToolbar.jsx';
+import { LayoutConflictDialog } from '../components/layout/LayoutConflictDialog.jsx';
 import { TableDetailDialog } from '../components/tables/TableDetailDialog.jsx';
 import { TableFilter } from '../components/tables/TableFilter.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useStore } from '../contexts/StoreContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
+import { useLayoutEditor } from '../contexts/LayoutEditorContext.jsx';
 import { usePolling } from '../hooks/usePolling.js';
 import { useSecondTick } from '../hooks/useSecondTick.js';
 import {
@@ -38,6 +40,7 @@ export function DashboardPage() {
     registerStoreRequest,
   } = useStore();
   const { showToast } = useToast();
+  const layoutEditor = useLayoutEditor();
   const [layout, setLayout] = useState(null);
   const [timers, setTimers] = useState([]);
   const [layoutError, setLayoutError] = useState(null);
@@ -156,8 +159,16 @@ export function DashboardPage() {
     [timers],
   );
   const correctedNow = now + clockOffsetRef.current;
+  const displayTables = useMemo(() => (
+    (layout?.tables ?? []).map((table) => ({
+      ...table,
+      layout: layoutEditor.mode === 'view'
+        ? table.layout
+        : layoutEditor.draftLayout.get(table.tableId) ?? table.layout,
+    }))
+  ), [layout?.tables, layoutEditor.draftLayout, layoutEditor.mode]);
   const allTables = useMemo(() => (
-    (layout?.tables ?? [])
+    displayTables
       .filter((table) => table.enabled)
       .map((table) => {
         const timer = timerByTableId.get(table.tableId) ?? null;
@@ -171,7 +182,7 @@ export function DashboardPage() {
           timerId: timer?.id ?? null,
         };
       })
-  ), [correctedNow, layout?.tables, timerByTableId]);
+  ), [correctedNow, displayTables, timerByTableId]);
   const normalizedSearch = search.trim().toLocaleLowerCase('zh-CN');
   const visibleTables = useMemo(() => allTables
     .filter((table) => (
@@ -214,8 +225,13 @@ export function DashboardPage() {
     [allTables, selectedTableId],
   );
   const handleTableClick = useCallback((tableId) => {
+    if (layoutEditor.mode !== 'view') {
+      layoutEditor.setSelectedTableId(tableId);
+      return;
+    }
+
     setSelectedTableId(tableId);
-  }, []);
+  }, [layoutEditor]);
   const handleCloseDialog = useCallback(() => {
     setSelectedTableId(null);
   }, []);
@@ -225,6 +241,11 @@ export function DashboardPage() {
     setLayoutRetryEpoch((value) => value + 1);
     refreshTimers();
   }, [refreshTimers]);
+  const reloadLatestLayout = useCallback(async () => {
+    const result = await getLayout(selectedStoreId);
+    setLayout(result);
+    return result;
+  }, [selectedStoreId]);
 
   const initialError = (!layout && layoutError)
     || (!timersLoadedRef.current && timersError);
@@ -269,17 +290,24 @@ export function DashboardPage() {
             <RotateCw size={16} />
             立即同步
           </button>
-          {['system_admin', 'store_admin'].includes(user.role) ? (
-            <Link
-              to="/admin/tables"
+          {['system_admin', 'store_admin'].includes(user.role)
+            && layoutEditor.mode === 'view' ? (
+            <button
+              type="button"
+              onClick={() => layoutEditor.enterEdit(layout, {
+                onSaved: setLayout,
+                onReload: reloadLatestLayout,
+              })}
               className="hidden items-center gap-2 rounded-2xl bg-ink-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-ink-800 md:inline-flex"
             >
               进入布局编辑
               <ArrowUpRight size={16} />
-            </Link>
+            </button>
           ) : null}
         </div>
       </div>
+
+      {layoutEditor.mode !== 'view' ? <EditorToolbar /> : null}
 
       <TimerStatusBanner
         status="overtime"
@@ -314,10 +342,16 @@ export function DashboardPage() {
           ) : (
             <div className="h-[clamp(30rem,68vh,46rem)] min-h-0">
               <FloorCanvas
-                canvas={layout.canvas}
+                canvas={layoutEditor.mode === 'view'
+                  ? layout.canvas
+                  : layoutEditor.draftCanvas}
                 tables={visibleTables}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
+                editing={layoutEditor.mode === 'editing'}
+                selectedTableId={layoutEditor.selectedTableId}
+                onSelectTable={layoutEditor.setSelectedTableId}
+                onUpdateTableLayout={layoutEditor.updateTableLayout}
               />
             </div>
           )}
@@ -325,10 +359,11 @@ export function DashboardPage() {
       )}
 
       <TableDetailDialog
-        table={selectedTable}
+        table={layoutEditor.mode === 'view' ? selectedTable : null}
         timezone={currentStore?.timezone}
         onClose={handleCloseDialog}
       />
+      <LayoutConflictDialog />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import App from './App.jsx';
 import { AuthProvider } from './contexts/AuthContext.jsx';
 import { StoreProvider } from './contexts/StoreContext.jsx';
 import { ToastProvider } from './contexts/ToastContext.jsx';
+import { LayoutEditorProvider } from './contexts/LayoutEditorContext.jsx';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -13,7 +14,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <ToastProvider>
         <AuthProvider>
           <StoreProvider>
-            <App />
+            <LayoutEditorProvider>
+              <App />
+            </LayoutEditorProvider>
           </StoreProvider>
         </AuthProvider>
       </ToastProvider>

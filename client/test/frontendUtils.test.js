@@ -7,6 +7,11 @@ import {
   deriveTimerDisplay,
   formatTimerDuration,
 } from '../src/utils/timerDisplay.js';
+import {
+  findSignificantOverlaps,
+  normalizeTableLayout,
+  serializeLayout,
+} from '../src/utils/layoutEditor.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -100,4 +105,51 @@ test('clock offset uses the request midpoint and rejects slow samples', () => {
 test('timer duration formats remaining and overtime values', () => {
   assert.equal(formatTimerDuration(65), '01:05');
   assert.equal(formatTimerDuration(125, { overtime: true }), '+02:05');
+});
+
+test('layout normalization rounds ratios and clamps positions', () => {
+  assert.deepEqual(normalizeTableLayout({
+    xRatio: 0.95,
+    yRatio: -0.2,
+    widthRatio: 0.123456789,
+    heightRatio: 0.2,
+    rotation: 0,
+    zIndex: 2.4,
+  }), {
+    xRatio: 0.876543,
+    yRatio: 0,
+    widthRatio: 0.123457,
+    heightRatio: 0.2,
+    rotation: 0,
+    zIndex: 2,
+  });
+});
+
+test('layout serialization is stable across map insertion order', () => {
+  const canvas = { virtualWidth: 1600, virtualHeight: 900 };
+  const left = new Map([
+    ['b', normalizeTableLayout({
+      xRatio: 0.2, yRatio: 0, widthRatio: 0.1, heightRatio: 0.1,
+    })],
+    ['a', normalizeTableLayout({
+      xRatio: 0, yRatio: 0, widthRatio: 0.1, heightRatio: 0.1,
+    })],
+  ]);
+  const right = new Map([...left.entries()].reverse());
+  assert.equal(serializeLayout(canvas, left), serializeLayout(canvas, right));
+});
+
+test('overlap detection reports intersections over thirty percent', () => {
+  const tables = [
+    { tableId: 'a', name: '1号桌' },
+    { tableId: 'b', name: '2号桌' },
+  ];
+  const layouts = new Map([
+    ['a', { xRatio: 0, yRatio: 0, widthRatio: 0.2, heightRatio: 0.2 }],
+    ['b', { xRatio: 0.05, yRatio: 0.05, widthRatio: 0.2, heightRatio: 0.2 }],
+  ]);
+  assert.deepEqual(findSignificantOverlaps(tables, layouts), [{
+    left: '1号桌',
+    right: '2号桌',
+  }]);
 });
