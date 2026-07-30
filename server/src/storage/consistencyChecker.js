@@ -74,6 +74,9 @@ export async function checkDataConsistency() {
   const realtimeEvents = data['realtimeEvents.json'];
   const storeById = new Map(stores.map((store) => [store.id, store]));
   const tableById = new Map(tables.map((table) => [table.id, table]));
+  const canvasByStoreId = new Map(
+    layouts.map((entry) => [entry.storeId, entry.canvas]),
+  );
 
   assertUnique(stores, (store) => store.id, '门店 id');
   assertUnique(stores, (store) => normalizeStoreCode(store.code), '门店 code');
@@ -165,15 +168,21 @@ export async function checkDataConsistency() {
       throw new Error(`桌台 ${table.id} 布局超出画布边界`);
     }
 
-    const width = layout.widthRatio * 1600;
-    const height = layout.heightRatio * 900;
+    const canvas = canvasByStoreId.get(table.storeId);
+
+    if (!canvas) {
+      throw new Error(`桌台 ${table.id} 所属门店缺少画布配置`);
+    }
+
+    const width = layout.widthRatio * canvas.virtualWidth;
+    const height = layout.heightRatio * canvas.virtualHeight;
 
     const epsilon = 0.01;
     if (
-      width < 80 - epsilon
-      || width > 400 + epsilon
-      || height < 60 - epsilon
-      || height > 300 + epsilon
+      width < canvas.minTableWidth - epsilon
+      || width > canvas.maxTableWidth + epsilon
+      || height < canvas.minTableHeight - epsilon
+      || height > canvas.maxTableHeight + epsilon
     ) {
       throw new Error(`桌台 ${table.id} 布局尺寸超出允许范围`);
     }

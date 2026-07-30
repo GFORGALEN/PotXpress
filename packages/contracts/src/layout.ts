@@ -7,18 +7,18 @@ import {
 } from './table.js';
 
 export const canvasSchema = z.object({
-  aspectRatio: z.literal('16:9'),
-  virtualWidth: z.literal(1600),
-  virtualHeight: z.literal(900),
+  aspectRatio: z.string().trim().min(1).max(10),
+  virtualWidth: z.number().int().min(800).max(6000),
+  virtualHeight: z.number().int().min(600).max(6000),
   backgroundImage: z.null(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   gridEnabled: z.boolean(),
   snapToGrid: z.boolean(),
   gridSize: z.number().int().min(5).max(100),
-  minTableWidth: z.literal(80),
-  minTableHeight: z.literal(60),
-  maxTableWidth: z.literal(400),
-  maxTableHeight: z.literal(300),
+  minTableWidth: z.number().int().min(20).max(2000),
+  minTableHeight: z.number().int().min(20).max(2000),
+  maxTableWidth: z.number().int().min(40).max(4000),
+  maxTableHeight: z.number().int().min(40).max(4000),
 }).passthrough();
 
 export const decorationSchema = z.object({
@@ -75,10 +75,17 @@ export const layoutSchema = z.object({
 export const saveLayoutInputSchema = z.object({
   layoutVersion: z.number().int().positive(),
   canvas: z.object({
+    aspectRatio: z.string().trim().min(1).max(10).optional(),
+    virtualWidth: z.number().int().min(800).max(6000).optional(),
+    virtualHeight: z.number().int().min(600).max(6000).optional(),
     backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     gridEnabled: z.boolean().optional(),
     snapToGrid: z.boolean().optional(),
     gridSize: z.number().int().min(5).max(100).optional(),
+    minTableWidth: z.number().int().min(20).max(2000).optional(),
+    minTableHeight: z.number().int().min(20).max(2000).optional(),
+    maxTableWidth: z.number().int().min(40).max(4000).optional(),
+    maxTableHeight: z.number().int().min(40).max(4000).optional(),
   }).strict(),
   decorations: z.array(decorationSchema).max(100),
   tables: z.array(z.object({

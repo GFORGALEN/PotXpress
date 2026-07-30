@@ -12,17 +12,17 @@ const SEED_IDS = Object.freeze({
 
 export const DEFAULT_CANVAS = Object.freeze({
   aspectRatio: '16:9',
-  virtualWidth: 1600,
-  virtualHeight: 900,
+  virtualWidth: 2400,
+  virtualHeight: 1350,
   backgroundImage: null,
   backgroundColor: '#f5f5f5',
   gridEnabled: true,
   snapToGrid: true,
-  gridSize: 10,
-  minTableWidth: 80,
-  minTableHeight: 60,
-  maxTableWidth: 400,
-  maxTableHeight: 300,
+  gridSize: 15,
+  minTableWidth: 120,
+  minTableHeight: 90,
+  maxTableWidth: 600,
+  maxTableHeight: 450,
 });
 
 function findConflict(items, id, predicate) {
