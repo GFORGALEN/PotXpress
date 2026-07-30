@@ -2,6 +2,9 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
 import { authRouter } from './routes/auth.routes.js';
@@ -14,10 +17,12 @@ import {
 import { settingRouter } from './routes/setting.routes.js';
 import { storeRouter } from './routes/store.routes.js';
 import { tableRouter } from './routes/table.routes.js';
+import { tableGroupRouter } from './routes/tableGroup.routes.js';
 import {
   tableTimerRouter,
   timerListRouter,
 } from './routes/timer.routes.js';
+import { userRouter } from './routes/user.routes.js';
 import { AppError } from './utils/appError.js';
 
 function corsOrigin(origin, callback) {
@@ -47,8 +52,10 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use('/api/health', healthRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/users', userRouter);
   app.use('/api/stores', storeRouter);
   app.use('/api/stores/:storeId/tables', tableRouter);
+  app.use('/api/stores/:storeId/table-groups', tableGroupRouter);
   app.use('/api/stores/:storeId/settings', settingRouter);
   app.use('/api/stores/:storeId/layout', layoutRouter);
   app.use('/api/stores/:storeId/timers', timerListRouter);
@@ -58,9 +65,37 @@ export function createApp() {
   );
   app.use('/api/stores/:storeId/records', recordRouter);
   app.use('/api/stores/:storeId/audit-logs', auditLogRouter);
-  app.use((req, res, next) => {
+  app.use('/api', (req, res, next) => {
     next(new AppError(404, 'NOT_FOUND', '接口不存在'));
   });
+
+  if (config.isProduction) {
+    const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
+    const clientDirectory = path.resolve(sourceDirectory, '../../client/dist');
+
+    if (!fs.existsSync(path.join(clientDirectory, 'index.html'))) {
+      throw new Error(`生产构建不存在：${clientDirectory}。请先运行客户端构建。`);
+    }
+
+    app.use(express.static(clientDirectory));
+    app.use((req, res, next) => {
+      const acceptsHtml = (req.get('Accept') ?? '')
+        .split(',')
+        .some((type) => type.trim().split(';')[0] === 'text/html');
+      if (
+        (req.method === 'GET' || req.method === 'HEAD')
+        && acceptsHtml
+      ) {
+        return res.sendFile(path.join(clientDirectory, 'index.html'));
+      }
+
+      return next(new AppError(404, 'NOT_FOUND', '资源不存在'));
+    });
+  } else {
+    app.use((req, res, next) => {
+      next(new AppError(404, 'NOT_FOUND', '资源不存在'));
+    });
+  }
   app.use(errorHandler);
 
   return app;

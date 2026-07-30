@@ -1,7 +1,7 @@
 import { healthRepository } from '../repositories/health.repository.js';
 
-export function getHealthStatus() {
-  const storage = healthRepository.getStorageStatus();
+export async function getHealthStatus() {
+  const storage = await healthRepository.getStorageStatus();
   const healthy = storage !== 'fatal';
 
   return {

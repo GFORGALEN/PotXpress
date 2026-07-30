@@ -2,6 +2,7 @@ import {
   createTable,
   createTableBatch,
   deleteTable,
+  deleteTablesPermanent,
   listTables,
   updateTable,
 } from '../services/table.service.js';
@@ -43,4 +44,22 @@ export async function deleteTableController(req, res) {
     req.user,
   );
   return ok(res, { table }, '桌台已停用');
+}
+
+export async function deleteTablePermanentController(req, res) {
+  const [table] = await deleteTablesPermanent(
+    req.params.storeId,
+    [req.params.tableId],
+    req.user,
+  );
+  return ok(res, { table }, '桌台已永久删除');
+}
+
+export async function deleteTablesBatchController(req, res) {
+  const tables = await deleteTablesPermanent(
+    req.params.storeId,
+    req.body.tableIds,
+    req.user,
+  );
+  return ok(res, { tables, count: tables.length }, `已删除 ${tables.length} 张桌台`);
 }

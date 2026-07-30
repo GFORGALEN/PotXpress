@@ -1,6 +1,25 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #101815;
+  --color-ink-900: #17211d;
+  --color-ink-800: #223029;
+  --color-ink-700: #314239;
+  --color-ember-50: #fff7ed;
+  --color-ember-100: #ffedd5;
+  --color-ember-400: #fb923c;
+  --color-ember-500: #f97316;
+  --color-ember-600: #ea580c;
+  --color-canvas: #f5f2ea;
+  --shadow-soft: 0 24px 60px -28px rgb(16 24 21 / 0.35);
+  --shadow-card: 0 14px 32px -22px rgb(16 24 21 / 0.28);
+  --font-sans:
+    Inter,
+    "PingFang SC",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+}
 
 @layer base {
   html,
@@ -46,6 +65,11 @@
   ::selection {
     color: #17211d;
     background: #fed7aa;
+  }
+
+  :focus-visible {
+    outline: 3px solid #f97316;
+    outline-offset: 2px;
   }
 }
 

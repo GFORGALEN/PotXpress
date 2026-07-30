@@ -5,9 +5,17 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ArrowUpRight, Radio, RotateCw } from 'lucide-react';
-import { getLayout } from '../api/layout.js';
-import { listTimers } from '../api/timers.js';
+import {
+  ArrowUpRight,
+  LayoutGrid,
+  List,
+  Maximize2,
+  Minimize2,
+  Radio,
+  RotateCw,
+} from 'lucide-react';
+import { getLayout } from '../api/layout.ts';
+import { listTimers } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
 import {
   OvertimeAlertDialog,
@@ -22,6 +30,7 @@ import { EditorToolbar } from '../components/layout/EditorToolbar.jsx';
 import { LayoutConflictDialog } from '../components/layout/LayoutConflictDialog.jsx';
 import { TableActionDialog } from '../components/tables/TableActionDialog.jsx';
 import { TableFilter } from '../components/tables/TableFilter.jsx';
+import { TableListView } from '../components/layout/TableListView.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useStore } from '../contexts/StoreContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
@@ -29,17 +38,21 @@ import { useLayoutEditor } from '../contexts/LayoutEditorContext.jsx';
 import { useSound } from '../contexts/SoundContext.jsx';
 import { useAlertWatcher } from '../hooks/useAlertWatcher.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { useStoreRealtime } from '../hooks/useStoreRealtime.js';
 import { useSecondTick } from '../hooks/useSecondTick.js';
+import { useMediaQuery } from '../hooks/useMediaQuery.js';
 import {
   calculateClockOffset,
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
 
 const TIMER_POLL_INTERVAL = 3000;
+const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
 const CLOCK_RECALIBRATION_POLLS = 30;
+const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { token, user } = useAuth();
   const {
     currentStore,
     selectedStoreId,
@@ -60,13 +73,21 @@ export function DashboardPage() {
   const [timersError, setTimersError] = useState(null);
   const [layoutRetryEpoch, setLayoutRetryEpoch] = useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [areaFilter, setAreaFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [canvasFocused, setCanvasFocused] = useState(false);
   const [settings, setSettings] = useState(null);
+  const [timerEventVersion, setTimerEventVersion] = useState(0);
+  const [mobileView, setMobileView] = useState(
+    () => localStorage.getItem(MOBILE_VIEW_STORAGE_KEY) || 'list',
+  );
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const clockOffsetRef = useRef(0);
   const timerPollCountRef = useRef(0);
   const timersLoadedRef = useRef(false);
   const pollingFailedRef = useRef(false);
+  const realtimeRefreshRef = useRef(() => {});
   const now = useSecondTick(Boolean(selectedStoreId));
 
   const loadSettings = useCallback(async () => {
@@ -100,11 +121,14 @@ export function DashboardPage() {
     setLayoutError(null);
     setTimersError(null);
     setSelectedTableId(null);
+    setCanvasFocused(false);
+    setAreaFilter('all');
     setSettings(null);
     clockOffsetRef.current = 0;
     timerPollCountRef.current = 0;
     timersLoadedRef.current = false;
     pollingFailedRef.current = false;
+    setTimerEventVersion(0);
   }, [selectedStoreId, storeEpoch]);
 
   useEffect(() => {
@@ -179,6 +203,9 @@ export function DashboardPage() {
 
     timerPollCountRef.current += 1;
     setTimers(result.timers);
+    setTimerEventVersion(
+      Number.isSafeInteger(result.eventVersion) ? result.eventVersion : 0,
+    );
     setTimersError(null);
 
     if (pollingFailedRef.current && timersLoadedRef.current) {
@@ -198,20 +225,37 @@ export function DashboardPage() {
     pollingFailedRef.current = true;
   }, []);
 
+  const handleRealtimeSnapshotRequired = useCallback(() => (
+    realtimeRefreshRef.current()
+  ), []);
+  const realtime = useStoreRealtime({
+    storeId: selectedStoreId,
+    token,
+    snapshotVersion: timerEventVersion,
+    onSnapshotRequired: handleRealtimeSnapshotRequired,
+  });
   const refreshTimers = usePolling(
     fetchTimers,
-    TIMER_POLL_INTERVAL,
+    realtime.connected
+      ? CONNECTED_SAFETY_POLL_INTERVAL
+      : TIMER_POLL_INTERVAL,
     {
       enabled: Boolean(selectedStoreId),
-      hiddenIntervalMs: 15000,
+      hiddenIntervalMs: realtime.connected
+        ? CONNECTED_SAFETY_POLL_INTERVAL
+        : 15000,
       onSuccess: handleTimersSuccess,
       onError: handleTimersError,
       registerController: registerStoreRequest,
     },
   );
+  realtimeRefreshRef.current = refreshTimers;
 
   const timerByTableId = useMemo(
-    () => new Map(timers.map((timer) => [timer.tableId, timer])),
+    () => new Map(timers.flatMap((timer) => (
+      (timer.memberTableIds ?? [timer.tableId])
+        .map((tableId) => [tableId, timer])
+    ))),
     [timers],
   );
   const correctedNow = now + clockOffsetRef.current;
@@ -243,6 +287,9 @@ export function DashboardPage() {
   const normalizedSearch = search.trim().toLocaleLowerCase('zh-CN');
   const visibleTables = useMemo(() => allTables
     .filter((table) => (
+      areaFilter === 'all' || table.area === areaFilter
+    ))
+    .filter((table) => (
       statusFilter === 'all' || table.status === statusFilter
     ))
     .filter((table) => (
@@ -252,7 +299,12 @@ export function DashboardPage() {
     .map((table) => ({
       ...table,
       highlighted: Boolean(normalizedSearch),
-    })), [allTables, normalizedSearch, statusFilter]);
+    })), [allTables, areaFilter, normalizedSearch, statusFilter]);
+  const areas = useMemo(
+    () => [...new Set(allTables.map((table) => table.area).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right, 'zh-CN')),
+    [allTables],
+  );
   const counts = useMemo(() => {
     const result = {
       total: allTables.length,
@@ -270,11 +322,19 @@ export function DashboardPage() {
     return result;
   }, [allTables]);
   const warningTables = useMemo(
-    () => allTables.filter((table) => table.status === 'warning'),
+    () => [...new Map(
+      allTables
+        .filter((table) => table.status === 'warning')
+        .map((table) => [table.timerId ?? table.tableId, table]),
+    ).values()],
     [allTables],
   );
   const overtimeTables = useMemo(
-    () => allTables.filter((table) => table.status === 'overtime'),
+    () => [...new Map(
+      allTables
+        .filter((table) => table.status === 'overtime')
+        .map((table) => [table.timerId ?? table.tableId, table]),
+    ).values()],
     [allTables],
   );
   const selectedTable = useMemo(
@@ -304,6 +364,11 @@ export function DashboardPage() {
     return result;
   }, [selectedStoreId]);
   const alerts = useAlertWatcher(allTables, refreshTimers);
+
+  const changeMobileView = useCallback((view) => {
+    setMobileView(view);
+    localStorage.setItem(MOBILE_VIEW_STORAGE_KEY, view);
+  }, []);
 
   useEffect(() => {
     if (alerts.overtimeDialogOpen) {
@@ -388,6 +453,11 @@ export function DashboardPage() {
         status="overtime"
         tables={overtimeTables}
       />
+
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-stone-200 p-1 md:hidden" aria-label="看板显示方式">
+        <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'list' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('list')}><List size={17} />列表</button>
+        <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'canvas' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('canvas')}><LayoutGrid size={17} />平面图</button>
+      </div>
       <TimerStatusBanner
         status="warning"
         tables={warningTables}
@@ -401,34 +471,68 @@ export function DashboardPage() {
         />
       ) : (
         <>
-          <TableFilter
-            status={statusFilter}
-            search={search}
-            counts={counts}
-            onStatusChange={setStatusFilter}
-            onSearchChange={setSearch}
-          />
+          {layoutEditor.mode === 'view' ? (
+            <TableFilter
+              status={statusFilter}
+              search={search}
+              counts={counts}
+              areas={areas}
+              area={areaFilter}
+              onStatusChange={setStatusFilter}
+              onAreaChange={setAreaFilter}
+              onSearchChange={setSearch}
+            />
+          ) : null}
 
-          {visibleTables.length === 0 ? (
+          {visibleTables.length === 0 && layoutEditor.mode === 'view' ? (
             <EmptyState
               title="没有符合条件的桌台"
               description="请调整状态筛选或清空搜索关键词。"
             />
           ) : (
-            <div className="h-[clamp(30rem,68vh,46rem)] min-h-0">
+            isMobile && mobileView === 'list' ? (
+              <TableListView
+                tables={visibleTables}
+                onTableClick={handleTableClick}
+              />
+            ) : (
+            <div className={canvasFocused
+              ? 'fixed inset-2 z-50 min-h-0 rounded-[2rem] bg-white p-2 shadow-2xl sm:inset-4'
+              : 'relative h-[clamp(34rem,76vh,56rem)] min-h-0'}>
+              <button
+                type="button"
+                onClick={() => setCanvasFocused((value) => !value)}
+                className="absolute left-4 top-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-sm font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
+                aria-label={canvasFocused ? '退出专注画布' : '专注画布'}
+              >
+                {canvasFocused ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                {canvasFocused ? '退出专注' : '专注画布'}
+              </button>
               <FloorCanvas
                 canvas={layoutEditor.mode === 'view'
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
-                tables={visibleTables}
+                tables={layoutEditor.mode === 'view'
+                  ? visibleTables
+                  : allTables}
+                decorations={layoutEditor.mode === 'view'
+                  ? layout.decorations ?? []
+                  : layoutEditor.draftDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
                 editing={layoutEditor.mode === 'editing'}
                 selectedTableId={layoutEditor.selectedTableId}
                 onSelectTable={layoutEditor.setSelectedTableId}
                 onUpdateTableLayout={layoutEditor.updateTableLayout}
+                selectedDecorationId={layoutEditor.selectedDecorationId}
+                onSelectDecoration={(id) => {
+                  layoutEditor.setSelectedDecorationId(id);
+                  layoutEditor.setSelectedTableId(null);
+                }}
+                onUpdateDecoration={layoutEditor.updateDecoration}
               />
             </div>
+            )
           )}
         </>
       )}
@@ -436,7 +540,11 @@ export function DashboardPage() {
       <TableActionDialog
         table={layoutEditor.mode === 'view' ? selectedTable : null}
         timezone={currentStore?.timezone}
-        defaultDurationMinutes={settings?.defaultDurationMinutes ?? 90}
+        defaultDurationMinutes={
+          selectedTable?.defaultDurationMinutes
+          ?? settings?.defaultDurationMinutes
+          ?? 90
+        }
         onRefresh={refreshTimers}
         onClose={handleCloseDialog}
       />

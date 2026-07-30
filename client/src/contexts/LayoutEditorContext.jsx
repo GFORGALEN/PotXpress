@@ -7,11 +7,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { saveLayout as saveLayoutRequest } from '../api/layout.js';
+import { saveLayout as saveLayoutRequest } from '../api/layout.ts';
 import { useAuth } from './AuthContext.jsx';
 import { useStore } from './StoreContext.jsx';
 import { useToast } from './ToastContext.jsx';
 import {
+  buildLayoutSavePayload,
+  normalizeDecoration,
   normalizeTableLayout,
   serializeLayout,
 } from '../utils/layoutEditor.js';
@@ -27,6 +29,9 @@ export function LayoutEditorProvider({ children }) {
   const [draftCanvas, setDraftCanvas] = useState(null);
   const [baseLayoutVersion, setBaseLayoutVersion] = useState(null);
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [draftDecorations, setDraftDecorations] = useState([]);
+  const [selectedDecorationId, setSelectedDecorationId] = useState(null);
+  const [history, setHistory] = useState({ past: [], future: [] });
   const [saving, setSaving] = useState(false);
   const [conflictDetails, setConflictDetails] = useState(null);
   const snapshotRef = useRef('');
@@ -36,8 +41,28 @@ export function LayoutEditorProvider({ children }) {
   const isDirty = useMemo(() => (
     mode !== 'view'
     && draftCanvas
-    && serializeLayout(draftCanvas, draftLayout) !== snapshotRef.current
-  ), [draftCanvas, draftLayout, mode]);
+    && serializeLayout(
+      draftCanvas,
+      draftLayout,
+      draftDecorations,
+    ) !== snapshotRef.current
+  ), [draftCanvas, draftDecorations, draftLayout, mode]);
+
+  const captureDraft = useCallback(() => ({
+    canvas: structuredClone(draftCanvas),
+    layout: new Map(
+      [...draftLayout].map(([id, value]) => [id, structuredClone(value)]),
+    ),
+    decorations: structuredClone(draftDecorations),
+  }), [draftCanvas, draftDecorations, draftLayout]);
+
+  const rememberCurrent = useCallback(() => {
+    const snapshot = captureDraft();
+    setHistory((current) => ({
+      past: [...current.past.slice(-49), snapshot],
+      future: [],
+    }));
+  }, [captureDraft]);
 
   const exitEdit = useCallback(() => {
     setMode('view');
@@ -45,6 +70,9 @@ export function LayoutEditorProvider({ children }) {
     setDraftCanvas(null);
     setBaseLayoutVersion(null);
     setSelectedTableId(null);
+    setDraftDecorations([]);
+    setSelectedDecorationId(null);
+    setHistory({ past: [], future: [] });
     setConflictDetails(null);
     snapshotRef.current = '';
     tablesRef.current = [];
@@ -86,19 +114,28 @@ export function LayoutEditorProvider({ children }) {
       ]),
     );
     const nextCanvas = structuredClone(layout.canvas);
+    const nextDecorations = structuredClone(layout.decorations ?? []);
     tablesRef.current = structuredClone(layout.tables);
     callbacksRef.current = callbacks;
-    snapshotRef.current = serializeLayout(nextCanvas, nextMap);
+    snapshotRef.current = serializeLayout(
+      nextCanvas,
+      nextMap,
+      nextDecorations,
+    );
     setDraftLayout(nextMap);
     setDraftCanvas(nextCanvas);
+    setDraftDecorations(nextDecorations);
     setBaseLayoutVersion(layout.layoutVersion);
     setSelectedTableId(null);
+    setSelectedDecorationId(null);
+    setHistory({ past: [], future: [] });
     setConflictDetails(null);
     setMode('editing');
     return true;
   }, [showToast, user?.role]);
 
   const updateTableLayout = useCallback((tableId, nextLayout) => {
+    rememberCurrent();
     setDraftLayout((current) => {
       const next = new Map(current);
       const maxZIndex = Math.max(
@@ -115,11 +152,87 @@ export function LayoutEditorProvider({ children }) {
       return next;
     });
     setSelectedTableId(tableId);
-  }, []);
+  }, [rememberCurrent]);
 
   const updateCanvas = useCallback((patch) => {
+    rememberCurrent();
     setDraftCanvas((current) => ({ ...current, ...patch }));
+  }, [rememberCurrent]);
+
+  const addDecoration = useCallback((type) => {
+    rememberCurrent();
+    const id = `decoration_${crypto.randomUUID()}`;
+    const maxZIndex = Math.max(
+      1,
+      ...tablesRef.current.map((table) => table.layout.zIndex ?? 1),
+      ...draftDecorations.map((item) => item.zIndex ?? 1),
+    );
+    const defaults = {
+      wall: { label: '墙体', xRatio: 0.39, yRatio: 0.08, widthRatio: 0.22, heightRatio: 0.025 },
+      entrance: { label: '入口', xRatio: 0.72, yRatio: 0.08, widthRatio: 0.1, heightRatio: 0.07 },
+      cashier: { label: '收银台', xRatio: 0.72, yRatio: 0.2, widthRatio: 0.14, heightRatio: 0.09 },
+      area: { label: '区域', xRatio: 0.35, yRatio: 0.34, widthRatio: 0.28, heightRatio: 0.24 },
+    }[type];
+    setDraftDecorations((current) => [...current, {
+      id,
+      type,
+      ...defaults,
+      rotation: 0,
+      zIndex: type === 'area' ? 0 : maxZIndex + 1,
+    }]);
+    setSelectedTableId(null);
+    setSelectedDecorationId(id);
+  }, [draftDecorations, rememberCurrent]);
+
+  const updateDecoration = useCallback((id, patch) => {
+    rememberCurrent();
+    setDraftDecorations((current) => current.map((item) => (
+      item.id === id ? normalizeDecoration({ ...item, ...patch }) : item
+    )));
+    setSelectedDecorationId(id);
+    setSelectedTableId(null);
+  }, [rememberCurrent]);
+
+  const deleteSelectedDecoration = useCallback(() => {
+    if (!selectedDecorationId) return;
+    rememberCurrent();
+    setDraftDecorations((current) => (
+      current.filter((item) => item.id !== selectedDecorationId)
+    ));
+    setSelectedDecorationId(null);
+  }, [rememberCurrent, selectedDecorationId]);
+
+  const restoreSnapshot = useCallback((snapshot) => {
+    setDraftCanvas(structuredClone(snapshot.canvas));
+    setDraftLayout(new Map(snapshot.layout));
+    setDraftDecorations(structuredClone(snapshot.decorations));
+    setSelectedTableId(null);
+    setSelectedDecorationId(null);
   }, []);
+
+  const undo = useCallback(() => {
+    setHistory((current) => {
+      if (!current.past.length) return current;
+      const previous = current.past[current.past.length - 1];
+      restoreSnapshot(previous);
+      return {
+        past: current.past.slice(0, -1),
+        future: [captureDraft(), ...current.future].slice(0, 50),
+      };
+    });
+  }, [captureDraft, restoreSnapshot]);
+
+  const redo = useCallback(() => {
+    setHistory((current) => {
+      if (!current.future.length) return current;
+      const next = current.future[0];
+      restoreSnapshot(next);
+      return {
+        past: [...current.past, captureDraft()].slice(-50),
+        future: current.future.slice(1),
+      };
+    });
+  }, [captureDraft, restoreSnapshot]);
 
   const saveLayout = useCallback(async () => {
     if (!isDirty) {
@@ -130,17 +243,20 @@ export function LayoutEditorProvider({ children }) {
     setSaving(true);
 
     try {
-      const result = await saveLayoutRequest(selectedStoreId, {
-        layoutVersion: baseLayoutVersion,
-        canvas: draftCanvas,
-        tables: tablesRef.current.map((table) => ({
-          tableId: table.tableId,
-          layout: normalizeTableLayout(draftLayout.get(table.tableId)),
-        })),
-      });
+      const result = await saveLayoutRequest(
+        selectedStoreId,
+        buildLayoutSavePayload({
+          layoutVersion: baseLayoutVersion,
+          canvas: draftCanvas,
+          tables: tablesRef.current,
+          layoutMap: draftLayout,
+          decorations: draftDecorations,
+        }),
+      );
       const savedLayout = {
         layoutVersion: result.layoutVersion,
         canvas: structuredClone(draftCanvas),
+        decorations: structuredClone(draftDecorations),
         tables: tablesRef.current.map((table) => ({
           ...table,
           layout: normalizeTableLayout(draftLayout.get(table.tableId)),
@@ -157,7 +273,13 @@ export function LayoutEditorProvider({ children }) {
         return { conflict: true };
       }
 
-      showToast(error.message, 'error');
+      const firstIssue = error.details?.issues?.[0];
+      showToast(
+        firstIssue
+          ? `${error.message}：${firstIssue.path} ${firstIssue.message}`
+          : error.message,
+        'error',
+      );
       return { error };
     } finally {
       setSaving(false);
@@ -165,7 +287,9 @@ export function LayoutEditorProvider({ children }) {
   }, [
     baseLayoutVersion,
     draftCanvas,
+    draftDecorations,
     draftLayout,
+    draftDecorations,
     exitEdit,
     isDirty,
     selectedStoreId,
@@ -190,9 +314,11 @@ export function LayoutEditorProvider({ children }) {
     mode,
     draftLayout,
     draftCanvas,
+    draftDecorations,
     baseLayoutVersion,
     isDirty,
     selectedTableId,
+    selectedDecorationId,
     saving,
     conflictDetails,
     tables: tablesRef.current,
@@ -200,13 +326,22 @@ export function LayoutEditorProvider({ children }) {
     exitEdit,
     updateTableLayout,
     updateCanvas,
+    addDecoration,
+    updateDecoration,
+    deleteSelectedDecoration,
+    undo,
+    redo,
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
     saveLayout,
     loadLatest,
     setSelectedTableId,
+    setSelectedDecorationId,
   }), [
     baseLayoutVersion,
     conflictDetails,
     draftCanvas,
+    draftDecorations,
     draftLayout,
     enterEdit,
     exitEdit,
@@ -216,8 +351,15 @@ export function LayoutEditorProvider({ children }) {
     saveLayout,
     saving,
     selectedTableId,
+    selectedDecorationId,
+    history,
     updateCanvas,
     updateTableLayout,
+    addDecoration,
+    updateDecoration,
+    deleteSelectedDecoration,
+    undo,
+    redo,
   ]);
 
   return (

@@ -22,6 +22,14 @@ function parsePort(value) {
   return port;
 }
 
+function parsePoolSize(value) {
+  const size = Number(value ?? 10);
+  if (!Number.isInteger(size) || size < 1 || size > 50) {
+    throw new Error('DATABASE_POOL_SIZE 必须是 1-50 之间的整数');
+  }
+  return size;
+}
+
 function parseTrustProxy(value) {
   if (value === undefined || value === '' || value === 'false') {
     return false;
@@ -41,7 +49,11 @@ function parseTrustProxy(value) {
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const isProduction = nodeEnv === 'production';
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret-change-me';
-const corsOrigins = (process.env.CORS_ORIGIN || (isProduction ? '' : 'http://localhost:5173'))
+const corsOrigins = (process.env.CORS_ORIGIN || (
+  isProduction
+    ? ''
+    : 'http://localhost:5173,http://127.0.0.1:5173'
+))
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -53,7 +65,13 @@ export const config = Object.freeze({
   jwtSecret,
   corsOrigins,
   dataDirectory: path.resolve(process.env.DATA_DIR || path.join(serverDirectory, 'data')),
-  seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA),
+  databaseUrl: process.env.DATABASE_URL
+    || 'postgres://potxpress:potxpress@127.0.0.1:5432/potxpress',
+  databasePoolSize: parsePoolSize(process.env.DATABASE_POOL_SIZE),
+  databaseSsl: parseBoolean(process.env.DATABASE_SSL),
+  useMemoryDatabase: nodeEnv === 'test'
+    || String(process.env.DATABASE_URL ?? '').startsWith('pgmem://'),
+  seedDemoData: parseBoolean(process.env.SEED_DEMO_DATA, !isProduction),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 });
 
@@ -64,10 +82,6 @@ export function validateRuntimeConfig() {
       || config.jwtSecret.length < 32
     ) {
       throw new Error('生产环境 JWT_SECRET 必须是至少 32 字符的非默认随机值');
-    }
-
-    if (config.corsOrigins.length === 0) {
-      throw new Error('生产环境必须配置 CORS_ORIGIN');
     }
   }
 }

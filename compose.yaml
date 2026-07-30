@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: potxpress-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: potxpress
+      POSTGRES_USER: potxpress
+      POSTGRES_PASSWORD: potxpress
+    ports:
+      - "5432:5432"
+    volumes:
+      - potxpress-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U potxpress -d potxpress"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  potxpress-postgres-data:

@@ -8,6 +8,7 @@ import {
   formatTimerDuration,
 } from '../src/utils/timerDisplay.js';
 import {
+  buildLayoutSavePayload,
   findSignificantOverlaps,
   normalizeTableLayout,
   serializeLayout,
@@ -137,6 +138,44 @@ test('layout serialization is stable across map insertion order', () => {
   ]);
   const right = new Map([...left.entries()].reverse());
   assert.equal(serializeLayout(canvas, left), serializeLayout(canvas, right));
+});
+
+test('layout save payload excludes read-only canvas fields', () => {
+  const layout = normalizeTableLayout({
+    xRatio: 0.1,
+    yRatio: 0.2,
+    widthRatio: 0.1,
+    heightRatio: 0.1,
+    rotation: 0,
+    zIndex: 1,
+  });
+  const payload = buildLayoutSavePayload({
+    layoutVersion: 3,
+    canvas: {
+      aspectRatio: '16:9',
+      virtualWidth: 1600,
+      virtualHeight: 900,
+      backgroundColor: '#ffffff',
+      gridEnabled: true,
+      snapToGrid: false,
+      gridSize: 10,
+      minTableWidth: 80,
+    },
+    tables: [{ tableId: 'table-1' }],
+    layoutMap: new Map([['table-1', layout]]),
+  });
+
+  assert.deepEqual(payload, {
+    layoutVersion: 3,
+    canvas: {
+      backgroundColor: '#ffffff',
+      gridEnabled: true,
+      snapToGrid: false,
+      gridSize: 10,
+    },
+    decorations: [],
+    tables: [{ tableId: 'table-1', layout }],
+  });
 });
 
 test('overlap detection reports intersections over thirty percent', () => {

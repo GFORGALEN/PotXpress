@@ -1,5 +1,6 @@
 import { userRepository } from '../repositories/user.repository.js';
 import { storeRepository } from '../repositories/store.repository.js';
+import { unitOfWorkRepository } from '../repositories/unitOfWork.repository.js';
 import { AppError } from '../utils/appError.js';
 import { writeAuditLog } from '../utils/audit.js';
 import { comparePassword, hashPassword } from '../utils/hash.js';
@@ -70,5 +71,38 @@ export async function logout(user) {
     targetId: user.userId,
     dataBefore: null,
     dataAfter: null,
+  });
+}
+
+export async function changePassword(user, input) {
+  const passwordHash = await hashPassword(input.newPassword);
+  await unitOfWorkRepository.run(
+    { resources: ['users'], writeOrder: ['users'] },
+    async ({ users }) => {
+      const latest = users.findById(user.userId);
+      if (!latest || !latest.enabled) {
+        throw new AppError(401, 'UNAUTHORIZED', '登录状态已失效');
+      }
+      if (!await comparePassword(input.currentPassword, latest.passwordHash)) {
+        throw new AppError(400, 'CURRENT_PASSWORD_INCORRECT', '当前密码不正确');
+      }
+      users.update(latest.id, {
+        ...latest,
+        passwordHash,
+        tokenVersion: latest.tokenVersion + 1,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+  );
+
+  await writeAuthAuditBestEffort({
+    userId: user.userId,
+    userNameSnapshot: user.displayName,
+    storeId: user.storeId,
+    action: 'auth.password_change',
+    targetType: 'user',
+    targetId: user.userId,
+    dataBefore: null,
+    dataAfter: { sessionsInvalidated: true },
   });
 }

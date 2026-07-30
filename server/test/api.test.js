@@ -85,6 +85,68 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
   });
   assert.equal(meResponse.status, 200);
 
+  const createUserResponse = await fetch(`${baseUrl}/api/users`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${loginBody.data.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: 'module8_staff',
+      displayName: '模块八员工',
+      password: 'staffpass1',
+      role: 'store_staff',
+      storeId: 'store_demo',
+    }),
+  });
+  const createUserBody = await createUserResponse.json();
+  assert.equal(createUserResponse.status, 201);
+  assert.equal('passwordHash' in createUserBody.data.user, false);
+
+  const staffLoginResponse = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      username: 'module8_staff',
+      password: 'staffpass1',
+    }),
+  });
+  const staffLoginBody = await staffLoginResponse.json();
+  assert.equal(staffLoginResponse.status, 200);
+
+  const passwordResponse = await fetch(`${baseUrl}/api/auth/password`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${staffLoginBody.data.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      currentPassword: 'staffpass1',
+      newPassword: 'staffpass2',
+    }),
+  });
+  assert.equal(passwordResponse.status, 200);
+
+  const invalidatedStaffResponse = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { authorization: `Bearer ${staffLoginBody.data.token}` },
+  });
+  assert.equal(invalidatedStaffResponse.status, 401);
+
+  const selfDisableResponse = await fetch(
+    `${baseUrl}/api/users/${loginBody.data.user.id}`,
+    {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${loginBody.data.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ enabled: false }),
+    },
+  );
+  const selfDisableBody = await selfDisableResponse.json();
+  assert.equal(selfDisableResponse.status, 409);
+  assert.equal(selfDisableBody.error.code, 'CANNOT_REVOKE_SELF');
+
   await fileStore.updateJSON('users.json', (users) => {
     const admin = users.find((user) => user.id === 'user_admin');
     admin.tokenVersion += 1;

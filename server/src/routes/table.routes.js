@@ -3,6 +3,8 @@ import {
   createTableBatchController,
   createTableController,
   deleteTableController,
+  deleteTablePermanentController,
+  deleteTablesBatchController,
   listTablesController,
   updateTableController,
 } from '../controllers/table.controller.js';
@@ -19,6 +21,7 @@ import {
 import {
   createTableBatchBodySchema,
   createTableBodySchema,
+  deleteTableBatchBodySchema,
   updateTableBodySchema,
 } from '../validators/table.validator.js';
 
@@ -58,6 +61,29 @@ tableRouter.post(
   }),
   asyncHandler(storeAccess),
   asyncHandler(createTableBatchController),
+);
+tableRouter.post(
+  '/batch-delete',
+  asyncHandler(authenticate),
+  tableManagerRoles,
+  validate({
+    params: storeParamsSchema,
+    body: deleteTableBatchBodySchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteTablesBatchController),
+);
+tableRouter.delete(
+  '/:tableId/permanent',
+  asyncHandler(authenticate),
+  tableManagerRoles,
+  validate({
+    params: storeTableParamsSchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteTablePermanentController),
 );
 tableRouter.patch(
   '/:tableId',

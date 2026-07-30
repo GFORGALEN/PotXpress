@@ -17,3 +17,11 @@ export async function logout() {
   const response = await apiClient.post('/auth/logout');
   return response.data.data;
 }
+
+export async function changePassword(currentPassword, newPassword) {
+  const response = await apiClient.patch('/auth/password', {
+    currentPassword,
+    newPassword,
+  });
+  return response.data.data;
+}

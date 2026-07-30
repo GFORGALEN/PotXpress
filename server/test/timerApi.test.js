@@ -8,8 +8,9 @@ async function request(baseUrl, pathname, {
   method = 'GET',
   token,
   body,
+  headers: extraHeaders = {},
 } = {}) {
-  const headers = {};
+  const headers = { ...extraHeaders };
 
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -25,7 +26,11 @@ async function request(baseUrl, pathname, {
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   const responseBody = await response.json();
-  return { status: response.status, body: responseBody };
+  return {
+    status: response.status,
+    body: responseBody,
+    headers: response.headers,
+  };
 }
 
 async function login(baseUrl, username, password) {
@@ -88,9 +93,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     [201, 409],
   );
 
-  const activeTimerPath = path.join(directory, 'activeTimers.json');
-  const beforeReads = await fs.readFile(activeTimerPath, 'utf8');
-  const beforeReadStat = await fs.stat(activeTimerPath);
+  const beforeReads = await fileStore.readJSON('activeTimers.json');
   const firstRead = await request(
     baseUrl,
     '/api/stores/store_demo/timers',
@@ -103,18 +106,44 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   );
   assert.equal(firstRead.body.data.serverTime, new Date(now).toISOString());
   assert.equal(secondRead.status, 200);
-  assert.equal(await fs.readFile(activeTimerPath, 'utf8'), beforeReads);
-  assert.equal((await fs.stat(activeTimerPath)).mtimeMs, beforeReadStat.mtimeMs);
+  assert.deepEqual(await fileStore.readJSON('activeTimers.json'), beforeReads);
 
   now += 30_000;
   const paused = await request(
     baseUrl,
     timerPath('table_demo_01', 'pause'),
-    { method: 'POST', token: staff.token },
+    {
+      method: 'POST',
+      token: staff.token,
+      headers: { 'Idempotency-Key': 'pause-table-01-at-30s' },
+    },
   );
   assert.equal(paused.status, 200);
   assert.equal(paused.body.data.timer.status, 'paused');
   assert.equal(paused.body.data.timer.remainingSeconds, 270);
+  const replayedPause = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'pause'),
+    {
+      method: 'POST',
+      token: staff.token,
+      headers: { 'Idempotency-Key': 'pause-table-01-at-30s' },
+    },
+  );
+  assert.equal(replayedPause.status, 200);
+  assert.equal(replayedPause.headers.get('idempotency-replayed'), 'true');
+  assert.deepEqual(replayedPause.body.data.timer, paused.body.data.timer);
+  const reusedKey = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'resume'),
+    {
+      method: 'POST',
+      token: staff.token,
+      headers: { 'Idempotency-Key': 'pause-table-01-at-30s' },
+    },
+  );
+  assert.equal(reusedKey.status, 409);
+  assert.equal(reusedKey.body.error.code, 'IDEMPOTENCY_KEY_REUSED');
   const duplicatePause = await request(
     baseUrl,
     timerPath('table_demo_01', 'pause'),
@@ -268,6 +297,42 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   assert.equal(filteredRunningRecords.body.data.date, '2026-01-15');
   assert.equal(filteredRunningRecords.body.data.records.length, 1);
 
+  await request(baseUrl, timerPath('table_demo_01', 'start'), {
+    method: 'POST',
+    token: staff.token,
+    body: { durationMinutes: 5 },
+  });
+  const adjustPauseRace = await Promise.all([
+    request(baseUrl, timerPath('table_demo_01', 'adjust'), {
+      method: 'POST',
+      token: staff.token,
+      body: { deltaSeconds: 60, reason: '并发加时' },
+    }),
+    request(baseUrl, timerPath('table_demo_01', 'pause'), {
+      method: 'POST',
+      token: staff.token,
+    }),
+  ]);
+  assert.deepEqual(
+    adjustPauseRace.map((response) => response.status).sort(),
+    [200, 200],
+  );
+  const afterAdjustPause = await request(
+    baseUrl,
+    '/api/stores/store_demo/timers',
+    { token: staff.token },
+  );
+  const racedTimer = afterAdjustPause.body.data.timers.find(
+    (timer) => timer.tableId === 'table_demo_01',
+  );
+  assert.equal(racedTimer.status, 'paused');
+  assert.equal(racedTimer.plannedDurationSeconds, 360);
+  assert.equal(racedTimer.adjustments.length, 1);
+  await request(baseUrl, timerPath('table_demo_01', 'reset'), {
+    method: 'POST',
+    token: staff.token,
+  });
+
   await request(baseUrl, timerPath('table_demo_02', 'start'), {
     method: 'POST',
     token: staff.token,
@@ -367,6 +432,43 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     body: { enabled: true },
   });
 
+  const groupTimerRace = await Promise.all([
+    request(baseUrl, '/api/stores/store_demo/table-groups', {
+      method: 'POST',
+      token: storeAdmin.token,
+      body: {
+        tableIds: ['table_demo_03', 'table_demo_04'],
+        name: '并发拼桌',
+        type: 'temporary',
+      },
+    }),
+    request(baseUrl, timerPath('table_demo_03', 'start'), {
+      method: 'POST',
+      token: staff.token,
+      body: { durationMinutes: 5 },
+    }),
+  ]);
+  const [racedGroupResponse, racedTimerResponse] = groupTimerRace;
+  assert.equal(racedTimerResponse.status, 201);
+  assert.equal([201, 409].includes(racedGroupResponse.status), true);
+  if (racedGroupResponse.status === 201) {
+    assert.equal(racedTimerResponse.body.data.timer.targetType, 'group');
+  } else {
+    assert.equal(racedGroupResponse.body.error.code, 'TABLE_HAS_ACTIVE_TIMER');
+    assert.equal(racedTimerResponse.body.data.timer.targetType, 'table');
+  }
+  await request(baseUrl, timerPath('table_demo_03', 'reset'), {
+    method: 'POST',
+    token: staff.token,
+  });
+  if (racedGroupResponse.status === 201) {
+    await request(
+      baseUrl,
+      `/api/stores/store_demo/table-groups/${racedGroupResponse.body.data.group.id}`,
+      { method: 'DELETE', token: storeAdmin.token },
+    );
+  }
+
   await request(baseUrl, timerPath('table_demo_05', 'start'), {
     method: 'POST',
     token: staff.token,
@@ -425,10 +527,42 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     token: staff.token,
     body: { durationMinutes: 5 },
   });
-  await request(baseUrl, timerPath('table_demo_07', 'reset'), {
-    method: 'POST',
-    token: staff.token,
-  });
+  const idempotentResetKey = 'reset-table-07-dst';
+  const idempotentResets = await Promise.all([
+    request(baseUrl, timerPath('table_demo_07', 'reset'), {
+      method: 'POST',
+      token: staff.token,
+      headers: { 'Idempotency-Key': idempotentResetKey },
+    }),
+    request(baseUrl, timerPath('table_demo_07', 'reset'), {
+      method: 'POST',
+      token: staff.token,
+      headers: { 'Idempotency-Key': idempotentResetKey },
+    }),
+  ]);
+  assert.deepEqual(
+    idempotentResets.map((response) => response.status),
+    [200, 200],
+  );
+  assert.equal(
+    idempotentResets[0].body.data.record.id,
+    idempotentResets[1].body.data.record.id,
+  );
+  assert.equal(
+    idempotentResets.filter(
+      (response) => response.headers.get('idempotency-replayed') === 'true',
+    ).length,
+    1,
+  );
+  assert.equal(
+    (await fileStore.readJSON('auditLogs.json')).filter(
+      (entry) => (
+        entry.action === 'timer.reset'
+        && entry.targetId === idempotentResets[0].body.data.record.timerId
+      ),
+    ).length,
+    1,
+  );
   now = Date.parse('2026-04-04T14:30:00.000Z');
   await request(baseUrl, timerPath('table_demo_08', 'start'), {
     method: 'POST',
@@ -468,6 +602,118 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     /records-2026-04-05\.csv/,
   );
 
+  const groupResponse = await request(
+    baseUrl,
+    '/api/stores/store_demo/table-groups',
+    {
+      method: 'POST',
+      token: storeAdmin.token,
+      body: {
+        tableIds: ['table_demo_01', 'table_demo_02'],
+        name: '1+2拼桌',
+        type: 'temporary',
+      },
+      headers: { 'Idempotency-Key': 'create-group-table-01-02' },
+    },
+  );
+  assert.equal(groupResponse.status, 201);
+  const groupId = groupResponse.body.data.group.id;
+  const replayedGroup = await request(
+    baseUrl,
+    '/api/stores/store_demo/table-groups',
+    {
+      method: 'POST',
+      token: storeAdmin.token,
+      body: {
+        tableIds: ['table_demo_01', 'table_demo_02'],
+        name: '1+2拼桌',
+        type: 'temporary',
+      },
+      headers: { 'Idempotency-Key': 'create-group-table-01-02' },
+    },
+  );
+  assert.equal(replayedGroup.status, 201);
+  assert.equal(replayedGroup.headers.get('idempotency-replayed'), 'true');
+  assert.equal(replayedGroup.body.data.group.id, groupId);
+  assert.equal(
+    (await fileStore.readJSON('auditLogs.json')).filter(
+      (entry) => (
+        entry.action === 'table_group.create'
+        && entry.targetId === groupId
+      ),
+    ).length,
+    1,
+  );
+  const groupStart = await request(
+    baseUrl,
+    timerPath('table_demo_02', 'start'),
+    {
+      method: 'POST',
+      token: staff.token,
+      body: { durationMinutes: 10 },
+    },
+  );
+  assert.equal(groupStart.status, 201);
+  assert.equal(groupStart.body.data.timer.targetType, 'group');
+  assert.deepEqual(
+    groupStart.body.data.timer.memberTableIds,
+    ['table_demo_01', 'table_demo_02'],
+  );
+  const groupPause = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'pause'),
+    { method: 'POST', token: staff.token },
+  );
+  assert.equal(groupPause.status, 200);
+  assert.equal(groupPause.body.data.timer.id, groupStart.body.data.timer.id);
+  const blockedUngroup = await request(
+    baseUrl,
+    `/api/stores/store_demo/table-groups/${groupId}`,
+    { method: 'DELETE', token: storeAdmin.token },
+  );
+  assert.equal(blockedUngroup.status, 409);
+  const groupReset = await request(
+    baseUrl,
+    timerPath('table_demo_02', 'reset'),
+    { method: 'POST', token: staff.token },
+  );
+  assert.equal(groupReset.status, 200);
+  assert.equal(groupReset.body.data.record.groupId, groupId);
+  assert.deepEqual(
+    groupReset.body.data.record.memberTableIds,
+    ['table_demo_01', 'table_demo_02'],
+  );
+  const ungrouped = await request(
+    baseUrl,
+    `/api/stores/store_demo/table-groups/${groupId}`,
+    {
+      method: 'DELETE',
+      token: storeAdmin.token,
+      headers: { 'Idempotency-Key': 'delete-group-table-01-02' },
+    },
+  );
+  assert.equal(ungrouped.status, 200);
+  const replayedUngroup = await request(
+    baseUrl,
+    `/api/stores/store_demo/table-groups/${groupId}`,
+    {
+      method: 'DELETE',
+      token: storeAdmin.token,
+      headers: { 'Idempotency-Key': 'delete-group-table-01-02' },
+    },
+  );
+  assert.equal(replayedUngroup.status, 200);
+  assert.equal(replayedUngroup.headers.get('idempotency-replayed'), 'true');
+  assert.equal(
+    (await fileStore.readJSON('auditLogs.json')).filter(
+      (entry) => (
+        entry.action === 'table_group.delete'
+        && entry.targetId === groupId
+      ),
+    ).length,
+    1,
+  );
+
   const staffAudit = await request(
     baseUrl,
     '/api/stores/store_demo/audit-logs',
@@ -489,4 +735,57 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     new Set(records.map((record) => record.timerId)).size,
     records.length,
   );
+
+  const auditsBeforeRollback = await fileStore.readJSON('auditLogs.json');
+  fileStore.setFaultInjector(({ stage, filename }) => {
+    if (stage === 'before_replace' && filename === 'auditLogs.json') {
+      fileStore.setFaultInjector(null);
+      throw new Error('injected atomic audit failure');
+    }
+  });
+  const originalConsoleError = console.error;
+  let failedAtomicStart;
+  console.error = () => {};
+  try {
+    failedAtomicStart = await request(
+      baseUrl,
+      timerPath('table_demo_01', 'start'),
+      {
+        method: 'POST',
+        token: staff.token,
+        body: { durationMinutes: 5 },
+        headers: { 'Idempotency-Key': 'atomic-start-rollback-01' },
+      },
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.equal(failedAtomicStart.status, 500);
+  assert.deepEqual(await fileStore.readJSON('activeTimers.json'), []);
+  assert.deepEqual(
+    await fileStore.readJSON('auditLogs.json'),
+    auditsBeforeRollback,
+  );
+  assert.equal(
+    (await fileStore.readJSON('idempotencyKeys.json')).some(
+      (entry) => entry.key === 'atomic-start-rollback-01',
+    ),
+    false,
+  );
+
+  const successfulRetry = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'start'),
+    {
+      method: 'POST',
+      token: staff.token,
+      body: { durationMinutes: 5 },
+      headers: { 'Idempotency-Key': 'atomic-start-rollback-01' },
+    },
+  );
+  assert.equal(successfulRetry.status, 201);
+  await request(baseUrl, timerPath('table_demo_01', 'reset'), {
+    method: 'POST',
+    token: staff.token,
+  });
 });

@@ -1,11 +1,12 @@
+import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './src/app.js';
 import { config, validateRuntimeConfig } from './src/config.js';
 import { checkDataConsistency } from './src/storage/consistencyChecker.js';
 import { initializeDemoData } from './src/storage/dataInitializer.js';
 import { fileStore } from './src/storage/fileStore.js';
-import { instanceLock } from './src/storage/instanceLock.js';
 import { runMigrations } from './src/storage/migrations.js';
+import { realtimeHub } from './src/realtime/realtimeHub.js';
 
 let httpServer = null;
 let shutdownPromise = null;
@@ -17,7 +18,6 @@ export async function startServer() {
 
   try {
     validateRuntimeConfig();
-    await instanceLock.acquire();
     await fileStore.initStorage();
     await fileStore.recoverTransactions();
     await runMigrations();
@@ -25,9 +25,11 @@ export async function startServer() {
     await checkDataConsistency();
 
     const app = createApp();
+    const candidateServer = http.createServer(app);
+    realtimeHub.attach(candidateServer);
     httpServer = await new Promise((resolve, reject) => {
-      const server = app.listen(config.port, () => resolve(server));
-      server.once('error', reject);
+      candidateServer.listen(config.port, () => resolve(candidateServer));
+      candidateServer.once('error', reject);
     });
 
     const address = httpServer.address();
@@ -35,7 +37,7 @@ export async function startServer() {
     console.log(`PotXpress API 已启动：http://127.0.0.1:${port}`);
     return httpServer;
   } catch (error) {
-    await instanceLock.release().catch(() => {});
+    await realtimeHub.close().catch(() => {});
     throw error;
   }
 }
@@ -49,6 +51,7 @@ export async function stopServer() {
     if (httpServer) {
       const serverToClose = httpServer;
       httpServer = null;
+      await realtimeHub.close();
       await new Promise((resolve, reject) => {
         serverToClose.close((error) => {
           if (error) {
@@ -61,7 +64,6 @@ export async function stopServer() {
     }
 
     await fileStore.drain();
-    await instanceLock.release();
     shutdownPromise = null;
   })();
 

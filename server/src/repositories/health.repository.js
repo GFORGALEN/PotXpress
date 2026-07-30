@@ -1,8 +1,12 @@
-import { fileStore } from '../storage/fileStore.js';
+import { checkDatabaseHealth } from '../storage/database.js';
 
 class HealthRepository {
-  getStorageStatus() {
-    return fileStore.getStatus();
+  async getStorageStatus() {
+    try {
+      return await checkDatabaseHealth();
+    } catch (error) {
+      return 'fatal';
+    }
   }
 }
 

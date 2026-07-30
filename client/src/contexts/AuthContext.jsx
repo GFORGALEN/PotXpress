@@ -6,15 +6,17 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import {
   login as loginRequest,
   logout as logoutRequest,
   me,
 } from '../api/auth.js';
 import {
+  getStoredToken,
+  removeStoredToken,
   resetUnauthorizedSignal,
-  TOKEN_STORAGE_KEY,
+  storeToken,
   UNAUTHORIZED_EVENT,
 } from '../api/client.js';
 
@@ -23,13 +25,13 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [token, setToken] = useState(
-    () => localStorage.getItem(TOKEN_STORAGE_KEY),
+    () => getStoredToken(),
   );
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(Boolean(token));
 
   const clearSession = useCallback(() => {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    removeStoredToken();
     setToken(null);
     setUser(null);
   }, []);
@@ -81,7 +83,7 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (username, password) => {
     const result = await loginRequest(username, password);
-    localStorage.setItem(TOKEN_STORAGE_KEY, result.token);
+    storeToken(result.token);
     resetUnauthorizedSignal();
     setToken(result.token);
     setUser(result.user);

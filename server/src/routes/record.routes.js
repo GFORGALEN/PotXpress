@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import {
   exportRecordsController,
+  deleteAuditLogController,
+  deleteAuditLogsController,
+  deleteRecordController,
+  deleteRecordsController,
   getRecordController,
   listAuditLogsController,
   listRecordsController,
@@ -12,11 +16,13 @@ import { validate } from '../middleware/validation.middleware.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
   emptyQuerySchema,
+  idSchema,
   storeParamsSchema,
   storeRecordParamsSchema,
 } from '../validators/common.validator.js';
 import {
   auditLogQuerySchema,
+  batchDeleteBodySchema,
   exportRecordQuerySchema,
   recordQuerySchema,
 } from '../validators/record.validator.js';
@@ -44,6 +50,29 @@ recordRouter.get(
   asyncHandler(storeAccess),
   asyncHandler(exportRecordsController),
 );
+recordRouter.post(
+  '/batch-delete',
+  asyncHandler(authenticate),
+  requireRole('system_admin'),
+  validate({
+    params: storeParamsSchema,
+    body: batchDeleteBodySchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteRecordsController),
+);
+recordRouter.delete(
+  '/:recordId',
+  asyncHandler(authenticate),
+  requireRole('system_admin'),
+  validate({
+    params: storeRecordParamsSchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteRecordController),
+);
 recordRouter.get(
   '/:recordId',
   asyncHandler(authenticate),
@@ -65,4 +94,27 @@ auditLogRouter.get(
   }),
   asyncHandler(storeAccess),
   asyncHandler(listAuditLogsController),
+);
+auditLogRouter.post(
+  '/batch-delete',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    body: batchDeleteBodySchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteAuditLogsController),
+);
+auditLogRouter.delete(
+  '/:logId',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema.extend({ logId: idSchema }),
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(deleteAuditLogController),
 );

@@ -13,6 +13,13 @@ const CANVAS_FIELDS = [
   'maxTableHeight',
 ];
 
+const EDITABLE_CANVAS_FIELDS = [
+  'backgroundColor',
+  'gridEnabled',
+  'snapToGrid',
+  'gridSize',
+];
+
 export function roundRatio(value) {
   return Number(Math.max(0, Math.min(1, value)).toFixed(6));
 }
@@ -31,7 +38,23 @@ export function normalizeTableLayout(layout) {
   };
 }
 
-export function serializeLayout(canvas, layoutMap) {
+export function normalizeDecoration(item) {
+  const widthRatio = Math.max(0.001, roundRatio(item.widthRatio));
+  const heightRatio = Math.max(0.001, roundRatio(item.heightRatio));
+  return {
+    ...item,
+    xRatio: roundRatio(Math.min(item.xRatio, 1 - widthRatio)),
+    yRatio: roundRatio(Math.min(item.yRatio, 1 - heightRatio)),
+    widthRatio,
+    heightRatio,
+    rotation: [0, 90, 180, 270].includes(item.rotation)
+      ? item.rotation
+      : 0,
+    zIndex: Math.max(0, Math.round(item.zIndex ?? 1)),
+  };
+}
+
+export function serializeLayout(canvas, layoutMap, decorations = []) {
   const normalizedCanvas = Object.fromEntries(
     CANVAS_FIELDS.map((field) => [field, canvas[field] ?? null]),
   );
@@ -41,7 +64,33 @@ export function serializeLayout(canvas, layoutMap) {
       tableId,
       layout: normalizeTableLayout(layout),
     }));
-  return JSON.stringify({ canvas: normalizedCanvas, tables });
+  return JSON.stringify({
+    canvas: normalizedCanvas,
+    tables,
+    decorations: [...decorations].map(normalizeDecoration).sort((left, right) => (
+      left.id.localeCompare(right.id)
+    )),
+  });
+}
+
+export function buildLayoutSavePayload({
+  layoutVersion,
+  canvas,
+  tables,
+  layoutMap,
+  decorations = [],
+}) {
+  return {
+    layoutVersion,
+    canvas: Object.fromEntries(
+      EDITABLE_CANVAS_FIELDS.map((field) => [field, canvas[field]]),
+    ),
+    decorations: decorations.map(normalizeDecoration),
+    tables: tables.map((table) => ({
+      tableId: table.tableId,
+      layout: normalizeTableLayout(layoutMap.get(table.tableId)),
+    })),
+  };
 }
 
 export function findSignificantOverlaps(tables, layoutMap) {

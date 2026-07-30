@@ -65,10 +65,13 @@ export async function checkDataConsistency() {
   const stores = data['stores.json'];
   const users = data['users.json'];
   const tables = data['tables.json'];
+  const tableGroups = data['tableGroups.json'];
   const timers = data['activeTimers.json'];
   const records = data['records.json'];
   const settings = data['settings.json'];
   const layouts = data['layouts.json'];
+  const idempotencyKeys = data['idempotencyKeys.json'];
+  const realtimeEvents = data['realtimeEvents.json'];
   const storeById = new Map(stores.map((store) => [store.id, store]));
   const tableById = new Map(tables.map((table) => [table.id, table]));
 
@@ -77,12 +80,25 @@ export async function checkDataConsistency() {
   assertUnique(users, (user) => user.id, '用户 id');
   assertUnique(users, (user) => normalizeUsername(user.username), '用户名');
   assertUnique(tables, (table) => table.id, '桌台 id');
+  assertUnique(tableGroups, (group) => group.id, '拼桌组 id');
   assertUnique(timers, (timer) => timer.id, '计时器 id');
   assertUnique(timers, (timer) => timer.tableId, '活动计时桌台');
   assertUnique(records, (record) => record.id, '记录 id');
   assertUnique(records, (record) => record.timerId, '记录 timerId');
   assertUnique(settings, (entry) => entry.storeId, '门店设置');
   assertUnique(layouts, (entry) => entry.storeId, '门店布局');
+  assertUnique(idempotencyKeys, (entry) => entry.id, '幂等记录 id');
+  assertUnique(
+    idempotencyKeys,
+    (entry) => `${entry.userId}:${entry.key}`,
+    '用户幂等键',
+  );
+  assertUnique(realtimeEvents, (entry) => entry.id, '实时事件 id');
+  assertUnique(
+    realtimeEvents,
+    (entry) => `${entry.storeId}:${entry.version}`,
+    '门店实时事件版本',
+  );
 
   for (const store of stores) {
     assertValidTimezone(store.timezone, store.id);
@@ -152,11 +168,35 @@ export async function checkDataConsistency() {
     const width = layout.widthRatio * 1600;
     const height = layout.heightRatio * 900;
 
-    if (width < 80 || width > 400 || height < 60 || height > 300) {
+    const epsilon = 0.01;
+    if (
+      width < 80 - epsilon
+      || width > 400 + epsilon
+      || height < 60 - epsilon
+      || height > 300 + epsilon
+    ) {
       throw new Error(`桌台 ${table.id} 布局尺寸超出允许范围`);
     }
   }
 
+  const groupedTableIds = new Set();
+  for (const group of tableGroups.filter((entry) => entry.enabled)) {
+    if (!storeById.has(group.storeId)) {
+      throw new Error(`拼桌组 ${group.id} 引用了不存在的门店`);
+    }
+    for (const tableId of group.tableIds) {
+      const table = tableById.get(tableId);
+      if (!table || table.storeId !== group.storeId || !table.enabled) {
+        throw new Error(`拼桌组 ${group.id} 的桌台引用无效`);
+      }
+      if (groupedTableIds.has(tableId)) {
+        throw new Error(`桌台 ${tableId} 同时属于多个启用拼桌组`);
+      }
+      groupedTableIds.add(tableId);
+    }
+  }
+
+  const timedTableIds = new Set();
   for (const timer of timers) {
     const table = tableById.get(timer.tableId);
 
@@ -166,6 +206,29 @@ export async function checkDataConsistency() {
 
     if (!table.enabled) {
       throw new Error(`计时器 ${timer.id} 不能绑定 disabled 桌台`);
+    }
+
+    for (const memberTableId of timer.memberTableIds) {
+      const member = tableById.get(memberTableId);
+      if (!member || member.storeId !== timer.storeId || !member.enabled) {
+        throw new Error(`计时器 ${timer.id} 的成员桌台引用无效`);
+      }
+      if (timedTableIds.has(memberTableId)) {
+        throw new Error(`桌台 ${memberTableId} 同时存在多个活动计时`);
+      }
+      timedTableIds.add(memberTableId);
+    }
+
+    if (
+      timer.targetType === 'group'
+      && !tableGroups.some((group) => (
+        group.id === timer.groupId
+        && group.enabled
+        && group.tableIds.length === timer.memberTableIds.length
+        && group.tableIds.every((id) => timer.memberTableIds.includes(id))
+      ))
+    ) {
+      throw new Error(`计时器 ${timer.id} 的拼桌组引用无效`);
     }
 
     if (
@@ -199,6 +262,12 @@ export async function checkDataConsistency() {
   for (const entry of layouts) {
     if (!storeById.has(entry.storeId)) {
       throw new Error(`layouts 引用了不存在的门店 ${entry.storeId}`);
+    }
+  }
+
+  for (const event of realtimeEvents) {
+    if (!storeById.has(event.storeId)) {
+      throw new Error(`实时事件 ${event.id} 引用了不存在的门店 ${event.storeId}`);
     }
   }
 }

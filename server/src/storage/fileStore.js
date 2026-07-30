@@ -9,11 +9,14 @@ export const ARRAY_DATA_FILES = Object.freeze([
   'stores.json',
   'users.json',
   'tables.json',
+  'tableGroups.json',
   'activeTimers.json',
   'records.json',
   'settings.json',
   'auditLogs.json',
   'layouts.json',
+  'idempotencyKeys.json',
+  'realtimeEvents.json',
 ]);
 
 export const METADATA_FILE = 'metadata.json';
@@ -576,4 +579,4 @@ export class FileStore {
   }
 }
 
-export const fileStore = new FileStore();
+export { databaseStore as fileStore } from './databaseStore.js';

@@ -15,7 +15,10 @@ export function TableFilter({
   status,
   search,
   counts,
+  areas = [],
+  area = 'all',
   onStatusChange,
+  onAreaChange,
   onSearchChange,
 }) {
   return (
@@ -42,7 +45,19 @@ export function TableFilter({
         ))}
       </div>
 
-      <label className="relative block w-full lg:w-64">
+      <div className="flex w-full gap-2 lg:w-auto">
+      {areas.length > 1 ? (
+        <select
+          value={area}
+          onChange={(event) => onAreaChange(event.target.value)}
+          className="min-h-11 rounded-2xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600"
+          aria-label="按区域筛选桌台"
+        >
+          <option value="all">全部区域</option>
+          {areas.map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+      ) : null}
+      <label className="relative block min-w-0 flex-1 lg:w-64">
         <span className="sr-only">搜索桌台名称</span>
         <Search
           className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400"
@@ -56,6 +71,7 @@ export function TableFilter({
           className="w-full rounded-2xl border border-stone-200 bg-white py-2.5 pl-9 pr-3 text-sm text-ink-900 outline-none transition placeholder:text-stone-400 focus:border-ember-400 focus:ring-4 focus:ring-ember-100"
         />
       </label>
+      </div>
     </div>
   );
 }

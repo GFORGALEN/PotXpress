@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  changePasswordController,
   loginController,
   logoutController,
   meController,
@@ -10,6 +11,7 @@ import { validate } from '../middleware/validation.middleware.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { loginBodySchema } from '../validators/auth.validator.js';
 import { emptyQuerySchema } from '../validators/common.validator.js';
+import { changePasswordBodySchema } from '../validators/user.validator.js';
 
 export const authRouter = Router();
 
@@ -30,4 +32,13 @@ authRouter.post(
   asyncHandler(authenticate),
   validate({ query: emptyQuerySchema }),
   asyncHandler(logoutController),
+);
+authRouter.patch(
+  '/password',
+  asyncHandler(authenticate),
+  validate({
+    body: changePasswordBodySchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(changePasswordController),
 );

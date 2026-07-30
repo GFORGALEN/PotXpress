@@ -15,7 +15,7 @@ import {
   resetTimer,
   resumeTimer,
   startTimer,
-} from '../../api/timers.js';
+} from '../../api/timers.ts';
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';
 import {
@@ -132,7 +132,9 @@ export function TableActionDialog({
                 </span>
               </div>
               <p className="mt-1 text-sm text-stone-500">
-                桌台计时操作
+                {table.groupName
+                  ? `拼桌统一计时 · ${table.groupName}`
+                  : '桌台计时操作'}
               </p>
             </div>
             <button

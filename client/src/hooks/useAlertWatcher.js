@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { acknowledgeTimerAlert } from '../api/timers.js';
+import { acknowledgeTimerAlert } from '../api/timers.ts';
 import { useSound } from '../contexts/SoundContext.jsx';
 import { useStore } from '../contexts/StoreContext.jsx';
 import { useToast } from '../contexts/ToastContext.jsx';
 
 const WARNING_STORAGE_PREFIX = 'potxpress_warning_seen_';
 const MAX_WARNING_IDS = 500;
+
+function uniqueTimerTables(tables) {
+  const seen = new Set();
+  return tables.filter((table) => {
+    const key = table.timerId ?? table.tableId;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function readWarningIds(storeId) {
   try {
@@ -33,11 +43,15 @@ export function useAlertWatcher(tables, refreshTimers) {
   const [overtimeDialogOpen, setOvertimeDialogOpen] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const warningTables = useMemo(
-    () => tables.filter((table) => table.status === 'warning'),
+    () => uniqueTimerTables(
+      tables.filter((table) => table.status === 'warning'),
+    ),
     [tables],
   );
   const overtimeTables = useMemo(
-    () => tables.filter((table) => table.status === 'overtime'),
+    () => uniqueTimerTables(
+      tables.filter((table) => table.status === 'overtime'),
+    ),
     [tables],
   );
   const unacknowledgedOvertime = useMemo(

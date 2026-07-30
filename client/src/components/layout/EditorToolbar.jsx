@@ -1,8 +1,17 @@
 import { useMemo, useState } from 'react';
 import {
+  BrickWall,
+  DoorOpen,
   Grid3X3,
+  Map,
+  Pencil,
+  Redo2,
+  RotateCw,
   RotateCcw,
   Save,
+  Store,
+  Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
@@ -16,7 +25,16 @@ export function EditorToolbar() {
     tables,
     isDirty,
     saving,
+    selectedDecorationId,
+    draftDecorations,
     updateCanvas,
+    addDecoration,
+    deleteSelectedDecoration,
+    updateDecoration,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     exitEdit,
     saveLayout,
     loadLatest,
@@ -54,7 +72,92 @@ export function EditorToolbar() {
               {isDirty ? ' 当前有未保存修改。' : ' 当前布局未修改。'}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible xl:pb-0">
+            {[
+              ['wall', '墙体', BrickWall],
+              ['entrance', '入口', DoorOpen],
+              ['cashier', '收银台', Store],
+              ['area', '区域', Map],
+            ].map(([type, label, Icon]) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => addDecoration(type)}
+                disabled={saving}
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900 disabled:opacity-50"
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={undo}
+              disabled={saving || !canUndo}
+              title="撤回"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600 disabled:opacity-40"
+            >
+              <Undo2 size={16} />撤回
+            </button>
+            <button
+              type="button"
+              onClick={redo}
+              disabled={saving || !canRedo}
+              title="重做"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600 disabled:opacity-40"
+            >
+              <Redo2 size={16} />重做
+            </button>
+            {selectedDecorationId ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = draftDecorations.find(
+                      (entry) => entry.id === selectedDecorationId,
+                    );
+                    if (item) {
+                      updateDecoration(item.id, {
+                        rotation: ((item.rotation ?? 0) + 90) % 360,
+                      });
+                    }
+                  }}
+                  disabled={saving}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-700 disabled:opacity-50"
+                >
+                  <RotateCw size={16} />旋转 90°
+                </button>
+                {draftDecorations.find((item) => (
+                  item.id === selectedDecorationId
+                  && item.type !== 'wall'
+                )) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = draftDecorations.find(
+                        (entry) => entry.id === selectedDecorationId,
+                      );
+                      const label = window.prompt('元素名称', item?.label);
+                      if (label?.trim()) {
+                        updateDecoration(item.id, { label: label.trim() });
+                      }
+                    }}
+                    disabled={saving}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-700 disabled:opacity-50"
+                  >
+                    <Pencil size={16} />命名
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={deleteSelectedDecoration}
+                  disabled={saving}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-200 bg-white px-3 text-sm font-bold text-red-700 disabled:opacity-50"
+                >
+                  <Trash2 size={16} />删除元素
+                </button>
+              </>
+            ) : null}
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
               <Grid3X3 size={16} />
               网格

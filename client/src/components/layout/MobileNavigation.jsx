@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { navigationForRole } from '../../utils/navigation.js';
@@ -9,7 +9,7 @@ export function MobileBottomNavigation() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 grid border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_-24px_rgba(16,24,21,0.45)] backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 grid border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_-24px_rgba(16,24,21,0.45)] backdrop-blur xl:hidden"
       style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
       aria-label="移动端导航"
     >
@@ -46,7 +46,7 @@ export function MobileDrawer({ open, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 lg:hidden">
+    <div className="fixed inset-0 z-50 xl:hidden">
       <button
         type="button"
         className="absolute inset-0 bg-ink-950/55 backdrop-blur-sm"

@@ -26,9 +26,27 @@ const canvasChangesSchema = z.object({
   gridSize: z.number().int().min(5).max(100).optional(),
 }).strict();
 
+const decorationSchema = z.object({
+  id: z.string().min(1).max(100),
+  type: z.enum(['wall', 'entrance', 'cashier', 'area']),
+  label: z.string().trim().min(1).max(50),
+  xRatio: ratioSchema,
+  yRatio: ratioSchema,
+  widthRatio: ratioSchema.refine((value) => value > 0, '宽度必须大于 0'),
+  heightRatio: ratioSchema.refine((value) => value > 0, '高度必须大于 0'),
+  rotation: z.union([
+    z.literal(0),
+    z.literal(90),
+    z.literal(180),
+    z.literal(270),
+  ]).default(0),
+  zIndex: z.number().int().nonnegative(),
+}).strict();
+
 export const saveLayoutBodySchema = z.object({
   layoutVersion: z.number().int().min(1),
   canvas: canvasChangesSchema,
+  decorations: z.array(decorationSchema).max(100).default([]),
   tables: z.array(
     z.object({
       tableId: z.string().min(1).max(100),

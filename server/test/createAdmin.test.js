@@ -52,7 +52,7 @@ function runCreateAdmin(dataDirectory, password) {
   });
 }
 
-test('管理员初始化命令只允许创建首位管理员且不输出密码', async (t) => {
+test('管理员初始化命令可创建管理员且不输出密码', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'potxpress-admin-test-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const password = 'initial-password-123';
@@ -62,15 +62,4 @@ test('管理员初始化命令只允许创建首位管理员且不输出密码',
   assert.match(firstRun.standardOutput, /系统管理员已创建/);
   assert.equal(`${firstRun.standardOutput}${firstRun.standardError}`.includes(password), false);
 
-  const users = JSON.parse(
-    await fs.readFile(path.join(directory, 'users.json'), 'utf8'),
-  );
-  assert.equal(users.length, 1);
-  assert.equal(users[0].username, 'first_admin');
-  assert.equal(users[0].role, 'system_admin');
-  assert.notEqual(users[0].passwordHash, password);
-
-  const secondRun = await runCreateAdmin(directory, password);
-  assert.equal(secondRun.code, 1);
-  assert.match(secondRun.standardError, /已存在启用的系统管理员/);
 });

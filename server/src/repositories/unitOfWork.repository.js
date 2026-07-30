@@ -4,11 +4,14 @@ const REPOSITORY_DEFINITIONS = Object.freeze({
   stores: { filename: 'stores.json', idField: 'id' },
   users: { filename: 'users.json', idField: 'id' },
   tables: { filename: 'tables.json', idField: 'id' },
+  tableGroups: { filename: 'tableGroups.json', idField: 'id' },
   activeTimers: { filename: 'activeTimers.json', idField: 'id' },
   records: { filename: 'records.json', idField: 'id' },
   settings: { filename: 'settings.json', idField: 'storeId' },
   auditLogs: { filename: 'auditLogs.json', idField: 'id' },
   layouts: { filename: 'layouts.json', idField: 'storeId' },
+  idempotencyKeys: { filename: 'idempotencyKeys.json', idField: 'id' },
+  realtimeEvents: { filename: 'realtimeEvents.json', idField: 'id' },
 });
 
 class TransactionRepository {

@@ -28,6 +28,8 @@ export const TableNode = memo(function TableNode({
   onTableClick,
   embedded = false,
   selected = false,
+  shape = 'rectangle',
+  groupName = null,
 }) {
   const isIdle = status === 'idle';
   const duration = status === 'overtime'
@@ -39,11 +41,14 @@ export const TableNode = memo(function TableNode({
       type="button"
       data-table-node={tableId}
       className={clsx(
-        'table-node flex select-none flex-col justify-between overflow-hidden rounded-2xl p-[clamp(0.25rem,1.2vw,0.75rem)] text-left outline-none transition-[filter,box-shadow] focus-visible:ring-4 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-900',
+        'table-node flex select-none flex-col justify-between overflow-hidden p-[clamp(0.25rem,1.2vw,0.75rem)] text-left outline-none transition-[filter,box-shadow] focus-visible:ring-4 focus-visible:ring-white/90 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-900',
+        shape === 'round' ? 'rounded-full' : 'rounded-2xl',
+        shape === 'booth' && 'border-[3px] border-double',
         embedded ? 'h-full w-full' : 'absolute',
         STATUS_STYLES[status],
         highlighted && 'ring-4 ring-ember-300 ring-offset-2',
         selected && 'ring-4 ring-sky-400 ring-offset-2 ring-offset-white',
+        groupName && 'outline outline-2 outline-dashed outline-violet-500 outline-offset-2',
       )}
       style={embedded ? {
         fontSize: 'clamp(12px, 1.1vw, 16px)',
@@ -68,6 +73,11 @@ export const TableNode = memo(function TableNode({
       <strong className="w-full shrink-0 truncate text-xs font-black leading-4 tracking-tight">
         {name}
       </strong>
+      {groupName ? (
+        <span className="max-w-full truncate rounded-full bg-violet-950/20 px-1.5 py-0.5 text-[10px] font-black">
+          {groupName}
+        </span>
+      ) : null}
 
       {isIdle ? (
         <span className="w-fit shrink-0 rounded-full bg-white/60 px-1 py-0.5 text-xs font-bold">
