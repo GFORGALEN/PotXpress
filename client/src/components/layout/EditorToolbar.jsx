@@ -16,7 +16,11 @@ import {
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
 import { useLayoutEditor } from '../../contexts/LayoutEditorContext.jsx';
-import { findSignificantOverlaps } from '../../utils/layoutEditor.js';
+import {
+  buildCanvasResizePatch,
+  CANVAS_SIZE_PRESETS,
+  findSignificantOverlaps,
+} from '../../utils/layoutEditor.js';
 
 export function EditorToolbar() {
   const {
@@ -158,6 +162,45 @@ export function EditorToolbar() {
                 </button>
               </>
             ) : null}
+            <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
+              画布
+              <select
+                value={`${draftCanvas.virtualWidth}x${draftCanvas.virtualHeight}`}
+                onChange={(event) => {
+                  const preset = CANVAS_SIZE_PRESETS.find(
+                    (item) => (
+                      `${item.virtualWidth}x${item.virtualHeight}`
+                      === event.target.value
+                    ),
+                  );
+                  if (preset) {
+                    updateCanvas(buildCanvasResizePatch(draftCanvas, preset));
+                  }
+                }}
+                disabled={saving}
+                className="rounded-lg border border-sky-100 bg-white px-1 py-0.5 text-xs font-bold text-sky-900"
+                aria-label="画布尺寸"
+              >
+                {CANVAS_SIZE_PRESETS.map((preset) => (
+                  <option
+                    key={`${preset.virtualWidth}x${preset.virtualHeight}`}
+                    value={`${preset.virtualWidth}x${preset.virtualHeight}`}
+                  >
+                    {preset.label}
+                  </option>
+                ))}
+                {!CANVAS_SIZE_PRESETS.some((item) => (
+                  item.virtualWidth === draftCanvas.virtualWidth
+                  && item.virtualHeight === draftCanvas.virtualHeight
+                )) ? (
+                  <option
+                    value={`${draftCanvas.virtualWidth}x${draftCanvas.virtualHeight}`}
+                  >
+                    {`自定义 ${draftCanvas.virtualWidth}×${draftCanvas.virtualHeight}`}
+                  </option>
+                ) : null}
+              </select>
+            </label>
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
               <Grid3X3 size={16} />
               网格

@@ -167,6 +167,18 @@ export async function saveLayout(storeId, input, user) {
         ...currentLayout.canvas,
         ...input.canvas,
       };
+
+      if (
+        nextCanvas.minTableWidth > nextCanvas.maxTableWidth
+        || nextCanvas.minTableHeight > nextCanvas.maxTableHeight
+      ) {
+        throw new AppError(
+          400,
+          'VALIDATION_ERROR',
+          '画布桌台尺寸约束不合法：最小值不能大于最大值',
+        );
+      }
+
       validateSubmittedTables(input.tables, storeTables, nextCanvas);
       const submittedById = new Map(
         input.tables.map((item) => [item.tableId, item.layout]),

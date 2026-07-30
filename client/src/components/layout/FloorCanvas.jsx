@@ -97,6 +97,10 @@ export function FloorCanvas({
   const pendingScaleRef = useRef(1);
   const scaleRef = useRef(1);
   const [transformScale, setTransformScale] = useState(1);
+  const [draggingTableId, setDraggingTableId] = useState(null);
+  const [draggingDecorationId, setDraggingDecorationId] = useState(null);
+  const [rndKeyVersion, setRndKeyVersion] = useState(0);
+  const rndRefs = useRef(new Map());
   const {
     fitScale,
     width,
@@ -152,6 +156,7 @@ export function FloorCanvas({
     if (zoomUpdateTimerRef.current) {
       clearTimeout(zoomUpdateTimerRef.current);
     }
+    rndRefs.current.clear();
   }, []);
 
   const queueScaleDisplayUpdate = (scale) => {
@@ -171,6 +176,34 @@ export function FloorCanvas({
         setTransformScale(pendingScaleRef.current);
       }, 200 - elapsed);
     }
+  };
+
+  // 只有真正产生位移/尺寸变化时才更新 ratio，避免纯点击因取整导致漂移。
+  const hasMoved = (nextX, nextY, currentX, currentY) => (
+    Math.abs(nextX - currentX) > 0.00001
+    || Math.abs(nextY - currentY) > 0.00001
+  );
+  const hasResized = (nextW, nextH, currentW, currentH) => (
+    Math.abs(nextW - currentW) > 0.00001
+    || Math.abs(nextH - currentH) > 0.00001
+  );
+
+  const refreshRndOffset = (id) => {
+    const rnd = rndRefs.current.get(id);
+    if (rnd && typeof rnd.updateOffsetFromParent === 'function') {
+      rnd.updateOffsetFromParent();
+    }
+  };
+
+  const refreshAllRndOffsets = () => {
+    rndRefs.current.forEach((rnd) => {
+      if (rnd && typeof rnd.updateOffsetFromParent === 'function') {
+        rnd.updateOffsetFromParent();
+        if (typeof rnd.forceUpdate === 'function') {
+          rnd.forceUpdate();
+        }
+      }
+    });
   };
 
   return (
@@ -203,10 +236,18 @@ export function FloorCanvas({
           ],
         }}
         pinch={{ excluded: ['table-node', 'canvas-control', 'potx-decoration-node'] }}
-        wheel={{ step: 0.12, excluded: ['canvas-control'] }}
+        // smooth 模式下缩放步长 = step × |deltaY|。Windows 滚轮一格 deltaY≈100，
+        // step 必须足够小，否则一格滚轮直接顶到 maxScale。
+        wheel={{ step: 0.0015, excluded: ['canvas-control'] }}
         onInit={(ref) => {
           scaleRef.current = ref.state.scale;
           setTransformScale(ref.state.scale);
+          // centerOnInit 会在当前回调之后才真正完成居中，
+          // 导致 Rnd 在挂载时计算的 offsetFromParent 过时。
+          // 等一帧后强制 Rnd 重新挂载，重新计算 offset。
+          requestAnimationFrame(() => {
+            setRndKeyVersion((v) => v + 1);
+          });
         }}
         onTransformed={(_, state) => {
           if (Math.abs(scaleRef.current - state.scale) < 0.0001) {
@@ -219,6 +260,10 @@ export function FloorCanvas({
         onZoomStop={(ref) => {
           scaleRef.current = ref.state.scale;
           setTransformScale(ref.state.scale);
+          requestAnimationFrame(refreshAllRndOffsets);
+        }}
+        onPanningStop={() => {
+          requestAnimationFrame(refreshAllRndOffsets);
         }}
       >
         {({
@@ -302,36 +347,63 @@ export function FloorCanvas({
                     : 1;
                   return (
                     <Rnd
-                      key={item.id}
+                      key={`${item.id}:${rndKeyVersion}`}
+                      ref={(instance) => {
+                        if (instance) {
+                          rndRefs.current.set(item.id, instance);
+                        } else {
+                          rndRefs.current.delete(item.id);
+                        }
+                      }}
                       className="potx-decoration-node"
                       bounds="parent"
                       position={{
-                        x: item.xRatio * width,
-                        y: item.yRatio * height,
+                        x: Math.round(item.xRatio * width),
+                        y: Math.round(item.yRatio * height),
                       }}
                       size={{
-                        width: item.widthRatio * width,
-                        height: item.heightRatio * height,
+                        width: Math.round(item.widthRatio * width),
+                        height: Math.round(item.heightRatio * height),
                       }}
-                      scale={transformScale}
+                      scale={scaleRef.current}
                       dragGrid={[gridStep, gridStep]}
                       resizeGrid={[gridStep, gridStep]}
                       minWidth={item.type === 'wall' ? 30 : 70}
                       minHeight={item.type === 'wall' ? 8 : 35}
-                      style={{ zIndex: item.zIndex }}
-                      onMouseDown={() => onSelectDecoration?.(item.id)}
-                      onDragStop={(_, data) => onUpdateDecoration?.(item.id, {
-                        xRatio: data.x / width,
-                        yRatio: data.y / height,
-                      })}
-                      onResizeStop={(_, __, element, ___, position) => (
-                        onUpdateDecoration?.(item.id, {
-                          xRatio: position.x / width,
-                          yRatio: position.y / height,
-                          widthRatio: element.offsetWidth / width,
-                          heightRatio: element.offsetHeight / height,
-                        })
-                      )}
+                      style={{ zIndex: item.zIndex + (draggingDecorationId === item.id ? 10000 : 0) }}
+                      onMouseDown={() => {
+                        refreshRndOffset(item.id);
+                        onSelectDecoration?.(item.id);
+                      }}
+                      onDragStart={() => setDraggingDecorationId(item.id)}
+                      onDragStop={(_, data) => {
+                        setDraggingDecorationId(null);
+                        const nextX = data.x / width;
+                        const nextY = data.y / height;
+                        if (hasMoved(nextX, nextY, item.xRatio, item.yRatio)) {
+                          onUpdateDecoration?.(item.id, {
+                            xRatio: nextX,
+                            yRatio: nextY,
+                          });
+                        }
+                      }}
+                      onResizeStop={(_, __, element, ___, position) => {
+                        const nextX = position.x / width;
+                        const nextY = position.y / height;
+                        const nextW = element.offsetWidth / width;
+                        const nextH = element.offsetHeight / height;
+                        if (
+                          hasMoved(nextX, nextY, item.xRatio, item.yRatio)
+                          || hasResized(nextW, nextH, item.widthRatio, item.heightRatio)
+                        ) {
+                          onUpdateDecoration?.(item.id, {
+                            xRatio: nextX,
+                            yRatio: nextY,
+                            widthRatio: nextW,
+                            heightRatio: nextH,
+                          });
+                        }
+                      }}
                     >
                       {content}
                     </Rnd>
@@ -377,56 +449,85 @@ export function FloorCanvas({
                     ? Math.max(1, canvas.gridSize * fitScale)
                     : 1;
                   const position = {
-                    x: table.layout.xRatio * width,
-                    y: table.layout.yRatio * height,
+                    x: Math.round(table.layout.xRatio * width),
+                    y: Math.round(table.layout.yRatio * height),
                   };
                   const size = {
-                    width: table.layout.widthRatio * width,
-                    height: table.layout.heightRatio * height,
+                    width: Math.round(table.layout.widthRatio * width),
+                    height: Math.round(table.layout.heightRatio * height),
                   };
 
                   return (
                     <Rnd
-                      key={table.tableId}
+                      key={`${table.tableId}:${rndKeyVersion}`}
+                      ref={(instance) => {
+                        if (instance) {
+                          rndRefs.current.set(table.tableId, instance);
+                        } else {
+                          rndRefs.current.delete(table.tableId);
+                        }
+                      }}
                       className="potx-table-node"
                       bounds="parent"
                       position={position}
                       size={size}
-                      scale={transformScale}
+                      scale={scaleRef.current}
                       dragGrid={[gridStep, gridStep]}
                       resizeGrid={[gridStep, gridStep]}
-                      minWidth={canvas.minTableWidth * fitScale}
-                      minHeight={canvas.minTableHeight * fitScale}
-                      maxWidth={canvas.maxTableWidth * fitScale}
-                      maxHeight={canvas.maxTableHeight * fitScale}
+                      minWidth={Math.round(canvas.minTableWidth * fitScale)}
+                      minHeight={Math.round(canvas.minTableHeight * fitScale)}
+                      maxWidth={Math.round(canvas.maxTableWidth * fitScale)}
+                      maxHeight={Math.round(canvas.maxTableHeight * fitScale)}
                       lockAspectRatio={
                         ['round', 'square'].includes(table.shape) ? 1 : false
                       }
-                      style={{ zIndex: table.layout.zIndex }}
-                      onDragStart={() => {
+                      style={{ zIndex: table.layout.zIndex + (draggingTableId === table.tableId ? 10000 : 0) }}
+                      onMouseDown={() => {
+                        refreshRndOffset(table.tableId);
                         onSelectTable?.(table.tableId);
-                        onUpdateTableLayout?.(table.tableId, {
-                          ...table.layout,
-                          bringToFront: true,
-                        });
+                      }}
+                      onDragStart={() => {
+                        refreshRndOffset(table.tableId);
+                        setDraggingTableId(table.tableId);
                       }}
                       onDragStop={(_, data) => {
-                        onUpdateTableLayout?.(table.tableId, {
-                          ...table.layout,
-                          xRatio: data.x / width,
-                          yRatio: data.y / height,
-                        });
+                        setDraggingTableId(null);
+                        const nextX = data.x / width;
+                        const nextY = data.y / height;
+                        if (hasMoved(nextX, nextY, table.layout.xRatio, table.layout.yRatio)) {
+                          onUpdateTableLayout?.(table.tableId, {
+                            ...table.layout,
+                            xRatio: nextX,
+                            yRatio: nextY,
+                            bringToFront: true,
+                          });
+                        } else {
+                          // 纯点击：只把 zIndex 提到最前，不改动位置
+                          onUpdateTableLayout?.(table.tableId, {
+                            ...table.layout,
+                            bringToFront: true,
+                          });
+                        }
                       }}
                       onResizeStart={() => onSelectTable?.(table.tableId)}
                       onResizeStop={(_, __, element, ___, nextPosition) => {
-                        onUpdateTableLayout?.(table.tableId, {
-                          ...table.layout,
-                          xRatio: nextPosition.x / width,
-                          yRatio: nextPosition.y / height,
-                          widthRatio: element.offsetWidth / width,
-                          heightRatio: element.offsetHeight / height,
-                          bringToFront: true,
-                        });
+                        const nextX = nextPosition.x / width;
+                        const nextY = nextPosition.y / height;
+                        const nextW = element.offsetWidth / width;
+                        const nextH = element.offsetHeight / height;
+                        if (
+                          hasMoved(nextX, nextY, table.layout.xRatio, table.layout.yRatio)
+                          || hasResized(nextW, nextH, table.layout.widthRatio, table.layout.heightRatio)
+                        ) {
+                          onUpdateTableLayout?.(table.tableId, {
+                            ...table.layout,
+                            xRatio: nextX,
+                            yRatio: nextY,
+                            widthRatio: nextW,
+                            heightRatio: nextH,
+                            bringToFront: true,
+                          });
+                        }
                       }}
                     >
                       <TableNode

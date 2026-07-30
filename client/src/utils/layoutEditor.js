@@ -14,11 +14,46 @@ const CANVAS_FIELDS = [
 ];
 
 const EDITABLE_CANVAS_FIELDS = [
+  'aspectRatio',
+  'virtualWidth',
+  'virtualHeight',
   'backgroundColor',
   'gridEnabled',
   'snapToGrid',
   'gridSize',
+  'minTableWidth',
+  'minTableHeight',
+  'maxTableWidth',
+  'maxTableHeight',
 ];
+
+// 画布尺寸预设档位。切换尺寸时必须按比例缩放桌台尺寸约束，
+// 否则已有桌台换算成新画布的虚拟像素后可能超出 maxTableWidth 校验。
+export const CANVAS_SIZE_PRESETS = [
+  { label: '小 1600×900', aspectRatio: '16:9', virtualWidth: 1600, virtualHeight: 900 },
+  { label: '中 2400×1350', aspectRatio: '16:9', virtualWidth: 2400, virtualHeight: 1350 },
+  { label: '大 3200×1800', aspectRatio: '16:9', virtualWidth: 3200, virtualHeight: 1800 },
+  { label: '超大 4800×2700', aspectRatio: '16:9', virtualWidth: 4800, virtualHeight: 2700 },
+  { label: '方形 2000×2000', aspectRatio: '1:1', virtualWidth: 2000, virtualHeight: 2000 },
+  { label: '条形 3000×1200', aspectRatio: '5:2', virtualWidth: 3000, virtualHeight: 1200 },
+];
+
+export function buildCanvasResizePatch(canvas, preset) {
+  const scaleX = preset.virtualWidth / canvas.virtualWidth;
+  const scaleY = preset.virtualHeight / canvas.virtualHeight;
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+  return {
+    aspectRatio: preset.aspectRatio,
+    virtualWidth: preset.virtualWidth,
+    virtualHeight: preset.virtualHeight,
+    minTableWidth: clamp(Math.round(canvas.minTableWidth * scaleX), 20, 2000),
+    minTableHeight: clamp(Math.round(canvas.minTableHeight * scaleY), 20, 2000),
+    maxTableWidth: clamp(Math.round(canvas.maxTableWidth * scaleX), 40, 4000),
+    maxTableHeight: clamp(Math.round(canvas.maxTableHeight * scaleY), 40, 4000),
+    gridSize: clamp(Math.round(canvas.gridSize * scaleX), 5, 100),
+  };
+}
 
 export function roundRatio(value) {
   return Number(Math.max(0, Math.min(1, value)).toFixed(6));

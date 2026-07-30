@@ -8,7 +8,9 @@ import {
   formatTimerDuration,
 } from '../src/utils/timerDisplay.js';
 import {
+  buildCanvasResizePatch,
   buildLayoutSavePayload,
+  CANVAS_SIZE_PRESETS,
   findSignificantOverlaps,
   normalizeTableLayout,
   serializeLayout,
@@ -140,7 +142,7 @@ test('layout serialization is stable across map insertion order', () => {
   assert.equal(serializeLayout(canvas, left), serializeLayout(canvas, right));
 });
 
-test('layout save payload excludes read-only canvas fields', () => {
+test('layout save payload includes all editable canvas fields', () => {
   const layout = normalizeTableLayout({
     xRatio: 0.1,
     yRatio: 0.2,
@@ -153,13 +155,17 @@ test('layout save payload excludes read-only canvas fields', () => {
     layoutVersion: 3,
     canvas: {
       aspectRatio: '16:9',
-      virtualWidth: 1600,
-      virtualHeight: 900,
+      virtualWidth: 2400,
+      virtualHeight: 1350,
+      backgroundImage: null,
       backgroundColor: '#ffffff',
       gridEnabled: true,
       snapToGrid: false,
-      gridSize: 10,
-      minTableWidth: 80,
+      gridSize: 15,
+      minTableWidth: 120,
+      minTableHeight: 90,
+      maxTableWidth: 600,
+      maxTableHeight: 450,
     },
     tables: [{ tableId: 'table-1' }],
     layoutMap: new Map([['table-1', layout]]),
@@ -168,13 +174,51 @@ test('layout save payload excludes read-only canvas fields', () => {
   assert.deepEqual(payload, {
     layoutVersion: 3,
     canvas: {
+      aspectRatio: '16:9',
+      virtualWidth: 2400,
+      virtualHeight: 1350,
       backgroundColor: '#ffffff',
       gridEnabled: true,
       snapToGrid: false,
-      gridSize: 10,
+      gridSize: 15,
+      minTableWidth: 120,
+      minTableHeight: 90,
+      maxTableWidth: 600,
+      maxTableHeight: 450,
     },
     decorations: [],
     tables: [{ tableId: 'table-1', layout }],
+  });
+});
+
+test('canvas resize patch scales table constraints proportionally', () => {
+  const canvas = {
+    aspectRatio: '16:9',
+    virtualWidth: 1600,
+    virtualHeight: 900,
+    backgroundColor: '#ffffff',
+    gridEnabled: true,
+    snapToGrid: true,
+    gridSize: 10,
+    minTableWidth: 80,
+    minTableHeight: 60,
+    maxTableWidth: 400,
+    maxTableHeight: 300,
+  };
+  const preset = CANVAS_SIZE_PRESETS.find(
+    (item) => item.virtualWidth === 3200 && item.virtualHeight === 1800,
+  );
+  const patch = buildCanvasResizePatch(canvas, preset);
+
+  assert.deepEqual(patch, {
+    aspectRatio: '16:9',
+    virtualWidth: 3200,
+    virtualHeight: 1800,
+    minTableWidth: 160,
+    minTableHeight: 120,
+    maxTableWidth: 800,
+    maxTableHeight: 600,
+    gridSize: 20,
   });
 });
 

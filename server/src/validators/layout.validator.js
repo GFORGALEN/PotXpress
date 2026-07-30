@@ -20,10 +20,17 @@ const submittedLayoutSchema = z.object({
 }).strict();
 
 const canvasChangesSchema = z.object({
+  aspectRatio: z.string().trim().min(1).max(10).optional(),
+  virtualWidth: z.number().int().min(800).max(6000).optional(),
+  virtualHeight: z.number().int().min(600).max(6000).optional(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   gridEnabled: z.boolean().optional(),
   snapToGrid: z.boolean().optional(),
   gridSize: z.number().int().min(5).max(100).optional(),
+  minTableWidth: z.number().int().min(20).max(2000).optional(),
+  minTableHeight: z.number().int().min(20).max(2000).optional(),
+  maxTableWidth: z.number().int().min(40).max(4000).optional(),
+  maxTableHeight: z.number().int().min(40).max(4000).optional(),
 }).strict();
 
 const decorationSchema = z.object({

@@ -5,6 +5,9 @@ packages/*/dist/
 .env*
 !.env.example
 
+# WorkBuddy session memory
+.workbuddy/
+
 server/data/*.json
 server/data/backups/
 server/data/transactions/
