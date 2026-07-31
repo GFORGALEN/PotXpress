@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: potxpress
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run db:migrate && npm start --workspace @potxpress/server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_POOL_SIZE
+        value: "10"
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: TRUST_PROXY
+        value: "1"
