@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   changePasswordController,
+  kioskController,
   loginController,
   logoutController,
   meController,
@@ -9,7 +10,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { loginRateLimit } from '../middleware/loginRateLimit.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { loginBodySchema } from '../validators/auth.validator.js';
+import { kioskBodySchema, loginBodySchema } from '../validators/auth.validator.js';
 import { emptyQuerySchema } from '../validators/common.validator.js';
 import { changePasswordBodySchema } from '../validators/user.validator.js';
 
@@ -20,6 +21,12 @@ authRouter.post(
   loginRateLimit,
   validate({ body: loginBodySchema, query: emptyQuerySchema }),
   asyncHandler(loginController),
+);
+authRouter.post(
+  '/kiosk',
+  loginRateLimit,
+  validate({ body: kioskBodySchema, query: emptyQuerySchema }),
+  asyncHandler(kioskController),
 );
 authRouter.get(
   '/me',

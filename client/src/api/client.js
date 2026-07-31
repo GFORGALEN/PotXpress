@@ -98,7 +98,8 @@ apiClient.interceptors.response.use(
 
     const status = error.response?.status ?? 0;
     const payload = error.response?.data?.error;
-    const isLoginRequest = error.config?.url === '/auth/login';
+    const isLoginRequest = error.config?.url === '/auth/login'
+      || error.config?.url === '/auth/kiosk';
 
     if (
       status === 401

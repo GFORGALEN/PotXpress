@@ -1,9 +1,14 @@
-import { changePassword, login, logout } from '../services/auth.service.js';
+import { changePassword, kioskLogin, login, logout } from '../services/auth.service.js';
 import { ok } from '../utils/response.js';
 
 export async function loginController(req, res) {
   const result = await login(req.body);
   return ok(res, result, '登录成功');
+}
+
+export async function kioskController(req, res) {
+  const result = await kioskLogin(req.body);
+  return ok(res, result, '店员入口登录成功');
 }
 
 export async function meController(req, res) {

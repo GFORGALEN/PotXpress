@@ -8,6 +8,11 @@ export async function login(username, password) {
   return response.data.data;
 }
 
+export async function kioskLogin(key) {
+  const response = await apiClient.post('/auth/kiosk', { key });
+  return response.data.data;
+}
+
 export async function me() {
   const response = await apiClient.get('/auth/me');
   return response.data.data;

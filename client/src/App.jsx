@@ -12,6 +12,7 @@ import {
   UsersAdminPage,
 } from './pages/AdminPages.jsx';
 import { DashboardPage } from './pages/DashboardPage.jsx';
+import { KioskPage } from './pages/KioskPage.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { NotFoundPage } from './pages/NotFoundPage.jsx';
 
@@ -30,6 +31,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/kiosk/:key" element={<KioskPage />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route index element={<GuardedPage roles={ALL_ROLES} requiresStore><DashboardPage /></GuardedPage>} />
         <Route path="admin/records" element={<GuardedPage roles={ALL_ROLES} requiresStore><RecordsPage /></GuardedPage>} />

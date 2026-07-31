@@ -25,6 +25,15 @@ class UserRepository {
     );
   }
 
+  async findEnabledStaffByStore(storeId) {
+    const users = await fileStore.readJSON('users.json');
+    return users.find(
+      (user) => user.role === 'store_staff'
+        && user.storeId === storeId
+        && user.enabled,
+    ) ?? null;
+  }
+
   async createSystemAdmin({
     username,
     displayName,

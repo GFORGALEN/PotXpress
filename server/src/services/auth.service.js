@@ -5,6 +5,7 @@ import { AppError } from '../utils/appError.js';
 import { writeAuditLog } from '../utils/audit.js';
 import { comparePassword, hashPassword } from '../utils/hash.js';
 import { signToken } from '../utils/jwt.js';
+import { kioskKeyForStore } from '../utils/kiosk.js';
 
 const dummyHashPromise = hashPassword('potxpress-dummy-password');
 
@@ -52,6 +53,41 @@ export async function login({ username, password }) {
     userNameSnapshot: user.displayName,
     storeId: user.storeId,
     action: 'auth.login',
+    targetType: 'user',
+    targetId: user.id,
+    dataBefore: null,
+    dataAfter: { username: user.username },
+  });
+
+  return { token, user: safeUser };
+}
+
+export async function kioskLogin({ key }) {
+  const stores = await storeRepository.find();
+  const store = stores.find(
+    (candidate) => candidate.enabled && kioskKeyForStore(candidate.id) === key,
+  ) ?? null;
+
+  if (!store) {
+    throw new AppError(401, 'KIOSK_KEY_INVALID', '店员入口链接无效或已失效');
+  }
+
+  const user = await userRepository.findEnabledStaffByStore(store.id);
+  if (!user) {
+    throw new AppError(409, 'KIOSK_STAFF_MISSING', '该门店还没有启用的店员账号');
+  }
+
+  const safeUser = toSafeUser(user);
+  const token = signToken({
+    userId: user.id,
+    tokenVersion: user.tokenVersion,
+  });
+
+  await writeAuthAuditBestEffort({
+    userId: user.id,
+    userNameSnapshot: user.displayName,
+    storeId: user.storeId,
+    action: 'auth.kiosk_login',
     targetType: 'user',
     targetId: user.id,
     dataBefore: null,

@@ -14,3 +14,7 @@ export const loginBodySchema = z.object({
   username: z.string().trim().min(1).max(32),
   password: z.string().min(1).max(64),
 }).strict();
+
+export const kioskBodySchema = z.object({
+  key: z.string().trim().min(8).max(128),
+}).strict();
