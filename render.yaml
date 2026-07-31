@@ -3,7 +3,7 @@ services:
     name: potxpress
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run db:migrate && npm start --workspace @potxpress/server
     healthCheckPath: /api/health
     envVars:
