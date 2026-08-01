@@ -74,7 +74,7 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
 | `JWT_SECRET` | 开发占位值 | 生产必须为至少 32 字符的随机值 |
 | `BOOTSTRAP_ADMIN_USERNAME` | 空 | 空库首次启动时创建的系统管理员用户名 |
 | `BOOTSTRAP_ADMIN_DISPLAY_NAME` | 空 | 空库首次启动时创建的系统管理员显示名 |
-| `BOOTSTRAP_ADMIN_PASSWORD` | 空 | 空库首次启动时创建的系统管理员密码，成功后应从部署环境删除 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | 空 | 空库首次启动时创建的系统管理员密码，成功后应连同其他两个初始化变量一起删除 |
 | `CORS_ORIGIN` | `http://localhost:5173` | 额外允许的前端来源，多个值用逗号分隔；同源生产可留空 |
 | `DATABASE_URL` | `postgres://potxpress:potxpress@127.0.0.1:5432/potxpress` | PostgreSQL 连接地址 |
 | `DATABASE_POOL_SIZE` | `10` | 数据库连接池大小（1–50） |
@@ -197,8 +197,8 @@ $password | npm run create-admin --workspace @potxpress/server -- --password-std
    `npm run create-admin --workspace @potxpress/server`。
 4. 构建客户端并执行 `npm start --workspace @potxpress/server`。
 
-首位管理员创建后，应从托管环境删除
-`BOOTSTRAP_ADMIN_PASSWORD`。后续启动检测到已有启用的系统管理员时，
+首位管理员创建后，应从托管环境同时删除全部三个
+`BOOTSTRAP_ADMIN_*` 变量。后续启动检测到已有启用的系统管理员时，
 不会重复创建。
 
 ## 已知限制与后续路线
