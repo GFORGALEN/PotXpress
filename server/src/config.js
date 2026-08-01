@@ -49,6 +49,11 @@ function parseTrustProxy(value) {
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 const isProduction = nodeEnv === 'production';
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret-change-me';
+const bootstrapAdmin = Object.freeze({
+  username: process.env.BOOTSTRAP_ADMIN_USERNAME?.trim() || null,
+  displayName: process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME?.trim() || null,
+  password: process.env.BOOTSTRAP_ADMIN_PASSWORD || null,
+});
 const corsOrigins = (process.env.CORS_ORIGIN || (
   isProduction
     ? ''
@@ -63,6 +68,7 @@ export const config = Object.freeze({
   isProduction,
   port: parsePort(process.env.PORT),
   jwtSecret,
+  bootstrapAdmin,
   corsOrigins,
   dataDirectory: path.resolve(process.env.DATA_DIR || path.join(serverDirectory, 'data')),
   databaseUrl: process.env.DATABASE_URL
@@ -76,6 +82,17 @@ export const config = Object.freeze({
 });
 
 export function validateRuntimeConfig() {
+  const bootstrapValues = Object.values(config.bootstrapAdmin);
+  const hasAnyBootstrapValue = bootstrapValues.some(Boolean);
+  const hasAllBootstrapValues = bootstrapValues.every(Boolean);
+
+  if (hasAnyBootstrapValue && !hasAllBootstrapValues) {
+    throw new Error(
+      'BOOTSTRAP_ADMIN_USERNAME、BOOTSTRAP_ADMIN_DISPLAY_NAME 和 '
+      + 'BOOTSTRAP_ADMIN_PASSWORD 必须同时配置',
+    );
+  }
+
   if (config.isProduction) {
     if (
       config.jwtSecret === 'dev-secret-change-me'
