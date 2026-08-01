@@ -35,7 +35,7 @@ const canvasChangesSchema = z.object({
 
 const decorationSchema = z.object({
   id: z.string().min(1).max(100),
-  type: z.enum(['wall', 'entrance', 'cashier', 'area']),
+  type: z.enum(['wall', 'entrance', 'cashier', 'area', 'seat']),
   label: z.string().trim().min(1).max(50),
   xRatio: ratioSchema,
   yRatio: ratioSchema,

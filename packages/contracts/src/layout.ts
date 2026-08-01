@@ -23,7 +23,7 @@ export const canvasSchema = z.object({
 
 export const decorationSchema = z.object({
   id: identifierSchema,
-  type: z.enum(['wall', 'entrance', 'cashier', 'area']),
+  type: z.enum(['wall', 'entrance', 'cashier', 'area', 'seat']),
   label: z.string().min(1).max(50),
   xRatio: z.number().min(0).max(1),
   yRatio: z.number().min(0).max(1),
