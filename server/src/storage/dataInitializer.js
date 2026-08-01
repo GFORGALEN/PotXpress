@@ -1,6 +1,13 @@
 import { hashPassword } from '../utils/hash.js';
 import { normalizeStoreCode, normalizeUsername } from '../utils/normalization.js';
 import { config } from '../config.js';
+import { userRepository } from '../repositories/user.repository.js';
+import { writeAuditLog } from '../utils/audit.js';
+import {
+  displayNameSchema,
+  passwordSchema,
+  usernameSchema,
+} from '../validators/auth.validator.js';
 import { fileStore } from './fileStore.js';
 
 const SEED_IDS = Object.freeze({
@@ -24,6 +31,52 @@ export const DEFAULT_CANVAS = Object.freeze({
   maxTableWidth: 600,
   maxTableHeight: 450,
 });
+
+export async function initializeBootstrapAdmin() {
+  const { username, displayName, password } = config.bootstrapAdmin;
+
+  if (!username || !displayName || !password) {
+    return null;
+  }
+
+  const existingAdmins = await userRepository.findEnabledSystemAdmins();
+  if (existingAdmins.length > 0) {
+    return existingAdmins[0];
+  }
+
+  const credentials = {
+    username: usernameSchema.parse(username),
+    displayName: displayNameSchema.parse(displayName),
+    password: passwordSchema.parse(password),
+  };
+  const passwordHash = await hashPassword(credentials.password);
+  const user = await userRepository.createSystemAdmin({
+    username: credentials.username,
+    displayName: credentials.displayName,
+    passwordHash,
+  });
+
+  try {
+    await writeAuditLog({
+      userId: user.id,
+      userNameSnapshot: user.displayName,
+      storeId: null,
+      action: 'system.bootstrap_admin',
+      targetType: 'user',
+      targetId: user.id,
+      dataBefore: null,
+      dataAfter: {
+        username: user.username,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error(`警告：管理员已创建，但审计日志写入失败：${error.message}`);
+  }
+
+  console.log(`首位系统管理员已创建：${user.username}`);
+  return user;
+}
 
 function findConflict(items, id, predicate) {
   return items.find((item) => item.id !== id && predicate(item));

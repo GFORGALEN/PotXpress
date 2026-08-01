@@ -25,13 +25,34 @@ import {
 import { userRouter } from './routes/user.routes.js';
 import { AppError } from './utils/appError.js';
 
-function corsOrigin(origin, callback) {
-  if (!origin || config.corsOrigins.includes(origin)) {
-    callback(null, true);
+function requestOrigin(req) {
+  const forwardedProtocol = req.get('X-Forwarded-Proto')
+    ?.split(',')[0]
+    ?.trim();
+  const forwardedHost = req.get('X-Forwarded-Host')
+    ?.split(',')[0]
+    ?.trim();
+  const protocol = forwardedProtocol || req.protocol;
+  const host = forwardedHost || req.get('Host');
+
+  return host ? `${protocol}://${host}` : null;
+}
+
+function corsOptions(req, callback) {
+  const origin = req.get('Origin');
+  const allowed = !origin
+    || origin === requestOrigin(req)
+    || config.corsOrigins.includes(origin);
+
+  if (!allowed) {
+    callback(new AppError(403, 'CORS_FORBIDDEN', '不允许的请求来源'));
     return;
   }
 
-  callback(new AppError(403, 'CORS_FORBIDDEN', '不允许的请求来源'));
+  callback(null, {
+    origin: Boolean(origin),
+    credentials: false,
+  });
 }
 
 export function createApp() {
@@ -40,10 +61,7 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
   app.use(helmet());
-  app.use(cors({
-    origin: corsOrigin,
-    credentials: false,
-  }));
+  app.use(cors(corsOptions));
 
   if (config.nodeEnv !== 'test') {
     app.use(morgan(config.isProduction ? 'combined' : 'dev'));

@@ -3,7 +3,10 @@ import { pathToFileURL } from 'node:url';
 import { createApp } from './src/app.js';
 import { config, validateRuntimeConfig } from './src/config.js';
 import { checkDataConsistency } from './src/storage/consistencyChecker.js';
-import { initializeDemoData } from './src/storage/dataInitializer.js';
+import {
+  initializeBootstrapAdmin,
+  initializeDemoData,
+} from './src/storage/dataInitializer.js';
 import { fileStore } from './src/storage/fileStore.js';
 import { runMigrations } from './src/storage/migrations.js';
 import { realtimeHub } from './src/realtime/realtimeHub.js';
@@ -22,6 +25,7 @@ export async function startServer() {
     await fileStore.recoverTransactions();
     await runMigrations();
     await initializeDemoData();
+    await initializeBootstrapAdmin();
     await checkDataConsistency();
 
     const app = createApp();

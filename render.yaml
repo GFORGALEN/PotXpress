@@ -2,6 +2,7 @@ services:
   - type: web
     name: potxpress
     runtime: node
+    region: singapore
     plan: free
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm run db:migrate && npm start --workspace @potxpress/server
@@ -15,12 +16,16 @@ services:
         generateValue: true
       - key: DATABASE_URL
         sync: false
-      - key: CORS_ORIGIN
-        value: "https://potxpress-tyjk.onrender.com"
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_DISPLAY_NAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
       - key: DATABASE_SSL
         value: "true"
       - key: DATABASE_POOL_SIZE
-        value: "10"
+        value: "5"
       - key: SEED_DEMO_DATA
         value: "false"
       - key: TRUST_PROXY
