@@ -4,6 +4,8 @@ import {
   DATABASE_RESOURCES,
   databasePool,
   initializeDatabase,
+  readResource,
+  replaceResource,
 } from './database.js';
 
 function cloneData(value) {
@@ -22,16 +24,6 @@ function definitionFor(filename) {
   }
 
   return definition;
-}
-
-function recordId(filename, record) {
-  const definition = definitionFor(filename);
-  return definition.idField ? record[definition.idField] : 'singleton';
-}
-
-function storeIdFor(filename, record) {
-  if (filename === 'stores.json') return record.id;
-  return record.storeId ?? null;
 }
 
 export class DatabaseStore {
@@ -61,7 +53,7 @@ export class DatabaseStore {
 
       if (!metadata) {
         await this.updateJSON('metadata.json', () => ({
-          schemaVersion: 4,
+          schemaVersion: 5,
           updatedAt: new Date().toISOString(),
         }));
       }
@@ -78,12 +70,8 @@ export class DatabaseStore {
   }
 
   async readWithClient(client, filename, { forUpdate = false } = {}) {
-    const definition = definitionFor(filename);
-    const result = await client.query(
-      `SELECT payload FROM ${definition.table} ORDER BY id${forUpdate ? ' FOR UPDATE' : ''}`,
-    );
-    const values = result.rows.map((row) => row.payload);
-    return definition.idField ? values : (values[0] ?? null);
+    definitionFor(filename);
+    return readResource(client, filename, { forUpdate });
   }
 
   async lockResourcesWithClient(client, filenames) {
@@ -121,10 +109,7 @@ export class DatabaseStore {
     value,
     { injectFault = true } = {},
   ) {
-    const definition = definitionFor(filename);
-    const records = definition.idField
-      ? value
-      : (value === null || value === undefined ? [] : [value]);
+    definitionFor(filename);
 
     if (injectFault && this.faultInjector) {
       await this.faultInjector({
@@ -133,21 +118,7 @@ export class DatabaseStore {
       });
     }
 
-    await client.query(`DELETE FROM ${definition.table}`);
-
-    for (const record of records) {
-      const id = recordId(filename, record);
-
-      if (!id) {
-        throw new Error(`${filename} 记录缺少主键 ${definition.idField}`);
-      }
-
-      await client.query(
-        `INSERT INTO ${definition.table} (id, store_id, payload, updated_at)
-         VALUES ($1, $2, $3::jsonb, NOW())`,
-        [id, storeIdFor(filename, record), serialize(record)],
-      );
-    }
+    return replaceResource(client, filename, value);
   }
 
   async updateJSON(filename, updater) {

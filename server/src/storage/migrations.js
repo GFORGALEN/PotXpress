@@ -1,6 +1,6 @@
 import { fileStore, METADATA_FILE } from './fileStore.js';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 async function migrateVersionZeroToOne() {
   await fileStore.withFiles(
@@ -99,6 +99,13 @@ async function migrateVersionThreeToFour() {
   );
 }
 
+async function migrateVersionFourToFive() {
+  await fileStore.updateJSON(METADATA_FILE, () => ({
+    schemaVersion: 5,
+    updatedAt: new Date().toISOString(),
+  }));
+}
+
 export async function runMigrations() {
   const metadata = await fileStore.readJSON(METADATA_FILE);
 
@@ -136,6 +143,12 @@ export async function runMigrations() {
     if (version === 3) {
       await migrateVersionThreeToFour();
       version = 4;
+      continue;
+    }
+
+    if (version === 4) {
+      await migrateVersionFourToFive();
+      version = 5;
       continue;
     }
 

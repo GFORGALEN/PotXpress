@@ -52,6 +52,12 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
 绕过并发控制。历史记录同时保存 `groupId` 与成员桌台快照，因此解除
 临时拼桌后仍可追溯。
 
+数据库 schemaVersion 5 使用显式业务列、主键、唯一约束、外键和门店维度
+索引，不再把整条业务记录放进通用 `payload JSONB`。拼桌成员、计时成员和
+调整历史使用独立明细表；只有画布布局、审计前后快照、幂等响应和实时事件
+载荷等复杂或整体保存的数据使用 JSONB。HTTP 与 WebSocket 接口仍使用 JSON；启动迁移会在事务内把旧版
+`payload` 表转换为关系表。
+
 ## 实时连接
 
 - 浏览器使用 `/ws` 和 `potxpress.v1` 子协议连接，JWT 通过连接后的首个
@@ -122,6 +128,9 @@ Docker PostgreSQL 可用时，可额外运行真实行锁集成测试：
 $env:RUN_POSTGRES_INTEGRATION = "true"
 npm run test:postgres --workspace @potxpress/server
 ```
+
+该集成测试会在隔离 schema 中建立旧版 v4 表，验证 v5 数据迁移、显式列、
+跨实例资源锁、事件版本唯一性及失败事务回滚，结束后自动删除测试 schema。
 
 另开一个终端：
 

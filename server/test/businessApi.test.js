@@ -385,6 +385,22 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
       id: 'timer_delete_conflict',
       storeId: 'store_demo',
       tableId: tableToDelete.id,
+      targetType: 'table',
+      groupId: null,
+      memberTableIds: [tableToDelete.id],
+      tableNameSnapshot: tableToDelete.name,
+      tableNumberSnapshot: tableToDelete.number,
+      startTime: new Date().toISOString(),
+      plannedDurationSeconds: 3600,
+      status: 'running',
+      pauseStartedAt: null,
+      totalPausedSeconds: 0,
+      adjustments: [],
+      overtimeAcknowledged: false,
+      startedBy: 'user_demo_admin',
+      startedByNameSnapshot: 'Demo admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
   });
   const deleteConflict = await request(
