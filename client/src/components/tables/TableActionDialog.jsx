@@ -28,7 +28,7 @@ import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
 const STATUS_BADGES = {
   idle: 'bg-slate-100 text-slate-700',
   running: 'bg-emerald-100 text-emerald-800',
-  paused: 'bg-sky-100 text-sky-800',
+  paused: 'bg-slate-200 text-slate-700',
   warning: 'bg-amber-100 text-amber-900',
   overtime: 'bg-red-100 text-red-800',
 };
@@ -53,10 +53,17 @@ export function TableActionDialog({
 
   useEffect(() => {
     if (!table) {
-      return undefined;
+      return;
     }
 
     closeRef.current?.focus();
+  }, [table?.tableId]);
+
+  useEffect(() => {
+    if (!table) {
+      return undefined;
+    }
+
     const handleKeyDown = (event) => {
       if (event.key === 'Escape' && !confirmReset) {
         onClose();
@@ -64,7 +71,7 @@ export function TableActionDialog({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [confirmReset, onClose, table]);
+  }, [confirmReset, onClose, table?.tableId]);
 
   useEffect(() => {
     if (table?.status === 'idle') {
@@ -102,19 +109,25 @@ export function TableActionDialog({
   const disabled = Boolean(busyAction);
   const isOvertime = table.status === 'overtime';
   const duration = isOvertime
-    ? formatTimerDuration(table.overtimeSeconds, { overtime: true })
+    ? formatTimerDuration(table.overtimeSeconds)
     : formatTimerDuration(table.remainingSeconds);
 
   return (
     <>
-      <div className="fixed inset-0 z-[90] flex items-center justify-center bg-ink-950/65 p-3 backdrop-blur-sm sm:p-5">
+      <div className="pointer-events-none fixed inset-0 z-[90]">
+        <button
+          type="button"
+          onClick={onClose}
+          className="pointer-events-auto absolute inset-0 bg-ink-950/45 backdrop-blur-[2px] xl:hidden"
+          aria-label="关闭桌台详情"
+        />
         <div
-          className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-soft sm:p-6"
+          className="detail-panel-enter pointer-events-auto absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[2rem] border border-stone-200 bg-white p-5 shadow-2xl xl:inset-y-[4.5rem] xl:left-auto xl:right-0 xl:max-h-none xl:w-[23.5rem] xl:rounded-none xl:border-y-0 xl:border-r-0 xl:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="table-action-title"
         >
-          <div className="flex items-start justify-between gap-4">
+          <div className="sticky -top-5 z-10 -mx-1 flex items-start justify-between gap-4 border-b border-stone-100 bg-white/95 px-1 pb-4 pt-1 backdrop-blur xl:-top-6">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2
@@ -152,8 +165,8 @@ export function TableActionDialog({
             <div className="mt-5 grid grid-cols-2 gap-3 rounded-2xl bg-stone-50 p-4 sm:grid-cols-3">
               <div>
                 <p className="text-xs text-stone-400">剩余/超时</p>
-                <p className="mt-1 font-mono text-xl font-black tabular-nums text-ink-950">
-                  {duration}
+                <p className={clsx('mt-1 font-mono text-xl font-black tabular-nums', isOvertime ? 'text-red-600' : 'text-ink-950')}>
+                  {isOvertime ? `超时 ${duration}` : duration}
                 </p>
               </div>
               <div>
@@ -170,6 +183,23 @@ export function TableActionDialog({
               </div>
             </div>
           ) : null}
+
+          <div className="mt-4 grid grid-cols-2 gap-3 border-b border-stone-100 pb-4 text-sm">
+            <div>
+              <p className="text-xs text-stone-400">容纳人数</p>
+              <p className="mt-1 font-bold text-stone-700">{table.capacity || 4} 人</p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">所属区域</p>
+              <p className="mt-1 font-bold text-stone-700">{table.area || '未分区'}</p>
+            </div>
+            {table.note ? (
+              <div className="col-span-2">
+                <p className="text-xs text-stone-400">备注</p>
+                <p className="mt-1 text-stone-700">{table.note}</p>
+              </div>
+            ) : null}
+          </div>
 
           {table.timer?.adjustments?.length > 0 ? (
             <div className="mt-4">
@@ -257,7 +287,7 @@ export function TableActionDialog({
                     () => pauseTimer(selectedStoreId, table.tableId),
                     '计时已暂停',
                   )}
-                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-sky-600 px-4 text-sm font-black text-white disabled:opacity-50"
+                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-slate-700 px-4 text-sm font-black text-white disabled:opacity-50"
                 >
                   <Pause size={19} />
                   暂停

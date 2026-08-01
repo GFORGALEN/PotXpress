@@ -42,6 +42,7 @@ export function useCanvasScale(viewportRef, canvas) {
       width: virtualWidth * fitScale,
       height: virtualHeight * fitScale,
       actualSizeScale: 1 / fitScale,
+      viewportSize,
     };
   }, [canvas?.virtualHeight, canvas?.virtualWidth, viewportSize]);
 }

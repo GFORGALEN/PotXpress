@@ -21,10 +21,11 @@ import { TableNode } from '../tables/TableNode.jsx';
 function ZoomControls({
   zoomIn,
   zoomOut,
-  centerView,
+  fitView,
   fitScale,
   actualSizeScale,
   transformScale,
+  editing,
 }) {
   const displayPercent = Math.round(
     fitScale * transformScale * 100,
@@ -57,22 +58,24 @@ function ZoomControls({
       <span className="mx-0.5 h-6 w-px bg-stone-200" />
       <button
         type="button"
-        onClick={() => centerView(1, 220, 'easeOut')}
+        onClick={() => fitView()}
         className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
         title="适应屏幕"
         aria-label="画布适应屏幕"
       >
         <Maximize2 size={17} />
       </button>
-      <button
-        type="button"
-        onClick={() => centerView(actualSizeScale, 220, 'easeOut')}
-        className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
-        title="虚拟像素 100%"
-        aria-label="画布显示为百分之百"
-      >
-        <ScanLine size={17} />
-      </button>
+      {editing ? (
+        <button
+          type="button"
+          onClick={() => fitView(actualSizeScale)}
+          className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
+          title="虚拟像素 100%"
+          aria-label="画布显示为百分之百"
+        >
+          <ScanLine size={17} />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -80,6 +83,7 @@ function ZoomControls({
 export function FloorCanvas({
   canvas,
   tables,
+  fitTables = tables,
   decorations = [],
   timezone,
   onTableClick,
@@ -92,6 +96,7 @@ export function FloorCanvas({
   onUpdateDecoration,
 }) {
   const viewportRef = useRef(null);
+  const transformApiRef = useRef(null);
   const lastZoomUpdateRef = useRef(0);
   const zoomUpdateTimerRef = useRef(null);
   const pendingScaleRef = useRef(1);
@@ -106,13 +111,14 @@ export function FloorCanvas({
     width,
     height,
     actualSizeScale,
+    viewportSize,
   } = useCanvasScale(viewportRef, canvas);
   const maxScale = Math.max(
     4,
     Math.min(8, actualSizeScale),
   );
   const gridStyle = useMemo(() => {
-    if (!canvas.gridEnabled) {
+    if (!editing || !canvas.gridEnabled) {
       return {};
     }
 
@@ -124,7 +130,30 @@ export function FloorCanvas({
       ].join(','),
       backgroundSize: `${gridSize}px ${gridSize}px`,
     };
-  }, [canvas.gridEnabled, canvas.gridSize, fitScale]);
+  }, [canvas.gridEnabled, canvas.gridSize, editing, fitScale]);
+  const contentBounds = useMemo(() => {
+    const items = [
+      ...fitTables.map((table) => table.layout),
+      ...decorations,
+    ];
+    if (items.length === 0) {
+      return { left: 0, top: 0, right: 1, bottom: 1 };
+    }
+    const raw = items.reduce((bounds, item) => ({
+      left: Math.min(bounds.left, item.xRatio),
+      top: Math.min(bounds.top, item.yRatio),
+      right: Math.max(bounds.right, item.xRatio + item.widthRatio),
+      bottom: Math.max(bounds.bottom, item.yRatio + item.heightRatio),
+    }), { left: 1, top: 1, right: 0, bottom: 0 });
+    const horizontalPadding = Math.max(0.035, (raw.right - raw.left) * 0.1);
+    const verticalPadding = Math.max(0.045, (raw.bottom - raw.top) * 0.12);
+    return {
+      left: Math.max(0, raw.left - horizontalPadding),
+      top: Math.max(0, raw.top - verticalPadding),
+      right: Math.min(1, raw.right + horizontalPadding),
+      bottom: Math.min(1, raw.bottom + verticalPadding),
+    };
+  }, [decorations, fitTables]);
   const groupBounds = useMemo(() => {
     const grouped = new Map();
     for (const table of tables) {
@@ -206,14 +235,52 @@ export function FloorCanvas({
     });
   };
 
+  const fitOperationalView = (forcedScale = null) => {
+    const api = transformApiRef.current;
+    if (!api || !width || !height || !viewportSize.width || !viewportSize.height) return;
+    if (editing || forcedScale) {
+      api.centerView(forcedScale ?? 1, 220, 'easeOut');
+      return;
+    }
+    const boundsWidth = Math.max(0.05, contentBounds.right - contentBounds.left);
+    const boundsHeight = Math.max(0.05, contentBounds.bottom - contentBounds.top);
+    const scale = Math.min(
+      maxScale,
+      Math.max(1, Math.min(
+        (viewportSize.width * 0.9) / (width * boundsWidth),
+        (viewportSize.height * 0.88) / (height * boundsHeight),
+      )),
+    );
+    const centerX = (contentBounds.left + contentBounds.right) / 2;
+    const centerY = (contentBounds.top + contentBounds.bottom) / 2;
+    api.setTransform(
+      viewportSize.width / 2 - centerX * width * scale,
+      viewportSize.height / 2 - centerY * height * scale,
+      scale,
+      260,
+      'easeOut',
+    );
+  };
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => fitOperationalView());
+    return () => cancelAnimationFrame(frame);
+  }, [
+    contentBounds.bottom,
+    contentBounds.left,
+    contentBounds.right,
+    contentBounds.top,
+    editing,
+    height,
+    viewportSize.height,
+    viewportSize.width,
+    width,
+  ]);
+
   return (
     <div
       ref={viewportRef}
-      className="relative h-full min-h-0 w-full touch-none overflow-hidden rounded-[1.75rem] shadow-inner"
-      style={{
-        backgroundColor: canvas.backgroundColor,
-        ...gridStyle,
-      }}
+      className="floor-viewport relative h-full min-h-0 w-full touch-none overflow-hidden rounded-[1.5rem] border border-stone-200 shadow-inner"
       aria-label="门店桌台布局画布"
     >
       <TransformWrapper
@@ -240,6 +307,7 @@ export function FloorCanvas({
         // step 必须足够小，否则一格滚轮直接顶到 maxScale。
         wheel={{ step: 0.0015, excluded: ['canvas-control'] }}
         onInit={(ref) => {
+          transformApiRef.current = ref;
           scaleRef.current = ref.state.scale;
           setTransformScale(ref.state.scale);
           // centerOnInit 会在当前回调之后才真正完成居中，
@@ -247,6 +315,7 @@ export function FloorCanvas({
           // 等一帧后强制 Rnd 重新挂载，重新计算 offset。
           requestAnimationFrame(() => {
             setRndKeyVersion((v) => v + 1);
+            fitOperationalView();
           });
         }}
         onTransformed={(_, state) => {
@@ -280,22 +349,26 @@ export function FloorCanvas({
               }}
             >
               <div
-                className="relative overflow-hidden rounded-2xl"
+                className="floor-surface relative overflow-hidden rounded-[1.35rem]"
                 style={{
                   width,
                   height,
-                  backgroundColor: canvas.backgroundColor,
-                  ...gridStyle,
+                  ...(editing ? {
+                    backgroundColor: canvas.backgroundColor,
+                    ...gridStyle,
+                  } : {}),
                 }}
                 onDoubleClick={(event) => {
                   if (event.target !== event.currentTarget) {
                     return;
                   }
 
-                  const nextScale = Math.abs(scaleRef.current - 1) < 0.05
-                    ? actualSizeScale
-                    : 1;
-                  centerView(nextScale, 240, 'easeOut');
+                  if (editing) {
+                    const nextScale = Math.abs(scaleRef.current - 1) < 0.05
+                      ? actualSizeScale
+                      : 1;
+                    centerView(nextScale, 240, 'easeOut');
+                  }
                 }}
                 onClick={(event) => {
                   if (editing && event.target === event.currentTarget) {
@@ -309,10 +382,11 @@ export function FloorCanvas({
                     <div
                       className={[
                         'flex h-full w-full select-none items-center justify-center text-center font-black',
-                        item.type === 'wall' ? 'rounded-full bg-stone-700' : '',
-                        item.type === 'entrance' ? 'rounded-xl border-4 border-dashed border-emerald-600 bg-emerald-50 text-emerald-800' : '',
-                        item.type === 'cashier' ? 'rounded-xl border-2 border-amber-700 bg-amber-100 text-amber-950 shadow' : '',
-                        item.type === 'area' ? 'rounded-3xl border-2 border-dashed border-sky-400 bg-sky-100/20 text-sky-700' : '',
+                        item.type === 'wall' ? 'rounded-full bg-stone-600/80' : '',
+                        item.type === 'entrance' ? 'rounded-xl border-2 border-dashed border-emerald-500 bg-emerald-50/80 text-emerald-800' : '',
+                        item.type === 'cashier' ? 'rounded-xl border border-amber-400 bg-amber-100/80 text-amber-950 shadow-sm' : '',
+                        item.type === 'area' ? 'rounded-3xl border border-dashed border-sky-300 bg-sky-100/20 text-sky-700/80' : '',
+                        item.type === 'seat' ? 'rounded-[42%] border-2 border-slate-300 bg-white/70 shadow-[0_5px_12px_-8px_rgba(15,23,42,.45)]' : '',
                         selectedDecorationId === item.id ? 'ring-4 ring-sky-500 ring-offset-2' : '',
                       ].join(' ')}
                       style={{
@@ -320,7 +394,7 @@ export function FloorCanvas({
                         transform: `rotate(${item.rotation ?? 0}deg)`,
                       }}
                     >
-                      {item.type === 'wall' ? null : item.label}
+                      {['wall', 'seat'].includes(item.type) ? null : item.label}
                     </div>
                   );
 
@@ -368,8 +442,8 @@ export function FloorCanvas({
                       scale={scaleRef.current}
                       dragGrid={[gridStep, gridStep]}
                       resizeGrid={[gridStep, gridStep]}
-                      minWidth={item.type === 'wall' ? 30 : 70}
-                      minHeight={item.type === 'wall' ? 8 : 35}
+                      minWidth={item.type === 'wall' ? 30 : item.type === 'seat' ? 36 : 70}
+                      minHeight={item.type === 'wall' ? 8 : item.type === 'seat' ? 32 : 35}
                       style={{ zIndex: item.zIndex + (draggingDecorationId === item.id ? 10000 : 0) }}
                       onMouseDown={() => {
                         refreshRndOffset(item.id);
@@ -441,6 +515,7 @@ export function FloorCanvas({
                         {...table}
                         timezone={timezone}
                         onTableClick={onTableClick}
+                        selected={selectedTableId === table.tableId}
                       />
                     );
                   }
@@ -545,10 +620,11 @@ export function FloorCanvas({
             <ZoomControls
               zoomIn={zoomIn}
               zoomOut={zoomOut}
-              centerView={centerView}
+              fitView={fitOperationalView}
               fitScale={fitScale}
               actualSizeScale={actualSizeScale}
               transformScale={transformScale}
+              editing={editing}
             />
           </>
         )}

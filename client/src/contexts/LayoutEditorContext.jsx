@@ -172,6 +172,7 @@ export function LayoutEditorProvider({ children }) {
       entrance: { label: '入口', xRatio: 0.72, yRatio: 0.08, widthRatio: 0.1, heightRatio: 0.07 },
       cashier: { label: '收银台', xRatio: 0.72, yRatio: 0.2, widthRatio: 0.14, heightRatio: 0.09 },
       area: { label: '区域', xRatio: 0.35, yRatio: 0.34, widthRatio: 0.28, heightRatio: 0.24 },
+      seat: { label: '座位', xRatio: 0.45, yRatio: 0.4, widthRatio: 0.07, heightRatio: 0.075 },
     }[type];
     setDraftDecorations((current) => [...current, {
       id,

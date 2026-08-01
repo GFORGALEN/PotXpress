@@ -7,6 +7,7 @@ import {
 } from 'react';
 import {
   ArrowUpRight,
+  Clock3,
   LayoutGrid,
   List,
   Maximize2,
@@ -341,6 +342,21 @@ export function DashboardPage() {
     () => allTables.find((table) => table.tableId === selectedTableId) ?? null,
     [allTables, selectedTableId],
   );
+  const currentTimeLabel = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: currentStore?.timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+      }).format(new Date(correctedNow));
+    } catch {
+      return new Date(correctedNow).toLocaleTimeString('zh-CN', {
+        hourCycle: 'h23',
+      });
+    }
+  }, [correctedNow, currentStore?.timezone]);
   const handleTableClick = useCallback((tableId) => {
     if (layoutEditor.mode !== 'view') {
       layoutEditor.setSelectedTableId(tableId);
@@ -395,26 +411,34 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[92rem] flex-col gap-5">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
-            <Radio size={14} />
-            3 秒实时同步
+    <div className="mx-auto flex max-w-[100rem] flex-col gap-3">
+      <section className="flex flex-col justify-between gap-3 rounded-[1.25rem] border border-stone-200/80 bg-white px-4 py-3 shadow-card sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="truncate text-xl font-black tracking-tight text-ink-950 sm:text-2xl">
+              {currentStore?.name ?? '桌台看板'}
+            </h1>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <Radio size={12} />
+              {realtime.connected ? '实时连接' : '自动重连中'}
+            </span>
           </div>
-          <h1 className="mt-2 text-2xl font-black tracking-tight text-ink-950 sm:text-3xl">
-            {currentStore?.name ?? '桌台看板'}
-          </h1>
-          <p className="mt-2 text-sm text-stone-500">
-            拖动画布查看区域，滚轮或双指缩放；双击空白区域切换显示比例。
+          <p className="mt-1 text-xs font-medium text-stone-500">
+            运行模式 · 点击桌台查看计时与操作
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="mr-1 hidden min-w-24 text-right sm:block">
+            <p className="flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+              <Clock3 size={11} /> 门店时间
+            </p>
+            <p className="font-mono text-base font-black tabular-nums text-ink-900">{currentTimeLabel}</p>
+          </div>
           <button
             type="button"
             onClick={refreshTimers}
-            className="inline-flex items-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-bold text-stone-600 transition hover:border-stone-300 hover:bg-stone-50"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600 transition hover:border-stone-300 hover:bg-stone-50"
           >
             <RotateCw size={16} />
             立即同步
@@ -427,14 +451,14 @@ export function DashboardPage() {
                 onSaved: setLayout,
                 onReload: reloadLatestLayout,
               })}
-              className="hidden items-center gap-2 rounded-2xl bg-ink-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-ink-800 md:inline-flex"
+              className="hidden min-h-11 items-center gap-2 rounded-xl bg-ink-900 px-4 text-sm font-bold text-white transition hover:bg-ink-800 md:inline-flex"
             >
               进入布局编辑
               <ArrowUpRight size={16} />
             </button>
           ) : null}
         </div>
-      </div>
+      </section>
 
       {layoutEditor.mode !== 'view' ? <EditorToolbar /> : null}
 
@@ -498,11 +522,11 @@ export function DashboardPage() {
             ) : (
             <div className={canvasFocused
               ? 'fixed inset-2 z-50 min-h-0 rounded-[2rem] bg-white p-2 shadow-2xl sm:inset-4'
-              : 'relative h-[clamp(34rem,76vh,56rem)] min-h-0'}>
+              : 'relative h-[clamp(32rem,70vh,54rem)] min-h-0'}>
               <button
                 type="button"
                 onClick={() => setCanvasFocused((value) => !value)}
-                className="absolute left-4 top-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-sm font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
+                className="absolute left-4 top-4 z-40 inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-xs font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
                 aria-label={canvasFocused ? '退出专注画布' : '专注画布'}
               >
                 {canvasFocused ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
@@ -515,13 +539,16 @@ export function DashboardPage() {
                 tables={layoutEditor.mode === 'view'
                   ? visibleTables
                   : allTables}
+                fitTables={allTables}
                 decorations={layoutEditor.mode === 'view'
                   ? layout.decorations ?? []
                   : layoutEditor.draftDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
                 editing={layoutEditor.mode === 'editing'}
-                selectedTableId={layoutEditor.selectedTableId}
+                selectedTableId={layoutEditor.mode === 'view'
+                  ? selectedTableId
+                  : layoutEditor.selectedTableId}
                 onSelectTable={layoutEditor.setSelectedTableId}
                 onUpdateTableLayout={layoutEditor.updateTableLayout}
                 selectedDecorationId={layoutEditor.selectedDecorationId}

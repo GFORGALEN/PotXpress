@@ -4,7 +4,7 @@ import { formatTimerDuration, TIMER_STATUS_LABELS } from '../../utils/timerDispl
 const statusClasses = {
   idle: 'bg-stone-100 text-stone-700',
   running: 'bg-emerald-100 text-emerald-800',
-  paused: 'bg-sky-100 text-sky-800',
+  paused: 'bg-slate-200 text-slate-700',
   warning: 'bg-amber-100 text-amber-900',
   overtime: 'bg-red-100 text-red-800',
 };
@@ -33,7 +33,7 @@ export function TableListView({ tables, onTableClick }) {
             key={table.tableId}
             type="button"
             onClick={() => onTableClick(table.tableId)}
-            className="flex min-h-20 items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-card transition active:scale-[0.99]"
+            className="flex min-h-[5.5rem] items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-card transition active:scale-[0.99]"
           >
             <span className="min-w-0">
               <span className="block truncate text-base font-black text-ink-950">{table.name}</span>
@@ -43,7 +43,9 @@ export function TableListView({ tables, onTableClick }) {
               <span className={clsx('inline-flex rounded-full px-2.5 py-1 text-xs font-bold', statusClasses[table.status])}>{TIMER_STATUS_LABELS[table.status]}</span>
               {table.status !== 'idle' ? (
                 <span className="mt-1.5 block font-mono text-lg font-black tabular-nums">
-                  {formatTimerDuration(seconds, { overtime: table.status === 'overtime' })}
+                  {table.status === 'overtime'
+                    ? `超时 ${formatTimerDuration(seconds)}`
+                    : formatTimerDuration(seconds)}
                 </span>
               ) : null}
             </span>

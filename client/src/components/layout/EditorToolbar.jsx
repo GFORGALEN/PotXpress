@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   BrickWall,
+  Armchair,
   DoorOpen,
   Grid3X3,
   Map,
@@ -76,12 +77,13 @@ export function EditorToolbar() {
               {isDirty ? ' 当前有未保存修改。' : ' 当前布局未修改。'}
             </p>
           </div>
-          <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible xl:pb-0">
+          <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0 xl:flex-wrap xl:overflow-visible xl:pb-0">
             {[
               ['wall', '墙体', BrickWall],
               ['entrance', '入口', DoorOpen],
               ['cashier', '收银台', Store],
               ['area', '区域', Map],
+              ['seat', '座位', Armchair],
             ].map(([type, label, Icon]) => (
               <button
                 key={type}
