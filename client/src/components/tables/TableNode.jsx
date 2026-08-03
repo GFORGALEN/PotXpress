@@ -80,7 +80,7 @@ export const TableNode = memo(function TableNode({
         'table-node group flex select-none flex-col items-center justify-center overflow-visible border-2 px-[clamp(.35rem,1.1vw,.75rem)] py-[clamp(.3rem,.9vw,.65rem)] text-center outline-none transition-[transform,filter,box-shadow,border-color] duration-200 focus-visible:ring-4 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 active:scale-[.98] md:hover:-translate-y-0.5',
         shape === 'round' ? 'rounded-full' : 'rounded-[1rem]',
         shape === 'booth' && 'border-[3px] border-double',
-        embedded ? 'h-full min-h-0 w-full' : 'absolute min-h-[4.75rem]',
+        embedded ? 'h-full min-h-0 w-full' : 'absolute min-h-0',
         config.shell,
         highlighted && 'ring-4 ring-orange-300 ring-offset-2',
         selected && 'ring-4 ring-sky-500 ring-offset-2 ring-offset-white',
