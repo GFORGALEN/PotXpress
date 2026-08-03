@@ -759,7 +759,7 @@ export function DashboardPage() {
               />
             ) : (
             <div className={canvasFocused
-              ? 'fixed inset-2 z-50 min-h-0 rounded-[2rem] bg-white p-2 shadow-2xl sm:inset-4'
+              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-white'
               : 'relative h-[clamp(32rem,70vh,54rem)] min-h-0'}>
               {(canManageTables || layoutEditor.mode !== 'view') ? (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
@@ -817,6 +817,7 @@ export function DashboardPage() {
                 onSelectTables={layoutEditor.selectTables}
                 onUpdateTableLayout={layoutEditor.updateTableLayout}
                 onMoveSelectedTables={layoutEditor.moveSelectedTables}
+                immersive={canvasFocused}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {
                   layoutEditor.setSelectedDecorationId(id);

@@ -104,6 +104,7 @@ export function FloorCanvas({
   onSelectTables,
   onUpdateTableLayout,
   onMoveSelectedTables,
+  immersive = false,
   selectedDecorationId = null,
   onSelectDecoration,
   onUpdateDecoration,
@@ -406,7 +407,17 @@ export function FloorCanvas({
   return (
     <div
       ref={viewportRef}
-      className="floor-viewport relative h-full min-h-0 w-full touch-none overflow-hidden rounded-[1.5rem] border border-stone-200 shadow-inner"
+      className={`floor-viewport relative h-full min-h-0 w-full touch-none overflow-hidden ${immersive
+        ? 'rounded-none border-0 shadow-none'
+        : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
+      style={immersive ? {
+        backgroundColor: canvas.backgroundColor,
+        backgroundImage: [
+          'linear-gradient(90deg, rgb(120 113 108 / 0.025) 1px, transparent 1px)',
+          'linear-gradient(rgb(120 113 108 / 0.025) 1px, transparent 1px)',
+        ].join(','),
+        backgroundSize: '54px 54px',
+      } : undefined}
       aria-label="门店桌台布局画布"
     >
       <TransformWrapper
@@ -416,6 +427,9 @@ export function FloorCanvas({
         centerOnInit={false}
         centerZoomedOut={false}
         limitToBounds={false}
+        disablePadding
+        autoAlignment={{ disabled: true, sizeX: 0, sizeY: 0 }}
+        velocityAnimation={{ disabled: true }}
         doubleClick={{ disabled: true }}
         panning={{
           disabled: false,
@@ -478,7 +492,7 @@ export function FloorCanvas({
             >
               <div
                 ref={surfaceRef}
-                className={`floor-surface relative rounded-[1.35rem] ${editing ? 'overflow-visible' : 'overflow-hidden'}`}
+                className={`floor-surface relative ${immersive ? 'rounded-none border-0' : 'rounded-[1.35rem]'} ${editing ? 'overflow-visible' : 'overflow-hidden'}`}
                 style={{
                   width,
                   height,
