@@ -432,9 +432,9 @@ export function FloorCanvas({
         velocityAnimation={{ disabled: true }}
         doubleClick={{ disabled: true }}
         panning={{
-          disabled: false,
-          velocityDisabled: false,
-          allowLeftClickPan: !editing,
+          disabled: !editing,
+          velocityDisabled: true,
+          allowLeftClickPan: false,
           allowMiddleClickPan: true,
           allowRightClickPan: false,
           excluded: [
@@ -444,7 +444,10 @@ export function FloorCanvas({
             'potx-decoration-node',
           ],
         }}
-        pinch={{ excluded: ['table-node', 'canvas-control', 'potx-decoration-node'] }}
+        pinch={{
+          allowPanning: editing,
+          excluded: ['table-node', 'canvas-control', 'potx-decoration-node'],
+        }}
         // smooth 模式下缩放步长 = step × |deltaY|。Windows 滚轮一格 deltaY≈100，
         // step 必须足够小，否则一格滚轮直接顶到 maxScale。
         wheel={{ step: 0.0015, excluded: ['canvas-control'] }}

@@ -110,8 +110,10 @@
 
 .floor-viewport {
   background:
-    radial-gradient(circle at 50% 15%, rgb(255 255 255 / 0.95), transparent 45%),
-    #e9e8e4;
+    linear-gradient(90deg, rgb(120 113 108 / 0.025) 1px, transparent 1px),
+    linear-gradient(rgb(120 113 108 / 0.025) 1px, transparent 1px),
+    #f7f5f0;
+  background-size: 54px 54px;
 }
 
 .floor-surface {
@@ -120,8 +122,8 @@
     linear-gradient(90deg, rgb(120 113 108 / 0.025) 1px, transparent 1px),
     linear-gradient(rgb(120 113 108 / 0.025) 1px, transparent 1px);
   background-size: 54px 54px;
-  border: 1px solid rgb(214 211 209 / 0.9);
-  box-shadow: var(--shadow-floor);
+  border: 0;
+  box-shadow: none;
 }
 
 .table-seat {
