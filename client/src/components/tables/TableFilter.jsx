@@ -29,7 +29,7 @@ export function TableFilter({
   onSearchChange,
 }) {
   return (
-    <section className="rounded-[1.25rem] border border-stone-200/80 bg-white p-2.5 shadow-card sm:p-3" aria-label="桌台运营概览">
+    <section className="rounded-[1.5rem] border border-stone-200/80 bg-white p-2.5 shadow-card sm:p-3" aria-label="桌台运营概览">
       <div className="flex gap-2 overflow-x-auto pb-1" aria-label="桌台状态筛选">
         {FILTERS.map(({ value, label, count, Icon, tone, active }) => (
           <button
@@ -37,7 +37,7 @@ export function TableFilter({
             type="button"
             onClick={() => onStatusChange(value)}
             className={clsx(
-              'flex min-h-[3.75rem] min-w-[7.4rem] shrink-0 items-center gap-2.5 rounded-2xl border px-3 text-left transition active:scale-[.98] sm:min-w-[8.4rem]',
+              'flex min-h-[4rem] min-w-[7.4rem] shrink-0 items-center gap-2.5 rounded-2xl border px-3 text-left transition active:scale-[.98] sm:min-w-[8.4rem]',
               status === value
                 ? active
                 : `border-stone-200 bg-stone-50/80 hover:border-stone-300 ${tone}`,

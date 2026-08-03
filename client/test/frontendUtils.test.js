@@ -173,6 +173,7 @@ test('layout save payload includes all editable canvas fields', () => {
 
   assert.deepEqual(payload, {
     layoutVersion: 3,
+    deletedTableIds: [],
     canvas: {
       aspectRatio: '16:9',
       virtualWidth: 2400,
@@ -189,6 +190,18 @@ test('layout save payload includes all editable canvas fields', () => {
     decorations: [],
     tables: [{ tableId: 'table-1', layout }],
   });
+
+  const deletionPayload = buildLayoutSavePayload({
+    layoutVersion: 4,
+    canvas: payload.canvas,
+    tables: [{ tableId: 'table-1' }, { tableId: 'table-2' }],
+    layoutMap: new Map([['table-1', layout]]),
+  });
+  assert.deepEqual(deletionPayload.deletedTableIds, ['table-2']);
+  assert.deepEqual(
+    deletionPayload.tables.map((table) => table.tableId),
+    ['table-1'],
+  );
 });
 
 test('canvas resize patch scales table constraints proportionally', () => {

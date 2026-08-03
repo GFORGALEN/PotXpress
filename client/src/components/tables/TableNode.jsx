@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useRef } from 'react';
 import clsx from 'clsx';
 import {
   AlertTriangle,
@@ -57,11 +57,14 @@ export const TableNode = memo(function TableNode({
   timezone,
   highlighted,
   onTableClick,
+  onTableContextMenu,
   embedded = false,
   selected = false,
   shape = 'rectangle',
   groupName = null,
 }) {
+  const longPressTimerRef = useRef(null);
+  const suppressClickRef = useRef(false);
   const isIdle = status === 'idle';
   const duration = formatTimerDuration(
     status === 'overtime' ? overtimeSeconds : remainingSeconds,
@@ -74,10 +77,10 @@ export const TableNode = memo(function TableNode({
       type="button"
       data-table-node={tableId}
       className={clsx(
-        'table-node group flex min-h-[4.75rem] select-none flex-col items-center justify-center overflow-visible border-2 px-[clamp(.35rem,1.1vw,.75rem)] py-[clamp(.3rem,.9vw,.65rem)] text-center outline-none transition-[transform,filter,box-shadow,border-color] duration-200 focus-visible:ring-4 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 active:scale-[.98] md:hover:-translate-y-0.5',
+        'table-node group flex select-none flex-col items-center justify-center overflow-visible border-2 px-[clamp(.35rem,1.1vw,.75rem)] py-[clamp(.3rem,.9vw,.65rem)] text-center outline-none transition-[transform,filter,box-shadow,border-color] duration-200 focus-visible:ring-4 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 active:scale-[.98] md:hover:-translate-y-0.5',
         shape === 'round' ? 'rounded-full' : 'rounded-[1rem]',
         shape === 'booth' && 'border-[3px] border-double',
-        embedded ? 'h-full w-full' : 'absolute',
+        embedded ? 'h-full min-h-0 w-full' : 'absolute min-h-[4.75rem]',
         config.shell,
         highlighted && 'ring-4 ring-orange-300 ring-offset-2',
         selected && 'ring-4 ring-sky-500 ring-offset-2 ring-offset-white',
@@ -98,8 +101,35 @@ export const TableNode = memo(function TableNode({
       }}
       onClick={(event) => {
         event.stopPropagation();
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
         onTableClick(tableId);
       }}
+      onContextMenu={(event) => {
+        if (!onTableContextMenu) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onTableContextMenu({
+          tableId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+      }}
+      onPointerDown={(event) => {
+        if (event.pointerType !== 'touch' || !onTableContextMenu) return;
+        const { clientX, clientY } = event;
+        longPressTimerRef.current = setTimeout(() => {
+          suppressClickRef.current = true;
+          onTableContextMenu({ tableId, clientX, clientY });
+        }, 550);
+      }}
+      onPointerMove={() => {
+        clearTimeout(longPressTimerRef.current);
+      }}
+      onPointerUp={() => clearTimeout(longPressTimerRef.current)}
+      onPointerCancel={() => clearTimeout(longPressTimerRef.current)}
       onDoubleClick={(event) => event.stopPropagation()}
       aria-label={`${name}，${embedded ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '超时' : '剩余'} ${duration}`}`}
     >

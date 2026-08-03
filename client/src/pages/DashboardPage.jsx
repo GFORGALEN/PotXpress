@@ -15,6 +15,12 @@ import {
   Radio,
   RotateCw,
 } from 'lucide-react';
+import {
+  createTable,
+  deleteTablePermanent,
+  disableTable,
+  updateTable,
+} from '../api/admin.js';
 import { getLayout } from '../api/layout.ts';
 import { listTimers } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
@@ -26,10 +32,13 @@ import { TimerStatusBanner } from '../components/alerts/TimerStatusBanner.jsx';
 import { EmptyState } from '../components/common/EmptyState.jsx';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.jsx';
+import { ConfirmDialog } from '../components/common/ConfirmDialog.jsx';
 import { FloorCanvas } from '../components/layout/FloorCanvas.jsx';
 import { EditorToolbar } from '../components/layout/EditorToolbar.jsx';
 import { LayoutConflictDialog } from '../components/layout/LayoutConflictDialog.jsx';
 import { TableActionDialog } from '../components/tables/TableActionDialog.jsx';
+import { CanvasContextMenu } from '../components/tables/CanvasContextMenu.jsx';
+import { CanvasTableDialog } from '../components/tables/CanvasTableDialog.jsx';
 import { TableFilter } from '../components/tables/TableFilter.jsx';
 import { TableListView } from '../components/layout/TableListView.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -78,6 +87,11 @@ export function DashboardPage() {
   const [search, setSearch] = useState('');
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [canvasFocused, setCanvasFocused] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [canvasMenu, setCanvasMenu] = useState(null);
+  const [tableDialog, setTableDialog] = useState(null);
+  const [tableMutation, setTableMutation] = useState(null);
+  const [tableMutationBusy, setTableMutationBusy] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
   const [mobileView, setMobileView] = useState(
@@ -89,6 +103,7 @@ export function DashboardPage() {
   const timersLoadedRef = useRef(false);
   const pollingFailedRef = useRef(false);
   const realtimeRefreshRef = useRef(() => {});
+  const fullscreenRootRef = useRef(null);
   const now = useSecondTick(Boolean(selectedStoreId));
 
   const loadSettings = useCallback(async () => {
@@ -123,6 +138,9 @@ export function DashboardPage() {
     setTimersError(null);
     setSelectedTableId(null);
     setCanvasFocused(false);
+    setCanvasMenu(null);
+    setTableDialog(null);
+    setTableMutation(null);
     setAreaFilter('all');
     setSettings(null);
     clockOffsetRef.current = 0;
@@ -131,6 +149,22 @@ export function DashboardPage() {
     pollingFailedRef.current = false;
     setTimerEventVersion(0);
   }, [selectedStoreId, storeEpoch]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement === fullscreenRootRef.current;
+      setIsFullscreen(active);
+      if (!document.fullscreenElement) {
+        setCanvasFocused(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener(
+      'fullscreenchange',
+      handleFullscreenChange,
+    );
+  }, []);
 
   useEffect(() => {
     loadSettings();
@@ -261,7 +295,12 @@ export function DashboardPage() {
   );
   const correctedNow = now + clockOffsetRef.current;
   const displayTables = useMemo(() => (
-    (layout?.tables ?? []).map((table) => ({
+    (layout?.tables ?? [])
+      .filter((table) => (
+        layoutEditor.mode === 'view'
+        || layoutEditor.draftLayout.has(table.tableId)
+      ))
+      .map((table) => ({
       ...table,
       layout: layoutEditor.mode === 'view'
         ? table.layout
@@ -379,6 +418,195 @@ export function DashboardPage() {
     setLayout(result);
     return result;
   }, [selectedStoreId]);
+  const canManageTables = ['system_admin', 'store_admin'].includes(user.role);
+  const toggleCanvasFocus = useCallback(async () => {
+    if (layoutEditor.mode !== 'view') {
+      setCanvasFocused((value) => !value);
+      return;
+    }
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen?.();
+      return;
+    }
+
+    if (canvasFocused) {
+      setCanvasFocused(false);
+      return;
+    }
+
+    setCanvasFocused(true);
+    try {
+      await fullscreenRootRef.current?.requestFullscreen?.();
+    } catch {
+      // Keep the focused canvas fallback when the browser blocks fullscreen.
+      setIsFullscreen(false);
+    }
+  }, [canvasFocused, layoutEditor.mode]);
+  const nextTableNumber = useMemo(() => {
+    const used = new Set((layout?.tables ?? []).map((table) => table.number));
+    for (let number = 1; number <= 9999; number += 1) {
+      if (!used.has(number)) return number;
+    }
+    return 9999;
+  }, [layout?.tables]);
+
+  const openCreateTableDialog = useCallback((position = { xRatio: 0.45, yRatio: 0.445 }) => {
+    setCanvasMenu(null);
+    if (layoutEditor.mode === 'editing' && layoutEditor.isDirty) {
+      showToast('请先保存当前布局，再新增桌台', 'info');
+      return;
+    }
+    setTableDialog({
+      mode: 'create',
+      position: {
+        xRatio: Math.max(0, position.xRatio - 0.05),
+        yRatio: Math.max(0, position.yRatio - 0.055),
+      },
+      table: {
+        name: `${nextTableNumber}号桌`,
+        number: nextTableNumber,
+        shape: 'rectangle',
+        capacity: 4,
+        area: '大厅',
+        note: null,
+        defaultDurationMinutes: null,
+      },
+    });
+  }, [layoutEditor.isDirty, layoutEditor.mode, nextTableNumber, showToast]);
+
+  const handleCanvasMenuAction = useCallback((action, menu) => {
+    setCanvasMenu(null);
+    if (
+      action !== 'delete'
+      && layoutEditor.mode === 'editing'
+      && layoutEditor.isDirty
+    ) {
+      showToast('请先保存当前布局，再修改桌台资料', 'info');
+      return;
+    }
+    if (action === 'create') {
+      openCreateTableDialog(menu.type === 'table' ? {
+        xRatio: Math.min(0.94, menu.table.layout.xRatio + menu.table.layout.widthRatio + 0.025),
+        yRatio: menu.table.layout.yRatio,
+      } : menu);
+      return;
+    }
+    const table = menu.table;
+    if (action === 'edit') {
+      setTableDialog({ mode: 'edit', table });
+    } else if (action === 'duplicate') {
+      setTableDialog({
+        mode: 'duplicate',
+        table: {
+          ...table,
+          name: `${nextTableNumber}号桌`,
+          number: nextTableNumber,
+        },
+        sourceTableId: table.tableId,
+        position: {
+          xRatio: Math.min(0.9, table.layout.xRatio + 0.025),
+          yRatio: Math.min(0.89, table.layout.yRatio + 0.025),
+        },
+      });
+    } else if (action === 'disable') {
+      setTableMutation({ type: 'disable', table });
+    } else if (action === 'delete') {
+      setTableMutation({
+        type: layoutEditor.mode === 'editing' ? 'stage-delete' : 'delete',
+        table,
+      });
+    }
+  }, [
+    layoutEditor.isDirty,
+    layoutEditor.mode,
+    nextTableNumber,
+    openCreateTableDialog,
+    showToast,
+  ]);
+
+  const refreshAfterTableMutation = useCallback(async (continueEditing) => {
+    const latestLayout = await reloadLatestLayout();
+    refreshTimers();
+    if (continueEditing) {
+      layoutEditor.enterEdit(latestLayout, {
+        onSaved: setLayout,
+        onReload: reloadLatestLayout,
+      });
+    }
+  }, [layoutEditor, refreshTimers, reloadLatestLayout]);
+
+  const submitTableDialog = useCallback(async (form) => {
+    if (!tableDialog || tableMutationBusy) return;
+    const continueEditing = layoutEditor.mode === 'editing'
+      || ['create', 'duplicate'].includes(tableDialog.mode);
+    setTableMutationBusy(true);
+    try {
+      if (tableDialog.mode === 'edit') {
+        await updateTable(selectedStoreId, tableDialog.table.tableId, form);
+        showToast('桌台资料已更新', 'success');
+      } else {
+        await createTable(selectedStoreId, {
+          ...form,
+          placement: tableDialog.position,
+        });
+        showToast(tableDialog.mode === 'duplicate' ? '桌台已复制' : '桌台已创建', 'success');
+      }
+      setTableDialog(null);
+      await refreshAfterTableMutation(continueEditing);
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setTableMutationBusy(false);
+    }
+  }, [
+    refreshAfterTableMutation,
+    layoutEditor.mode,
+    selectedStoreId,
+    showToast,
+    tableDialog,
+    tableMutationBusy,
+  ]);
+
+  const confirmTableMutation = useCallback(async () => {
+    if (!tableMutation || tableMutationBusy) return;
+    if (tableMutation.type === 'stage-delete') {
+      layoutEditor.deleteTables([tableMutation.table.tableId]);
+      setTableMutation(null);
+      showToast('桌台已从布局草稿移除，保存布局后生效', 'success');
+      return;
+    }
+    const continueEditing = layoutEditor.mode === 'editing';
+    setTableMutationBusy(true);
+    try {
+      if (tableMutation.type === 'disable') {
+        await disableTable(selectedStoreId, tableMutation.table.tableId);
+        showToast('桌台已停用，历史记录仍会保留', 'success');
+      } else {
+        await deleteTablePermanent(selectedStoreId, tableMutation.table.tableId);
+        showToast('桌台已永久删除', 'success');
+      }
+      setTableMutation(null);
+      await refreshAfterTableMutation(continueEditing);
+    } catch (error) {
+      showToast(
+        error.code === 'TABLE_HAS_ACTIVE_TIMER'
+          ? '该桌正在计时，请先重置清台'
+          : error.message,
+        'error',
+      );
+    } finally {
+      setTableMutationBusy(false);
+    }
+  }, [
+    refreshAfterTableMutation,
+    layoutEditor,
+    layoutEditor.mode,
+    selectedStoreId,
+    showToast,
+    tableMutation,
+    tableMutationBusy,
+  ]);
   const alerts = useAlertWatcher(allTables, refreshTimers);
 
   const changeMobileView = useCallback((view) => {
@@ -411,19 +639,23 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[100rem] flex-col gap-3">
-      <section className="flex flex-col justify-between gap-3 rounded-[1.25rem] border border-stone-200/80 bg-white px-4 py-3 shadow-card sm:flex-row sm:items-center">
+    <div
+      ref={fullscreenRootRef}
+      className="mx-auto flex max-w-[110rem] flex-col gap-4 bg-stone-50"
+    >
+      <section className="relative flex flex-col justify-between gap-4 overflow-hidden rounded-[1.75rem] bg-ink-950 px-5 py-5 text-white shadow-[0_24px_52px_-28px_rgba(16,24,21,.55)] sm:flex-row sm:items-center sm:px-6">
+        <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-ember-500/25 blur-3xl" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-black tracking-tight text-ink-950 sm:text-2xl">
+            <h1 className="truncate text-xl font-black tracking-tight text-white sm:text-2xl">
               {currentStore?.name ?? '桌台看板'}
             </h1>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-400/15 text-emerald-200' : 'bg-amber-300/15 text-amber-100'}`}>
               <Radio size={12} />
               {realtime.connected ? '实时连接' : '自动重连中'}
             </span>
           </div>
-          <p className="mt-1 text-xs font-medium text-stone-500">
+          <p className="mt-1 text-xs font-medium text-stone-300">
             运行模式 · 点击桌台查看计时与操作
           </p>
         </div>
@@ -433,12 +665,12 @@ export function DashboardPage() {
             <p className="flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
               <Clock3 size={11} /> 门店时间
             </p>
-            <p className="font-mono text-base font-black tabular-nums text-ink-900">{currentTimeLabel}</p>
+            <p className="font-mono text-base font-black tabular-nums text-white">{currentTimeLabel}</p>
           </div>
           <button
             type="button"
             onClick={refreshTimers}
-            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600 transition hover:border-stone-300 hover:bg-stone-50"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 text-sm font-bold text-white transition hover:bg-white/15"
           >
             <RotateCw size={16} />
             立即同步
@@ -451,7 +683,7 @@ export function DashboardPage() {
                 onSaved: setLayout,
                 onReload: reloadLatestLayout,
               })}
-              className="hidden min-h-11 items-center gap-2 rounded-xl bg-ink-900 px-4 text-sm font-bold text-white transition hover:bg-ink-800 md:inline-flex"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-ink-950 transition hover:bg-stone-100"
             >
               进入布局编辑
               <ArrowUpRight size={16} />
@@ -460,7 +692,9 @@ export function DashboardPage() {
         </div>
       </section>
 
-      {layoutEditor.mode !== 'view' ? <EditorToolbar /> : null}
+      {layoutEditor.mode !== 'view' ? (
+        <EditorToolbar onAddTable={() => openCreateTableDialog()} />
+      ) : null}
 
       {!soundAuthorized ? (
         <button
@@ -478,10 +712,12 @@ export function DashboardPage() {
         tables={overtimeTables}
       />
 
-      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-stone-200 p-1 md:hidden" aria-label="看板显示方式">
-        <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'list' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('list')}><List size={17} />列表</button>
-        <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'canvas' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('canvas')}><LayoutGrid size={17} />平面图</button>
-      </div>
+      {layoutEditor.mode === 'view' ? (
+        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-stone-200 p-1 md:hidden" aria-label="看板显示方式">
+          <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'list' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('list')}><List size={17} />列表</button>
+          <button type="button" className={`flex min-h-10 items-center justify-center gap-2 rounded-xl text-sm font-bold ${mobileView === 'canvas' ? 'bg-white text-ink-950 shadow-card' : 'text-stone-500'}`} onClick={() => changeMobileView('canvas')}><LayoutGrid size={17} />平面图</button>
+        </div>
+      ) : null}
       <TimerStatusBanner
         status="warning"
         tables={warningTables}
@@ -491,7 +727,9 @@ export function DashboardPage() {
       {allTables.length === 0 ? (
         <EmptyState
           title="本店还没有桌台"
-          description="请管理员先到 桌台管理 创建桌台。"
+          description={canManageTables
+            ? '点击上方“新增桌台”，创建后会立即出现在画布中。'
+            : '请联系门店管理员创建桌台。'}
         />
       ) : (
         <>
@@ -514,7 +752,7 @@ export function DashboardPage() {
               description="请调整状态筛选或清空搜索关键词。"
             />
           ) : (
-            isMobile && mobileView === 'list' ? (
+            isMobile && mobileView === 'list' && layoutEditor.mode === 'view' ? (
               <TableListView
                 tables={visibleTables}
                 onTableClick={handleTableClick}
@@ -523,16 +761,30 @@ export function DashboardPage() {
             <div className={canvasFocused
               ? 'fixed inset-2 z-50 min-h-0 rounded-[2rem] bg-white p-2 shadow-2xl sm:inset-4'
               : 'relative h-[clamp(32rem,70vh,54rem)] min-h-0'}>
-              <button
-                type="button"
-                onClick={() => setCanvasFocused((value) => !value)}
-                className="absolute left-4 top-4 z-40 inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-xs font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
-                aria-label={canvasFocused ? '退出专注画布' : '专注画布'}
-              >
-                {canvasFocused ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-                {canvasFocused ? '退出专注' : '专注画布'}
-              </button>
+              {(canManageTables || layoutEditor.mode !== 'view') ? (
+                <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleCanvasFocus}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-xs font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
+                    aria-label={isFullscreen || canvasFocused
+                      ? '退出全屏运营'
+                      : '进入全屏运营'}
+                  >
+                    {canvasFocused ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+                    {layoutEditor.mode === 'view'
+                      ? (canvasFocused ? '退出全屏' : '全屏运营')
+                      : (canvasFocused ? '退出专注' : '专注画布')}
+                  </button>
+                  {canvasFocused && layoutEditor.mode === 'view' ? (
+                    <span className="rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2 text-xs font-black text-emerald-800 shadow-lg backdrop-blur">
+                      点击桌台即可开始或调整计时
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               <FloorCanvas
+                key={selectedStoreId}
                 canvas={layoutEditor.mode === 'view'
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
@@ -545,16 +797,30 @@ export function DashboardPage() {
                   : layoutEditor.draftDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
+                onCanvasContextMenu={canManageTables
+                  ? (position) => setCanvasMenu({ type: 'canvas', ...position })
+                  : undefined}
+                onTableContextMenu={canManageTables
+                  ? ({ tableId, clientX, clientY }) => {
+                    const table = allTables.find((item) => item.tableId === tableId);
+                    if (table) setCanvasMenu({ type: 'table', table, clientX, clientY });
+                  }
+                  : undefined}
                 editing={layoutEditor.mode === 'editing'}
                 selectedTableId={layoutEditor.mode === 'view'
                   ? selectedTableId
                   : layoutEditor.selectedTableId}
+                selectedTableIds={layoutEditor.mode === 'editing'
+                  ? layoutEditor.selectedTableIds
+                  : []}
                 onSelectTable={layoutEditor.setSelectedTableId}
+                onSelectTables={layoutEditor.selectTables}
                 onUpdateTableLayout={layoutEditor.updateTableLayout}
+                onMoveSelectedTables={layoutEditor.moveSelectedTables}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {
                   layoutEditor.setSelectedDecorationId(id);
-                  layoutEditor.setSelectedTableId(null);
+                  if (id) layoutEditor.setSelectedTableId(null);
                 }}
                 onUpdateDecoration={layoutEditor.updateDecoration}
               />
@@ -574,6 +840,40 @@ export function DashboardPage() {
         }
         onRefresh={refreshTimers}
         onClose={handleCloseDialog}
+      />
+      <CanvasContextMenu
+        menu={canvasMenu}
+        onClose={() => setCanvasMenu(null)}
+        onAction={handleCanvasMenuAction}
+      />
+      <CanvasTableDialog
+        dialog={tableDialog}
+        busy={tableMutationBusy}
+        onClose={() => setTableDialog(null)}
+        onSubmit={submitTableDialog}
+      />
+      <ConfirmDialog
+        open={Boolean(tableMutation)}
+        title={['delete', 'stage-delete'].includes(tableMutation?.type)
+          ? '永久删除桌台？'
+          : '停用桌台？'}
+        description={tableMutation?.type === 'stage-delete'
+          ? `“${tableMutation?.table.name}”会先从当前草稿移除，点击“保存布局”后才永久删除。已有计时历史的桌台不能永久删除。`
+          : tableMutation?.type === 'delete'
+          ? `“${tableMutation?.table.name}”将被永久删除；存在计时历史或活动计时时不会执行。`
+          : `“${tableMutation?.table.name}”将从当前画布隐藏，但历史记录会保留。`}
+        confirmText={tableMutationBusy
+          ? '处理中…'
+          : tableMutation?.type === 'stage-delete'
+            ? '从草稿移除'
+            : tableMutation?.type === 'delete'
+              ? '永久删除'
+              : '确认停用'}
+        danger
+        onConfirm={confirmTableMutation}
+        onCancel={() => {
+          if (!tableMutationBusy) setTableMutation(null);
+        }}
       />
       <LayoutConflictDialog />
       <WarningAlertDialog

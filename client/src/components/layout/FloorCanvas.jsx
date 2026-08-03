@@ -18,6 +18,14 @@ import { Rnd } from 'react-rnd';
 import { useCanvasScale } from '../../hooks/useCanvasScale.js';
 import { TableNode } from '../tables/TableNode.jsx';
 
+function getClientPoint(event) {
+  const point = event?.changedTouches?.[0] ?? event?.touches?.[0] ?? event;
+  return {
+    x: point?.clientX ?? 0,
+    y: point?.clientY ?? 0,
+  };
+}
+
 function ZoomControls({
   zoomIn,
   zoomOut,
@@ -87,32 +95,49 @@ export function FloorCanvas({
   decorations = [],
   timezone,
   onTableClick,
+  onCanvasContextMenu,
+  onTableContextMenu,
   editing = false,
   selectedTableId = null,
+  selectedTableIds = [],
   onSelectTable,
+  onSelectTables,
   onUpdateTableLayout,
+  onMoveSelectedTables,
   selectedDecorationId = null,
   onSelectDecoration,
   onUpdateDecoration,
 }) {
   const viewportRef = useRef(null);
+  const surfaceRef = useRef(null);
   const transformApiRef = useRef(null);
   const lastZoomUpdateRef = useRef(0);
   const zoomUpdateTimerRef = useRef(null);
+  const transformSettleTimerRef = useRef(null);
   const pendingScaleRef = useRef(1);
   const scaleRef = useRef(1);
   const [transformScale, setTransformScale] = useState(1);
   const [draggingTableId, setDraggingTableId] = useState(null);
   const [draggingDecorationId, setDraggingDecorationId] = useState(null);
+  const [selectionBox, setSelectionBox] = useState(null);
   const [rndKeyVersion, setRndKeyVersion] = useState(0);
   const rndRefs = useRef(new Map());
+  const groupDragStartRef = useRef(null);
+  const decorationDragStartRef = useRef(null);
+  const marqueeRef = useRef(null);
+  const suppressSurfaceClickRef = useRef(false);
+  const editingViewInitializedRef = useRef(false);
+  const selectedTableIdSet = useMemo(
+    () => new Set(selectedTableIds.length ? selectedTableIds : [selectedTableId].filter(Boolean)),
+    [selectedTableId, selectedTableIds],
+  );
   const {
     fitScale,
     width,
     height,
     actualSizeScale,
     viewportSize,
-  } = useCanvasScale(viewportRef, canvas);
+  } = useCanvasScale(viewportRef, canvas, editing);
   const maxScale = Math.max(
     4,
     Math.min(8, actualSizeScale),
@@ -185,8 +210,84 @@ export function FloorCanvas({
     if (zoomUpdateTimerRef.current) {
       clearTimeout(zoomUpdateTimerRef.current);
     }
+    if (transformSettleTimerRef.current) {
+      clearTimeout(transformSettleTimerRef.current);
+    }
     rndRefs.current.clear();
   }, []);
+
+  useEffect(() => {
+    if (!editing) {
+      editingViewInitializedRef.current = false;
+      setSelectionBox(null);
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    const handleMouseMove = (event) => {
+      const marquee = marqueeRef.current;
+      if (!marquee) return;
+      const currentX = Math.min(1, Math.max(0, (event.clientX - marquee.bounds.left) / marquee.bounds.width));
+      const currentY = Math.min(1, Math.max(0, (event.clientY - marquee.bounds.top) / marquee.bounds.height));
+      if (Math.abs(currentX - marquee.startX) > 0.003 || Math.abs(currentY - marquee.startY) > 0.003) {
+        suppressSurfaceClickRef.current = true;
+      }
+      setSelectionBox({
+        startX: marquee.startX,
+        startY: marquee.startY,
+        currentX,
+        currentY,
+      });
+    };
+    const handleMouseUp = (event) => {
+      const marquee = marqueeRef.current;
+      if (!marquee) return;
+      const currentX = Math.min(1, Math.max(0, (event.clientX - marquee.bounds.left) / marquee.bounds.width));
+      const currentY = Math.min(1, Math.max(0, (event.clientY - marquee.bounds.top) / marquee.bounds.height));
+      const left = Math.min(marquee.startX, currentX);
+      const right = Math.max(marquee.startX, currentX);
+      const top = Math.min(marquee.startY, currentY);
+      const bottom = Math.max(marquee.startY, currentY);
+      const dragged = right - left > 0.003 || bottom - top > 0.003;
+      if (dragged) {
+        const ids = tables.filter((table) => (
+          table.layout.xRatio < right
+          && table.layout.xRatio + table.layout.widthRatio > left
+          && table.layout.yRatio < bottom
+          && table.layout.yRatio + table.layout.heightRatio > top
+        )).map((table) => table.tableId);
+        onSelectTables?.(ids);
+        onSelectDecoration?.(null);
+        suppressSurfaceClickRef.current = true;
+      }
+      marqueeRef.current = null;
+      setSelectionBox(null);
+    };
+    window.addEventListener('mousemove', handleMouseMove, true);
+    window.addEventListener('mouseup', handleMouseUp, true);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove, true);
+      window.removeEventListener('mouseup', handleMouseUp, true);
+    };
+  }, [onSelectDecoration, onSelectTables, tables]);
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!editing || !surface) return undefined;
+    const handleMouseDown = (event) => {
+      if (event.button !== 0 || event.target !== surface) return;
+      const bounds = surface.getBoundingClientRect();
+      const startX = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
+      const startY = Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height));
+      marqueeRef.current = { startX, startY, bounds };
+      suppressSurfaceClickRef.current = false;
+      setSelectionBox({ startX, startY, currentX: startX, currentY: startY });
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    surface.addEventListener('mousedown', handleMouseDown, true);
+    return () => surface.removeEventListener('mousedown', handleMouseDown, true);
+  }, [editing, height, width]);
 
   const queueScaleDisplayUpdate = (scale) => {
     pendingScaleRef.current = scale;
@@ -235,11 +336,34 @@ export function FloorCanvas({
     });
   };
 
+  // Programmatic centerView/setTransform animations do not reliably emit the
+  // user-interaction stop callbacks. Refresh react-rnd after every transform
+  // sequence settles so it never starts the next drag with stale geometry.
+  const scheduleRndOffsetRefresh = () => {
+    if (transformSettleTimerRef.current) {
+      clearTimeout(transformSettleTimerRef.current);
+    }
+    transformSettleTimerRef.current = setTimeout(() => {
+      transformSettleTimerRef.current = null;
+      setRndKeyVersion((version) => version + 1);
+      requestAnimationFrame(refreshAllRndOffsets);
+    }, 80);
+  };
+
   const fitOperationalView = (forcedScale = null) => {
     const api = transformApiRef.current;
     if (!api || !width || !height || !viewportSize.width || !viewportSize.height) return;
-    if (editing || forcedScale) {
-      api.centerView(forcedScale ?? 1, 220, 'easeOut');
+    if (editing) {
+      const editingScale = forcedScale ?? Math.min(
+        1,
+        viewportSize.width / width,
+        viewportSize.height / height,
+      );
+      api.centerView(editingScale, 0);
+      return;
+    }
+    if (forcedScale) {
+      api.centerView(forcedScale, 220, 'easeOut');
       return;
     }
     const boundsWidth = Math.max(0.05, contentBounds.right - contentBounds.left);
@@ -263,6 +387,8 @@ export function FloorCanvas({
   };
 
   useEffect(() => {
+    if (editing && editingViewInitializedRef.current) return undefined;
+    if (editing) editingViewInitializedRef.current = true;
     const frame = requestAnimationFrame(() => fitOperationalView());
     return () => cancelAnimationFrame(frame);
   }, [
@@ -284,17 +410,19 @@ export function FloorCanvas({
       aria-label="门店桌台布局画布"
     >
       <TransformWrapper
-        key={`${canvas.virtualWidth}:${canvas.virtualHeight}`}
         minScale={0.5}
         maxScale={maxScale}
         initialScale={1}
-        centerOnInit
-        centerZoomedOut
+        centerOnInit={false}
+        centerZoomedOut={false}
         limitToBounds={false}
         doubleClick={{ disabled: true }}
         panning={{
           disabled: false,
           velocityDisabled: false,
+          allowLeftClickPan: !editing,
+          allowMiddleClickPan: true,
+          allowRightClickPan: false,
           excluded: [
             'table-node',
             'canvas-control',
@@ -310,21 +438,21 @@ export function FloorCanvas({
           transformApiRef.current = ref;
           scaleRef.current = ref.state.scale;
           setTransformScale(ref.state.scale);
+          fitOperationalView();
           // centerOnInit 会在当前回调之后才真正完成居中，
           // 导致 Rnd 在挂载时计算的 offsetFromParent 过时。
           // 等一帧后强制 Rnd 重新挂载，重新计算 offset。
           requestAnimationFrame(() => {
             setRndKeyVersion((v) => v + 1);
-            fitOperationalView();
+            refreshAllRndOffsets();
           });
         }}
         onTransformed={(_, state) => {
-          if (Math.abs(scaleRef.current - state.scale) < 0.0001) {
-            return;
+          scheduleRndOffsetRefresh();
+          if (Math.abs(scaleRef.current - state.scale) >= 0.0001) {
+            scaleRef.current = state.scale;
+            queueScaleDisplayUpdate(state.scale);
           }
-
-          scaleRef.current = state.scale;
-          queueScaleDisplayUpdate(state.scale);
         }}
         onZoomStop={(ref) => {
           scaleRef.current = ref.state.scale;
@@ -349,7 +477,8 @@ export function FloorCanvas({
               }}
             >
               <div
-                className="floor-surface relative overflow-hidden rounded-[1.35rem]"
+                ref={surfaceRef}
+                className={`floor-surface relative rounded-[1.35rem] ${editing ? 'overflow-visible' : 'overflow-hidden'}`}
                 style={{
                   width,
                   height,
@@ -372,11 +501,40 @@ export function FloorCanvas({
                 }}
                 onClick={(event) => {
                   if (editing && event.target === event.currentTarget) {
+                    if (suppressSurfaceClickRef.current) {
+                      suppressSurfaceClickRef.current = false;
+                      return;
+                    }
+                    onSelectTables?.([]);
                     onSelectTable?.(null);
                     onSelectDecoration?.(null);
                   }
                 }}
+                onContextMenu={(event) => {
+                  if (!onCanvasContextMenu || event.target !== event.currentTarget) {
+                    return;
+                  }
+                  event.preventDefault();
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  onCanvasContextMenu({
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    xRatio: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+                    yRatio: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
+                  });
+                }}
               >
+                {selectionBox ? (
+                  <div
+                    className="pointer-events-none absolute z-[50000] border-2 border-sky-500 bg-sky-300/20"
+                    style={{
+                      left: `${Math.min(selectionBox.startX, selectionBox.currentX) * 100}%`,
+                      top: `${Math.min(selectionBox.startY, selectionBox.currentY) * 100}%`,
+                      width: `${Math.abs(selectionBox.currentX - selectionBox.startX) * 100}%`,
+                      height: `${Math.abs(selectionBox.currentY - selectionBox.startY) * 100}%`,
+                    }}
+                  />
+                ) : null}
                 {decorations.map((item) => {
                   const content = (
                     <div
@@ -421,7 +579,7 @@ export function FloorCanvas({
                     : 1;
                   return (
                     <Rnd
-                      key={`${item.id}:${rndKeyVersion}`}
+                      key={`${item.id}:${width}:${height}:${rndKeyVersion}`}
                       ref={(instance) => {
                         if (instance) {
                           rndRefs.current.set(item.id, instance);
@@ -430,7 +588,6 @@ export function FloorCanvas({
                         }
                       }}
                       className="potx-decoration-node"
-                      bounds="parent"
                       position={{
                         x: Math.round(item.xRatio * width),
                         y: Math.round(item.yRatio * height),
@@ -446,14 +603,39 @@ export function FloorCanvas({
                       minHeight={item.type === 'wall' ? 8 : item.type === 'seat' ? 32 : 35}
                       style={{ zIndex: item.zIndex + (draggingDecorationId === item.id ? 10000 : 0) }}
                       onMouseDown={() => {
-                        refreshRndOffset(item.id);
                         onSelectDecoration?.(item.id);
                       }}
-                      onDragStart={() => setDraggingDecorationId(item.id)}
-                      onDragStop={(_, data) => {
+                      onDragStart={(event) => {
+                        const point = getClientPoint(event);
+                        decorationDragStartRef.current = {
+                          id: item.id,
+                          clientX: point.x,
+                          clientY: point.y,
+                        };
+                        setDraggingDecorationId(item.id);
+                      }}
+                      onDragStop={(event) => {
                         setDraggingDecorationId(null);
-                        const nextX = data.x / width;
-                        const nextY = data.y / height;
+                        const dragStart = decorationDragStartRef.current;
+                        decorationDragStartRef.current = null;
+                        const point = getClientPoint(event);
+                        const deltaXPixels = dragStart?.id === item.id
+                          ? point.x - dragStart.clientX
+                          : 0;
+                        const deltaYPixels = dragStart?.id === item.id
+                          ? point.y - dragStart.clientY
+                          : 0;
+                        if (Math.hypot(deltaXPixels, deltaYPixels) < 3) {
+                          rndRefs.current.get(item.id)?.updatePosition({
+                            x: Math.round(item.xRatio * width),
+                            y: Math.round(item.yRatio * height),
+                          });
+                          return;
+                        }
+                        const deltaX = deltaXPixels / (width * scaleRef.current);
+                        const deltaY = deltaYPixels / (height * scaleRef.current);
+                        const nextX = item.xRatio + deltaX;
+                        const nextY = item.yRatio + deltaY;
                         if (hasMoved(nextX, nextY, item.xRatio, item.yRatio)) {
                           onUpdateDecoration?.(item.id, {
                             xRatio: nextX,
@@ -515,7 +697,8 @@ export function FloorCanvas({
                         {...table}
                         timezone={timezone}
                         onTableClick={onTableClick}
-                        selected={selectedTableId === table.tableId}
+                        onTableContextMenu={onTableContextMenu}
+                        selected={selectedTableIdSet.has(table.tableId)}
                       />
                     );
                   }
@@ -534,7 +717,7 @@ export function FloorCanvas({
 
                   return (
                     <Rnd
-                      key={`${table.tableId}:${rndKeyVersion}`}
+                      key={`${table.tableId}:${width}:${height}:${rndKeyVersion}`}
                       ref={(instance) => {
                         if (instance) {
                           rndRefs.current.set(table.tableId, instance);
@@ -543,7 +726,6 @@ export function FloorCanvas({
                         }
                       }}
                       className="potx-table-node"
-                      bounds="parent"
                       position={position}
                       size={size}
                       scale={scaleRef.current}
@@ -557,34 +739,81 @@ export function FloorCanvas({
                         ['round', 'square'].includes(table.shape) ? 1 : false
                       }
                       style={{ zIndex: table.layout.zIndex + (draggingTableId === table.tableId ? 10000 : 0) }}
-                      onMouseDown={() => {
-                        refreshRndOffset(table.tableId);
-                        onSelectTable?.(table.tableId);
+                      onMouseDown={(event) => {
+                        if (event.button !== 0) return;
+                        if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                          const nextIds = selectedTableIdSet.has(table.tableId)
+                            ? [...selectedTableIdSet].filter((id) => id !== table.tableId)
+                            : [...selectedTableIdSet, table.tableId];
+                          onSelectTables?.(nextIds);
+                        } else if (!selectedTableIdSet.has(table.tableId)) {
+                          onSelectTables?.([table.tableId]);
+                          onSelectTable?.(table.tableId);
+                        }
                       }}
-                      onDragStart={() => {
-                        refreshRndOffset(table.tableId);
+                      onDragStart={(event) => {
+                        const point = getClientPoint(event);
                         setDraggingTableId(table.tableId);
+                        const ids = selectedTableIdSet.has(table.tableId)
+                          ? [...selectedTableIdSet]
+                          : [table.tableId];
+                        groupDragStartRef.current = {
+                          activeId: table.tableId,
+                          clientX: point.x,
+                          clientY: point.y,
+                          positions: new Map(ids.map((id) => {
+                            const entry = tables.find((item) => item.tableId === id);
+                            return [id, {
+                              x: Math.round(entry.layout.xRatio * width),
+                              y: Math.round(entry.layout.yRatio * height),
+                            }];
+                          })),
+                        };
                       }}
-                      onDragStop={(_, data) => {
-                        setDraggingTableId(null);
-                        const nextX = data.x / width;
-                        const nextY = data.y / height;
-                        if (hasMoved(nextX, nextY, table.layout.xRatio, table.layout.yRatio)) {
-                          onUpdateTableLayout?.(table.tableId, {
-                            ...table.layout,
-                            xRatio: nextX,
-                            yRatio: nextY,
-                            bringToFront: true,
+                      onDrag={(event) => {
+                        const group = groupDragStartRef.current;
+                        if (!group || group.activeId !== table.tableId || group.positions.size < 2) return;
+                        const point = getClientPoint(event);
+                        const deltaX = (point.x - group.clientX) / scaleRef.current;
+                        const deltaY = (point.y - group.clientY) / scaleRef.current;
+                        group.positions.forEach((start, id) => {
+                          if (id === table.tableId) return;
+                          rndRefs.current.get(id)?.updatePosition({
+                            x: start.x + deltaX,
+                            y: start.y + deltaY,
                           });
+                        });
+                      }}
+                      onDragStop={(event) => {
+                        setDraggingTableId(null);
+                        const dragStart = groupDragStartRef.current;
+                        const point = getClientPoint(event);
+                        const deltaXPixels = dragStart?.activeId === table.tableId
+                          ? point.x - dragStart.clientX
+                          : 0;
+                        const deltaYPixels = dragStart?.activeId === table.tableId
+                          ? point.y - dragStart.clientY
+                          : 0;
+                        groupDragStartRef.current = null;
+                        if (Math.hypot(deltaXPixels, deltaYPixels) >= 3) {
+                          const deltaX = deltaXPixels / (width * scaleRef.current);
+                          const deltaY = deltaYPixels / (height * scaleRef.current);
+                          onMoveSelectedTables?.(table.tableId, deltaX, deltaY);
                         } else {
-                          // 纯点击：只把 zIndex 提到最前，不改动位置
+                          dragStart?.positions.forEach((start, id) => {
+                            rndRefs.current.get(id)?.updatePosition(start);
+                          });
+                          // 纯点击：强制恢复原位置，只把 zIndex 提到最前。
                           onUpdateTableLayout?.(table.tableId, {
                             ...table.layout,
                             bringToFront: true,
                           });
                         }
                       }}
-                      onResizeStart={() => onSelectTable?.(table.tableId)}
+                      onResizeStart={() => {
+                        onSelectTables?.([table.tableId]);
+                        onSelectTable?.(table.tableId);
+                      }}
                       onResizeStop={(_, __, element, ___, nextPosition) => {
                         const nextX = nextPosition.x / width;
                         const nextY = nextPosition.y / height;
@@ -608,9 +837,15 @@ export function FloorCanvas({
                       <TableNode
                         {...table}
                         embedded
-                        selected={selectedTableId === table.tableId}
+                        selected={selectedTableIdSet.has(table.tableId)}
                         timezone={timezone}
-                        onTableClick={() => onSelectTable?.(table.tableId)}
+                        onTableClick={() => {
+                          if (!selectedTableIdSet.has(table.tableId)) {
+                            onSelectTables?.([table.tableId]);
+                            onSelectTable?.(table.tableId);
+                          }
+                        }}
+                        onTableContextMenu={onTableContextMenu}
                       />
                     </Rnd>
                   );

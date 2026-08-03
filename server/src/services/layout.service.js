@@ -129,10 +129,24 @@ export async function saveLayout(storeId, input, user) {
 
   await unitOfWorkRepository.run(
     {
-      resources: ['stores', 'layouts', 'tables'],
+      resources: [
+        'stores',
+        'layouts',
+        'tables',
+        'activeTimers',
+        'tableGroups',
+        'records',
+      ],
       writeOrder: ['tables', 'layouts'],
     },
-    ({ stores, layouts, tables }) => {
+    ({
+      stores,
+      layouts,
+      tables,
+      activeTimers,
+      tableGroups,
+      records,
+    }) => {
       const store = stores.findById(storeId);
 
       if (!store) {
@@ -163,6 +177,57 @@ export async function saveLayout(storeId, input, user) {
       }
 
       const storeTables = tables.findByStoreId(storeId);
+      const deletedTableIds = [...new Set(input.deletedTableIds ?? [])];
+      const deletedIdSet = new Set(deletedTableIds);
+      const deletedTables = deletedTableIds.map((tableId) => (
+        storeTables.find((table) => table.id === tableId)
+      ));
+
+      if (deletedTables.some((table) => !table)) {
+        throw new AppError(
+          400,
+          'VALIDATION_ERROR',
+          '待删除桌台不存在或不属于当前门店',
+          { deletedTableIds },
+        );
+      }
+
+      const activeTableIds = new Set(
+        activeTimers.findByStoreId(storeId).flatMap(
+          (timer) => timer.memberTableIds ?? [timer.tableId],
+        ),
+      );
+      const groupedTableIds = new Set(
+        tableGroups.findByStoreId(storeId)
+          .filter((group) => group.enabled)
+          .flatMap((group) => group.tableIds),
+      );
+      const recordedTableIds = new Set(
+        records.findByStoreId(storeId).flatMap(
+          (record) => record.memberTableIds ?? [record.tableId],
+        ),
+      );
+      const blockedActive = deletedTableIds.filter((id) => activeTableIds.has(id));
+      const blockedGrouped = deletedTableIds.filter((id) => groupedTableIds.has(id));
+      const blockedHistory = deletedTableIds.filter((id) => recordedTableIds.has(id));
+
+      if (blockedActive.length) {
+        throw new AppError(409, 'TABLE_HAS_ACTIVE_TIMER', '待删除桌台正在计时，请先重置清台', {
+          tableIds: blockedActive,
+        });
+      }
+      if (blockedGrouped.length) {
+        throw new AppError(409, 'TABLE_IN_GROUP', '待删除桌台属于拼桌组，请先解除拼桌', {
+          tableIds: blockedGrouped,
+        });
+      }
+      if (blockedHistory.length) {
+        throw new AppError(409, 'TABLE_HAS_HISTORY', '已有计时历史的桌台只能停用，不能永久删除', {
+          tableIds: blockedHistory,
+        });
+      }
+
+      const remainingTables = storeTables.filter((table) => !deletedIdSet.has(table.id));
       const nextCanvas = {
         ...currentLayout.canvas,
         ...input.canvas,
@@ -179,13 +244,17 @@ export async function saveLayout(storeId, input, user) {
         );
       }
 
-      validateSubmittedTables(input.tables, storeTables, nextCanvas);
+      validateSubmittedTables(input.tables, remainingTables, nextCanvas);
       const submittedById = new Map(
         input.tables.map((item) => [item.tableId, item.layout]),
       );
       const timestamp = new Date().toISOString();
 
-      for (const table of storeTables) {
+      for (const tableId of deletedTableIds) {
+        tables.delete(tableId);
+      }
+
+      for (const table of remainingTables) {
         tables.update(table.id, {
           ...table,
           layout: submittedById.get(table.id),
@@ -198,6 +267,7 @@ export async function saveLayout(storeId, input, user) {
         canvas: currentLayout.canvas,
         decorations: currentLayout.decorations ?? [],
         tableCount: storeTables.length,
+        deletedTableIds: [],
       };
       savedVersion = currentLayout.layoutVersion + 1;
       layouts.update(storeId, {
@@ -212,7 +282,8 @@ export async function saveLayout(storeId, input, user) {
         layoutVersion: savedVersion,
         canvas: nextCanvas,
         decorations: input.decorations,
-        tableCount: storeTables.length,
+        tableCount: remainingTables.length,
+        deletedTableIds,
       };
     },
   );

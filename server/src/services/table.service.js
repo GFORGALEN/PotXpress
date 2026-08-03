@@ -137,6 +137,9 @@ function planNewTables({
       .map((table) => table.layout),
     count: specifications.length,
     startingZIndex: maxZIndex + 1,
+    preferredPositions: specifications.map(
+      (specification) => specification.placement ?? null,
+    ),
   });
 
   if (!placements) {

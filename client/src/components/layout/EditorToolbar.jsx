@@ -6,6 +6,7 @@ import {
   Grid3X3,
   Map,
   Pencil,
+  Plus,
   Redo2,
   RotateCw,
   RotateCcw,
@@ -18,12 +19,10 @@ import {
 import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
 import { useLayoutEditor } from '../../contexts/LayoutEditorContext.jsx';
 import {
-  buildCanvasResizePatch,
-  CANVAS_SIZE_PRESETS,
   findSignificantOverlaps,
 } from '../../utils/layoutEditor.js';
 
-export function EditorToolbar() {
+export function EditorToolbar({ onAddTable }) {
   const {
     draftCanvas,
     draftLayout,
@@ -73,11 +72,19 @@ export function EditorToolbar() {
               编辑模式：拖动调整位置，拖角调整大小
             </p>
             <p className="mt-1 text-xs text-sky-700">
-              滚轮仍可缩放，拖动画布空白区域可平移。
+              滚轮可缩放，中键拖动可平移；按住空白区域拖动可框选桌台，再拖动任一选中桌台即可整体移动。
               {isDirty ? ' 当前有未保存修改。' : ' 当前布局未修改。'}
             </p>
           </div>
           <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0 xl:flex-wrap xl:overflow-visible xl:pb-0">
+            <button
+              type="button"
+              onClick={onAddTable}
+              disabled={saving}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-ink-950 px-4 text-sm font-black text-white disabled:opacity-50"
+            >
+              <Plus size={16} />新增桌台
+            </button>
             {[
               ['wall', '墙体', BrickWall],
               ['entrance', '入口', DoorOpen],
@@ -164,45 +171,9 @@ export function EditorToolbar() {
                 </button>
               </>
             ) : null}
-            <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
-              画布
-              <select
-                value={`${draftCanvas.virtualWidth}x${draftCanvas.virtualHeight}`}
-                onChange={(event) => {
-                  const preset = CANVAS_SIZE_PRESETS.find(
-                    (item) => (
-                      `${item.virtualWidth}x${item.virtualHeight}`
-                      === event.target.value
-                    ),
-                  );
-                  if (preset) {
-                    updateCanvas(buildCanvasResizePatch(draftCanvas, preset));
-                  }
-                }}
-                disabled={saving}
-                className="rounded-lg border border-sky-100 bg-white px-1 py-0.5 text-xs font-bold text-sky-900"
-                aria-label="画布尺寸"
-              >
-                {CANVAS_SIZE_PRESETS.map((preset) => (
-                  <option
-                    key={`${preset.virtualWidth}x${preset.virtualHeight}`}
-                    value={`${preset.virtualWidth}x${preset.virtualHeight}`}
-                  >
-                    {preset.label}
-                  </option>
-                ))}
-                {!CANVAS_SIZE_PRESETS.some((item) => (
-                  item.virtualWidth === draftCanvas.virtualWidth
-                  && item.virtualHeight === draftCanvas.virtualHeight
-                )) ? (
-                  <option
-                    value={`${draftCanvas.virtualWidth}x${draftCanvas.virtualHeight}`}
-                  >
-                    {`自定义 ${draftCanvas.virtualWidth}×${draftCanvas.virtualHeight}`}
-                  </option>
-                ) : null}
-              </select>
-            </label>
+            <span className="inline-flex min-h-11 items-center rounded-xl border border-sky-200 bg-white px-3 text-xs font-bold text-sky-900">
+              无限画布 · 靠近边缘自动扩展
+            </span>
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
               <Grid3X3 size={16} />
               网格

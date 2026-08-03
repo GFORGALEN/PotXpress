@@ -6,6 +6,7 @@ import {
   initializeDatabase,
   readResource,
   replaceResource,
+  syncResourceChanges,
 } from './database.js';
 
 function cloneData(value) {
@@ -121,6 +122,17 @@ export class DatabaseStore {
     return replaceResource(client, filename, value);
   }
 
+  async syncWithClient(client, filename, before, after) {
+    definitionFor(filename);
+    if (this.faultInjector) {
+      await this.faultInjector({
+        stage: 'before_replace',
+        filename,
+      });
+    }
+    return syncResourceChanges(client, filename, before, after);
+  }
+
   async updateJSON(filename, updater) {
     return this.withFiles(
       [filename],
@@ -189,7 +201,12 @@ export class DatabaseStore {
 
         for (const filename of writeOrder) {
           if (serialize(before[filename]) !== serialize(after[filename])) {
-            await this.replaceWithClient(client, filename, after[filename]);
+            await this.syncWithClient(
+              client,
+              filename,
+              before[filename],
+              after[filename],
+            );
           }
         }
 

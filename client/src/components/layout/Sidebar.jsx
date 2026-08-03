@@ -8,7 +8,7 @@ export function Sidebar() {
   const items = navigationForRole(user.role);
 
   return (
-    <aside className="hidden w-56 shrink-0 border-r border-white/10 bg-ink-900 px-3 py-4 text-stone-200 xl:block">
+    <aside className="hidden w-60 shrink-0 border-r border-white/10 bg-ink-950 px-3 py-5 text-stone-200 xl:block">
       <p className="px-3 pb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
         工作台
       </p>
@@ -22,7 +22,7 @@ export function Sidebar() {
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) => clsx(
-                'flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',
+                'flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition',
                 isActive
                   ? 'bg-white text-ink-950 shadow-card'
                   : 'text-stone-300 hover:bg-white/8 hover:text-white',
@@ -34,7 +34,7 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-3">
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
         <p className="text-xs font-semibold text-stone-200">快速提示</p>
         <p className="mt-2 text-xs leading-5 text-stone-400">
           门店数据会按当前选择隔离，切换门店时旧请求会自动取消。

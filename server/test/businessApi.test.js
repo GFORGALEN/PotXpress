@@ -49,6 +49,38 @@ function completeLayoutBody(layoutResponse, canvas = {}) {
   };
 }
 
+test('桌台布局优先使用画布指定位置，并在重叠时回退到空位', () => {
+  const canvas = {
+    virtualWidth: 1600,
+    virtualHeight: 900,
+    gridSize: 20,
+  };
+  const preferred = { xRatio: 0.62, yRatio: 0.48 };
+  const [placed] = planTableLayouts({
+    canvas,
+    existingLayouts: [],
+    count: 1,
+    startingZIndex: 3,
+    preferredPositions: [preferred],
+  });
+  assert.equal(placed.xRatio, preferred.xRatio);
+  assert.equal(placed.yRatio, preferred.yRatio);
+  assert.equal(placed.zIndex, 3);
+
+  const [fallback] = planTableLayouts({
+    canvas,
+    existingLayouts: [placed],
+    count: 1,
+    startingZIndex: 4,
+    preferredPositions: [preferred],
+  });
+  assert.equal(layoutsOverlap(placed, fallback), false);
+  assert.notDeepEqual(
+    { xRatio: fallback.xRatio, yRatio: fallback.yRatio },
+    preferred,
+  );
+});
+
 test('门店、桌台、设置和布局 API 权限与并发链路可用', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'potxpress-business-test-'));
   process.env.NODE_ENV = 'test';
@@ -377,6 +409,49 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
   assert.equal(
     settingsUpdate.body.data.settings.defaultDurationMinutes,
     120,
+  );
+
+  const stagedDeleteCreate = await request(
+    baseUrl,
+    '/api/stores/store_demo/tables',
+    {
+      method: 'POST',
+      token: storeAdmin.token,
+      body: { name: '33号桌', number: 33 },
+    },
+  );
+  assert.equal(stagedDeleteCreate.status, 201);
+  const stagedDeleteTable = stagedDeleteCreate.body.data.table;
+  const stagedDeleteLayoutResponse = await request(
+    baseUrl,
+    '/api/stores/store_demo/layout',
+    { token: storeAdmin.token },
+  );
+  const stagedDeleteBody = completeLayoutBody(stagedDeleteLayoutResponse.body.data);
+  stagedDeleteBody.deletedTableIds = [stagedDeleteTable.id];
+  stagedDeleteBody.tables = stagedDeleteBody.tables.filter(
+    (table) => table.tableId !== stagedDeleteTable.id,
+  );
+  const stagedDeleteSave = await request(
+    baseUrl,
+    '/api/stores/store_demo/layout',
+    {
+      method: 'PUT',
+      token: storeAdmin.token,
+      body: stagedDeleteBody,
+    },
+  );
+  assert.equal(stagedDeleteSave.status, 200);
+  const layoutAfterStagedDelete = await request(
+    baseUrl,
+    '/api/stores/store_demo/layout',
+    { token: storeAdmin.token },
+  );
+  assert.equal(
+    layoutAfterStagedDelete.body.data.tables.some(
+      (table) => table.tableId === stagedDeleteTable.id,
+    ),
+    false,
   );
 
   const tableToDelete = createTwentyNine.body.data.table;

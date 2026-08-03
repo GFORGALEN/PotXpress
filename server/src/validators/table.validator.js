@@ -8,6 +8,10 @@ const tableAreaSchema = z.string().trim().min(1).max(50);
 const tableNoteSchema = z.string().trim().max(200).nullable();
 const tableCapacitySchema = z.number().int().min(1).max(30);
 const defaultDurationSchema = z.number().int().min(5).max(480).nullable();
+const tablePlacementSchema = z.object({
+  xRatio: z.number().min(0).max(1),
+  yRatio: z.number().min(0).max(1),
+}).strict();
 
 export const createTableBodySchema = z.object({
   name: tableNameSchema,
@@ -17,6 +21,7 @@ export const createTableBodySchema = z.object({
   area: tableAreaSchema.optional(),
   note: tableNoteSchema.optional(),
   defaultDurationMinutes: defaultDurationSchema.optional(),
+  placement: tablePlacementSchema.optional(),
 }).strict();
 
 export const createTableBatchBodySchema = z.object({

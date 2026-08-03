@@ -55,9 +55,11 @@ export function MobileDrawer({ open, onClose }) {
       />
       <div className="absolute inset-y-0 left-0 w-[min(19rem,86vw)] bg-ink-900 p-5 text-white shadow-soft">
         <div className="flex h-12 items-center gap-3 px-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ember-500 font-black">
-            P
-          </span>
+          <img
+            src="/potxpress-logo.png"
+            alt="PotXpress 小锅快线"
+            className="h-9 w-12 rounded-xl object-cover"
+          />
           <div>
             <p className="text-sm font-semibold">PotXpress</p>
             <p className="text-xs text-stone-400">桌位计时工作台</p>

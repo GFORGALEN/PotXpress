@@ -1,6 +1,11 @@
-import { useLayoutEffect, useMemo, useState } from 'react';
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
-export function useCanvasScale(viewportRef, canvas) {
+export function useCanvasScale(viewportRef, canvas, lockScale = false) {
   const [viewportSize, setViewportSize] = useState({
     width: 0,
     height: 0,
@@ -27,15 +32,29 @@ export function useCanvasScale(viewportRef, canvas) {
     return () => observer.disconnect();
   }, [viewportRef]);
 
+  const lockedFitScaleRef = useRef(null);
+
   return useMemo(() => {
     const virtualWidth = canvas?.virtualWidth ?? 1600;
     const virtualHeight = canvas?.virtualHeight ?? 900;
     const widthScale = viewportSize.width / virtualWidth;
     const heightScale = viewportSize.height / virtualHeight;
-    const fitScale = Math.max(
+    const naturalFitScale = Math.max(
       0.01,
       Math.min(widthScale || 1, heightScale || 1),
     );
+    if (!lockScale) {
+      lockedFitScaleRef.current = null;
+    } else if (
+      lockedFitScaleRef.current === null
+      && viewportSize.width > 0
+      && viewportSize.height > 0
+    ) {
+      lockedFitScaleRef.current = naturalFitScale;
+    }
+    const fitScale = lockScale
+      ? lockedFitScaleRef.current ?? naturalFitScale
+      : naturalFitScale;
 
     return {
       fitScale,
@@ -44,5 +63,5 @@ export function useCanvasScale(viewportRef, canvas) {
       actualSizeScale: 1 / fitScale,
       viewportSize,
     };
-  }, [canvas?.virtualHeight, canvas?.virtualWidth, viewportSize]);
+  }, [canvas?.virtualHeight, canvas?.virtualWidth, lockScale, viewportSize]);
 }

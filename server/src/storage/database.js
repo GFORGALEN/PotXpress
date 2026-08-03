@@ -297,6 +297,98 @@ export async function replaceResource(client, filename, value) {
   else await client.query(`DELETE FROM ${definition.table} WHERE NOT (${definition.keyColumn} = ANY($1::text[]))`, [ids]);
 }
 
+function resourceRecords(definition, value) {
+  return definition.idField
+    ? value
+    : (value == null ? [] : [{ _id: 'singleton', ...value }]);
+}
+
+function recordKey(definition, record) {
+  return definition.idField ? record[definition.idField] : 'singleton';
+}
+
+async function upsertResourceRecord(client, definition, record) {
+  const names = definition.columns.map(({ name }) => name);
+  const updates = names.filter((name) => name !== definition.keyColumn)
+    .map((name) => `${name} = EXCLUDED.${name}`).join(', ');
+  const values = definition.columns.map((descriptor) => toDatabaseValue(
+    descriptor.property === '_id' ? 'singleton' : record[descriptor.property],
+    descriptor,
+  ));
+  await client.query(
+    `INSERT INTO ${definition.table} (${names.join(', ')})
+     VALUES (${names.map((_, index) => `$${index + 1}`).join(', ')})
+     ON CONFLICT (${definition.keyColumn}) DO UPDATE SET ${updates}`,
+    values,
+  );
+}
+
+async function replaceRecordChildren(client, filename, definition, record) {
+  const parentId = recordKey(definition, record);
+  for (const child of CHILD_RESOURCES[filename] ?? []) {
+    await client.query(
+      `DELETE FROM ${child.table} WHERE ${child.parentColumn} = $1`,
+      [parentId],
+    );
+    for (const [position, item] of (record[child.property] ?? []).entries()) {
+      const descriptors = child.valueColumn
+        ? [col('_value', child.valueColumn)]
+        : child.columns;
+      const names = [
+        child.parentColumn,
+        'position',
+        ...descriptors.map(({ name }) => name),
+      ];
+      const values = [
+        parentId,
+        position,
+        ...descriptors.map((descriptor) => toDatabaseValue(
+          descriptor.property === '_value' ? item : item[descriptor.property],
+          descriptor,
+        )),
+      ];
+      await client.query(
+        `INSERT INTO ${child.table} (${names.join(', ')})
+         VALUES (${names.map((_, index) => `$${index + 1}`).join(', ')})`,
+        values,
+      );
+    }
+  }
+}
+
+export async function syncResourceChanges(client, filename, before, after) {
+  const definition = definitionFor(filename);
+  const beforeRecords = resourceRecords(definition, before);
+  const afterRecords = resourceRecords(definition, after);
+  const beforeById = new Map(
+    beforeRecords.map((record) => [recordKey(definition, record), record]),
+  );
+  const afterIds = new Set();
+
+  for (const record of afterRecords) {
+    const id = recordKey(definition, record);
+    if (!id) throw new Error(`${filename} record is missing ${definition.idField}`);
+    afterIds.add(id);
+    const previous = beforeById.get(id);
+    if (previous && JSON.stringify(previous) === JSON.stringify(record)) {
+      continue;
+    }
+    await upsertResourceRecord(client, definition, record);
+    await replaceRecordChildren(client, filename, definition, record);
+  }
+
+  const deletedIds = beforeRecords
+    .map((record) => recordKey(definition, record))
+    .filter((id) => !afterIds.has(id));
+  if (deletedIds.length) {
+    await client.query(
+      `DELETE FROM ${definition.table}
+       WHERE ${definition.keyColumn} IN (${deletedIds.map((_, index) => `$${index + 1}`).join(', ')})`,
+      deletedIds,
+    );
+  }
+}
+
 async function createNormalizedSchema(client) {
   for (const statement of CREATE_STATEMENTS) await client.query(statement);
   for (const statement of INDEX_STATEMENTS) await client.query(statement);

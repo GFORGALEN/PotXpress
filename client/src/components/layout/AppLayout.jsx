@@ -19,7 +19,7 @@ export function AppLayout() {
   const isDashboard = location.pathname === '/';
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas">
+    <div className="flex h-full min-h-0 flex-col bg-[#f8f5ef]">
       <TopNavbar onOpenMenu={() => setMobileMenuOpen(true)} />
       <div className="flex min-h-0 flex-1">
         <Sidebar />

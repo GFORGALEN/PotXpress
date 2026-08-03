@@ -29,6 +29,7 @@ export function LayoutEditorProvider({ children }) {
   const [draftCanvas, setDraftCanvas] = useState(null);
   const [baseLayoutVersion, setBaseLayoutVersion] = useState(null);
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [selectedTableIds, setSelectedTableIds] = useState([]);
   const [draftDecorations, setDraftDecorations] = useState([]);
   const [selectedDecorationId, setSelectedDecorationId] = useState(null);
   const [history, setHistory] = useState({ past: [], future: [] });
@@ -70,6 +71,7 @@ export function LayoutEditorProvider({ children }) {
     setDraftCanvas(null);
     setBaseLayoutVersion(null);
     setSelectedTableId(null);
+    setSelectedTableIds([]);
     setDraftDecorations([]);
     setSelectedDecorationId(null);
     setHistory({ past: [], future: [] });
@@ -102,11 +104,6 @@ export function LayoutEditorProvider({ children }) {
       return false;
     }
 
-    if (window.innerWidth < 768) {
-      showToast('请在平板或电脑上编辑布局', 'info');
-      return false;
-    }
-
     const nextMap = new Map(
       layout.tables.map((table) => [
         table.tableId,
@@ -127,6 +124,7 @@ export function LayoutEditorProvider({ children }) {
     setDraftDecorations(nextDecorations);
     setBaseLayoutVersion(layout.layoutVersion);
     setSelectedTableId(null);
+    setSelectedTableIds([]);
     setSelectedDecorationId(null);
     setHistory({ past: [], future: [] });
     setConflictDetails(null);
@@ -134,25 +132,135 @@ export function LayoutEditorProvider({ children }) {
     return true;
   }, [showToast, user?.role]);
 
-  const updateTableLayout = useCallback((tableId, nextLayout) => {
+  const selectTables = useCallback((tableIds) => {
+    const uniqueIds = [...new Set((tableIds ?? []).filter(Boolean))];
+    setSelectedTableIds(uniqueIds);
+    setSelectedTableId(uniqueIds[0] ?? null);
+    if (uniqueIds.length) setSelectedDecorationId(null);
+  }, []);
+
+  const selectTable = useCallback((tableId) => {
+    selectTables(tableId ? [tableId] : []);
+  }, [selectTables]);
+
+  const commitTableChanges = useCallback((changes, focusTableId) => {
     rememberCurrent();
-    setDraftLayout((current) => {
-      const next = new Map(current);
-      const maxZIndex = Math.max(
-        0,
-        ...[...current.values()].map((layout) => layout.zIndex ?? 0),
-      );
-      next.set(tableId, normalizeTableLayout({
-        ...current.get(tableId),
-        ...nextLayout,
-        zIndex: nextLayout.bringToFront
+    const next = new Map(draftLayout);
+    const maxZIndex = Math.max(
+      0,
+      ...[...draftLayout.values()].map((layout) => layout.zIndex ?? 0),
+    );
+    let geometryChanged = false;
+    let changedRight = 0;
+    let changedBottom = 0;
+
+    changes.forEach(({ tableId, patch }) => {
+      const current = draftLayout.get(tableId);
+      if (!current) return;
+      const merged = {
+        ...current,
+        ...patch,
+        zIndex: patch.bringToFront
           ? maxZIndex + 1
-          : nextLayout.zIndex ?? current.get(tableId)?.zIndex,
-      }));
-      return next;
+          : patch.zIndex ?? current.zIndex,
+      };
+      next.set(tableId, merged);
+      const changed = ['xRatio', 'yRatio', 'widthRatio', 'heightRatio']
+        .some((key) => patch[key] !== undefined && Math.abs(merged[key] - current[key]) > 0.00001);
+      if (changed) {
+        geometryChanged = true;
+        changedRight = Math.max(changedRight, merged.xRatio + merged.widthRatio);
+        changedBottom = Math.max(changedBottom, merged.yRatio + merged.heightRatio);
+      }
     });
-    setSelectedTableId(tableId);
-  }, [rememberCurrent]);
+
+    const oldWidth = draftCanvas.virtualWidth;
+    const oldHeight = draftCanvas.virtualHeight;
+    const edgeMargin = Math.max(120, draftCanvas.gridSize * 6);
+    const growWidth = Math.max(800, Math.round(oldWidth * 0.25));
+    const growHeight = Math.max(600, Math.round(oldHeight * 0.25));
+    const requiredWidth = changedRight * oldWidth + edgeMargin;
+    const requiredHeight = changedBottom * oldHeight + edgeMargin;
+    const newWidth = geometryChanged && changedRight * oldWidth >= oldWidth - edgeMargin
+      ? Math.min(50000, Math.max(
+        oldWidth + growWidth,
+        Math.ceil(requiredWidth / growWidth) * growWidth,
+      ))
+      : oldWidth;
+    const newHeight = geometryChanged && changedBottom * oldHeight >= oldHeight - edgeMargin
+      ? Math.min(50000, Math.max(
+        oldHeight + growHeight,
+        Math.ceil(requiredHeight / growHeight) * growHeight,
+      ))
+      : oldHeight;
+
+    if (newWidth !== oldWidth || newHeight !== oldHeight) {
+      const xScale = oldWidth / newWidth;
+      const yScale = oldHeight / newHeight;
+      next.forEach((layout, tableId) => {
+        next.set(tableId, normalizeTableLayout({
+          ...layout,
+          xRatio: layout.xRatio * xScale,
+          yRatio: layout.yRatio * yScale,
+          widthRatio: layout.widthRatio * xScale,
+          heightRatio: layout.heightRatio * yScale,
+        }));
+      });
+      setDraftDecorations((current) => current.map((item) => normalizeDecoration({
+        ...item,
+        xRatio: item.xRatio * xScale,
+        yRatio: item.yRatio * yScale,
+        widthRatio: item.widthRatio * xScale,
+        heightRatio: item.heightRatio * yScale,
+      })));
+      setDraftCanvas((current) => ({
+        ...current,
+        virtualWidth: newWidth,
+        virtualHeight: newHeight,
+        aspectRatio: 'auto',
+      }));
+    } else {
+      next.forEach((layout, tableId) => {
+        next.set(tableId, normalizeTableLayout(layout));
+      });
+    }
+
+    setDraftLayout(next);
+    if (focusTableId) {
+      setSelectedTableId(focusTableId);
+      setSelectedDecorationId(null);
+    }
+  }, [draftCanvas, draftLayout, rememberCurrent]);
+
+  const updateTableLayout = useCallback((tableId, nextLayout) => {
+    commitTableChanges([{ tableId, patch: nextLayout }], tableId);
+    if (!selectedTableIds.includes(tableId)) {
+      setSelectedTableIds([tableId]);
+    }
+  }, [commitTableChanges, selectedTableIds]);
+
+  const moveSelectedTables = useCallback((activeTableId, deltaXRatio, deltaYRatio) => {
+    const ids = selectedTableIds.includes(activeTableId)
+      ? selectedTableIds
+      : [activeTableId];
+    const layouts = ids.map((id) => draftLayout.get(id)).filter(Boolean);
+    if (!layouts.length) return;
+    const minX = Math.min(...layouts.map((layout) => layout.xRatio));
+    const minY = Math.min(...layouts.map((layout) => layout.yRatio));
+    const safeDeltaX = Math.max(-minX, deltaXRatio);
+    const safeDeltaY = Math.max(-minY, deltaYRatio);
+    commitTableChanges(ids.map((tableId) => {
+      const layout = draftLayout.get(tableId);
+      return {
+        tableId,
+        patch: {
+          xRatio: layout.xRatio + safeDeltaX,
+          yRatio: layout.yRatio + safeDeltaY,
+          bringToFront: tableId === activeTableId,
+        },
+      };
+    }), activeTableId);
+  }, [commitTableChanges, draftLayout, selectedTableIds]);
 
   const updateCanvas = useCallback((patch) => {
     rememberCurrent();
@@ -182,17 +290,76 @@ export function LayoutEditorProvider({ children }) {
       zIndex: type === 'area' ? 0 : maxZIndex + 1,
     }]);
     setSelectedTableId(null);
+    setSelectedTableIds([]);
     setSelectedDecorationId(id);
   }, [draftDecorations, rememberCurrent]);
 
   const updateDecoration = useCallback((id, patch) => {
     rememberCurrent();
-    setDraftDecorations((current) => current.map((item) => (
-      item.id === id ? normalizeDecoration({ ...item, ...patch }) : item
-    )));
+    const currentItem = draftDecorations.find((item) => item.id === id);
+    const nextItem = currentItem
+      ? { ...currentItem, ...patch }
+      : null;
+    let nextDecorations = draftDecorations.map((item) => (
+      item.id === id ? nextItem : item
+    ));
+    const geometryChanged = nextItem && ['xRatio', 'yRatio', 'widthRatio', 'heightRatio']
+      .some((key) => patch[key] !== undefined && Math.abs(nextItem[key] - currentItem[key]) > 0.00001);
+    const oldWidth = draftCanvas.virtualWidth;
+    const oldHeight = draftCanvas.virtualHeight;
+    const edgeMargin = Math.max(120, draftCanvas.gridSize * 6);
+    const growWidth = Math.max(800, Math.round(oldWidth * 0.25));
+    const growHeight = Math.max(600, Math.round(oldHeight * 0.25));
+    const nextRight = nextItem ? nextItem.xRatio + nextItem.widthRatio : 0;
+    const nextBottom = nextItem ? nextItem.yRatio + nextItem.heightRatio : 0;
+    const newWidth = geometryChanged
+      && nextRight * oldWidth >= oldWidth - edgeMargin
+      ? Math.min(50000, Math.max(
+        oldWidth + growWidth,
+        Math.ceil((nextRight * oldWidth + edgeMargin) / growWidth) * growWidth,
+      ))
+      : oldWidth;
+    const newHeight = geometryChanged
+      && nextBottom * oldHeight >= oldHeight - edgeMargin
+      ? Math.min(50000, Math.max(
+        oldHeight + growHeight,
+        Math.ceil((nextBottom * oldHeight + edgeMargin) / growHeight) * growHeight,
+      ))
+      : oldHeight;
+    if (newWidth !== oldWidth || newHeight !== oldHeight) {
+      const xScale = oldWidth / newWidth;
+      const yScale = oldHeight / newHeight;
+      nextDecorations = nextDecorations.map((item) => normalizeDecoration({
+        ...item,
+        xRatio: item.xRatio * xScale,
+        yRatio: item.yRatio * yScale,
+        widthRatio: item.widthRatio * xScale,
+        heightRatio: item.heightRatio * yScale,
+      }));
+      setDraftLayout((current) => new Map([...current].map(([tableId, layout]) => [
+        tableId,
+        normalizeTableLayout({
+          ...layout,
+          xRatio: layout.xRatio * xScale,
+          yRatio: layout.yRatio * yScale,
+          widthRatio: layout.widthRatio * xScale,
+          heightRatio: layout.heightRatio * yScale,
+        }),
+      ])));
+      setDraftCanvas((current) => ({
+        ...current,
+        virtualWidth: newWidth,
+        virtualHeight: newHeight,
+        aspectRatio: 'auto',
+      }));
+    } else {
+      nextDecorations = nextDecorations.map(normalizeDecoration);
+    }
+    setDraftDecorations(nextDecorations);
     setSelectedDecorationId(id);
     setSelectedTableId(null);
-  }, [rememberCurrent]);
+    setSelectedTableIds([]);
+  }, [draftCanvas, draftDecorations, rememberCurrent]);
 
   const deleteSelectedDecoration = useCallback(() => {
     if (!selectedDecorationId) return;
@@ -203,11 +370,23 @@ export function LayoutEditorProvider({ children }) {
     setSelectedDecorationId(null);
   }, [rememberCurrent, selectedDecorationId]);
 
+  const deleteTables = useCallback((tableIds) => {
+    const ids = new Set((tableIds ?? []).filter((id) => draftLayout.has(id)));
+    if (!ids.size) return;
+    rememberCurrent();
+    setDraftLayout((current) => new Map(
+      [...current].filter(([tableId]) => !ids.has(tableId)),
+    ));
+    setSelectedTableId(null);
+    setSelectedTableIds([]);
+  }, [draftLayout, rememberCurrent]);
+
   const restoreSnapshot = useCallback((snapshot) => {
     setDraftCanvas(structuredClone(snapshot.canvas));
     setDraftLayout(new Map(snapshot.layout));
     setDraftDecorations(structuredClone(snapshot.decorations));
     setSelectedTableId(null);
+    setSelectedTableIds([]);
     setSelectedDecorationId(null);
   }, []);
 
@@ -258,10 +437,12 @@ export function LayoutEditorProvider({ children }) {
         layoutVersion: result.layoutVersion,
         canvas: structuredClone(draftCanvas),
         decorations: structuredClone(draftDecorations),
-        tables: tablesRef.current.map((table) => ({
+        tables: tablesRef.current
+          .filter((table) => draftLayout.has(table.tableId))
+          .map((table) => ({
           ...table,
           layout: normalizeTableLayout(draftLayout.get(table.tableId)),
-        })),
+          })),
       };
       callbacksRef.current.onSaved?.(savedLayout);
       showToast('布局已保存', 'success');
@@ -319,6 +500,7 @@ export function LayoutEditorProvider({ children }) {
     baseLayoutVersion,
     isDirty,
     selectedTableId,
+    selectedTableIds,
     selectedDecorationId,
     saving,
     conflictDetails,
@@ -326,17 +508,20 @@ export function LayoutEditorProvider({ children }) {
     enterEdit,
     exitEdit,
     updateTableLayout,
+    moveSelectedTables,
     updateCanvas,
     addDecoration,
     updateDecoration,
     deleteSelectedDecoration,
+    deleteTables,
     undo,
     redo,
     canUndo: history.past.length > 0,
     canRedo: history.future.length > 0,
     saveLayout,
     loadLatest,
-    setSelectedTableId,
+    setSelectedTableId: selectTable,
+    selectTables,
     setSelectedDecorationId,
   }), [
     baseLayoutVersion,
@@ -352,13 +537,18 @@ export function LayoutEditorProvider({ children }) {
     saveLayout,
     saving,
     selectedTableId,
+    selectedTableIds,
     selectedDecorationId,
     history,
     updateCanvas,
     updateTableLayout,
+    moveSelectedTables,
+    selectTable,
+    selectTables,
     addDecoration,
     updateDecoration,
     deleteSelectedDecoration,
+    deleteTables,
     undo,
     redo,
   ]);

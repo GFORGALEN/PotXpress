@@ -8,8 +8,8 @@ import {
 
 export const canvasSchema = z.object({
   aspectRatio: z.string().trim().min(1).max(10),
-  virtualWidth: z.number().int().min(800).max(6000),
-  virtualHeight: z.number().int().min(600).max(6000),
+  virtualWidth: z.number().int().min(800).max(50000),
+  virtualHeight: z.number().int().min(600).max(50000),
   backgroundImage: z.null(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   gridEnabled: z.boolean(),
@@ -74,10 +74,11 @@ export const layoutSchema = z.object({
 
 export const saveLayoutInputSchema = z.object({
   layoutVersion: z.number().int().positive(),
+  deletedTableIds: z.array(identifierSchema).max(200).default([]),
   canvas: z.object({
     aspectRatio: z.string().trim().min(1).max(10).optional(),
-    virtualWidth: z.number().int().min(800).max(6000).optional(),
-    virtualHeight: z.number().int().min(600).max(6000).optional(),
+    virtualWidth: z.number().int().min(800).max(50000).optional(),
+    virtualHeight: z.number().int().min(600).max(50000).optional(),
     backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     gridEnabled: z.boolean().optional(),
     snapToGrid: z.boolean().optional(),

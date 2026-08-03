@@ -16,7 +16,9 @@
     "test:postgres": "node --test --test-concurrency=1 test/postgresConcurrency.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "create-admin": "node --env-file-if-exists=../.env scripts/createAdmin.js",
-    "db:migrate": "node --env-file-if-exists=../.env scripts/migrateDatabase.js"
+    "db:migrate": "node --env-file-if-exists=../.env scripts/migrateDatabase.js",
+    "prelayout:transfer": "npm run build --workspace @potxpress/contracts",
+    "layout:transfer": "node --env-file-if-exists=../.env --env-file-if-exists=../.env.render.local scripts/transferStoreLayout.js"
   },
   "dependencies": {
     "@potxpress/contracts": "*",

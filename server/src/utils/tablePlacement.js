@@ -25,6 +25,7 @@ export function planTableLayouts({
   existingLayouts,
   count,
   startingZIndex,
+  preferredPositions = [],
 }) {
   const stepX = canvas.gridSize / canvas.virtualWidth;
   const stepY = canvas.gridSize / canvas.virtualHeight;
@@ -35,6 +36,28 @@ export function planTableLayouts({
 
   for (let tableIndex = 0; tableIndex < count; tableIndex += 1) {
     let placement = null;
+    const preferred = preferredPositions[tableIndex];
+
+    if (preferred) {
+      const candidate = {
+        xRatio: roundRatio(Math.min(
+          Math.max(preferred.xRatio, 0),
+          1 - DEFAULT_WIDTH_RATIO,
+        )),
+        yRatio: roundRatio(Math.min(
+          Math.max(preferred.yRatio, 0),
+          1 - DEFAULT_HEIGHT_RATIO,
+        )),
+        widthRatio: DEFAULT_WIDTH_RATIO,
+        heightRatio: DEFAULT_HEIGHT_RATIO,
+        rotation: 0,
+        zIndex: startingZIndex + tableIndex,
+      };
+
+      if (!occupied.some((layout) => overlaps(candidate, layout))) {
+        placement = candidate;
+      }
+    }
 
     for (
       let rawY = stepY;

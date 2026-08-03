@@ -21,8 +21,8 @@ const submittedLayoutSchema = z.object({
 
 const canvasChangesSchema = z.object({
   aspectRatio: z.string().trim().min(1).max(10).optional(),
-  virtualWidth: z.number().int().min(800).max(6000).optional(),
-  virtualHeight: z.number().int().min(600).max(6000).optional(),
+  virtualWidth: z.number().int().min(800).max(50000).optional(),
+  virtualHeight: z.number().int().min(600).max(50000).optional(),
   backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   gridEnabled: z.boolean().optional(),
   snapToGrid: z.boolean().optional(),
@@ -52,6 +52,7 @@ const decorationSchema = z.object({
 
 export const saveLayoutBodySchema = z.object({
   layoutVersion: z.number().int().min(1),
+  deletedTableIds: z.array(z.string().min(1).max(100)).max(200).default([]),
   canvas: canvasChangesSchema,
   decorations: z.array(decorationSchema).max(100).default([]),
   tables: z.array(

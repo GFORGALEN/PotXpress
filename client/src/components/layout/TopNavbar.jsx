@@ -3,7 +3,6 @@ import {
   BellRing,
   ArrowRightLeft,
   ChevronDown,
-  Flame,
   LogOut,
   Menu,
   Volume2,
@@ -109,9 +108,11 @@ export function TopNavbar({ onOpenMenu }) {
       </button>
 
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-ink-900 text-ember-400 sm:flex">
-          <Flame size={21} fill="currentColor" />
-        </span>
+        <img
+          src="/potxpress-logo.png"
+          alt="PotXpress 小锅快线"
+          className="hidden h-10 w-14 shrink-0 rounded-xl object-cover sm:block"
+        />
         <div className="min-w-0">
           <p className="truncate text-sm font-bold tracking-tight text-ink-950 sm:text-base">
             PotXpress

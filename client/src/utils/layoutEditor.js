@@ -117,11 +117,14 @@ export function buildLayoutSavePayload({
 }) {
   return {
     layoutVersion,
+    deletedTableIds: tables
+      .filter((table) => !layoutMap.has(table.tableId))
+      .map((table) => table.tableId),
     canvas: Object.fromEntries(
       EDITABLE_CANVAS_FIELDS.map((field) => [field, canvas[field]]),
     ),
     decorations: decorations.map(normalizeDecoration),
-    tables: tables.map((table) => ({
+    tables: tables.filter((table) => layoutMap.has(table.tableId)).map((table) => ({
       tableId: table.tableId,
       layout: normalizeTableLayout(layoutMap.get(table.tableId)),
     })),
