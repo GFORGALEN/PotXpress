@@ -30,6 +30,7 @@ export function LayoutEditorProvider({ children }) {
   const [baseLayoutVersion, setBaseLayoutVersion] = useState(null);
   const [selectedTableId, setSelectedTableId] = useState(null);
   const [selectedTableIds, setSelectedTableIds] = useState([]);
+  const [syncSelectedResize, setSyncSelectedResize] = useState(false);
   const [draftDecorations, setDraftDecorations] = useState([]);
   const [selectedDecorationId, setSelectedDecorationId] = useState(null);
   const [history, setHistory] = useState({ past: [], future: [] });
@@ -72,6 +73,7 @@ export function LayoutEditorProvider({ children }) {
     setBaseLayoutVersion(null);
     setSelectedTableId(null);
     setSelectedTableIds([]);
+    setSyncSelectedResize(false);
     setDraftDecorations([]);
     setSelectedDecorationId(null);
     setHistory({ past: [], future: [] });
@@ -125,6 +127,7 @@ export function LayoutEditorProvider({ children }) {
     setBaseLayoutVersion(layout.layoutVersion);
     setSelectedTableId(null);
     setSelectedTableIds([]);
+    setSyncSelectedResize(false);
     setSelectedDecorationId(null);
     setHistory({ past: [], future: [] });
     setConflictDetails(null);
@@ -260,6 +263,22 @@ export function LayoutEditorProvider({ children }) {
         },
       };
     }), activeTableId);
+  }, [commitTableChanges, draftLayout, selectedTableIds]);
+
+  const resizeSelectedTables = useCallback((activeTableId, nextLayouts) => {
+    const selectedIds = new Set(selectedTableIds.includes(activeTableId)
+      ? selectedTableIds
+      : [activeTableId]);
+    const changes = nextLayouts
+      .filter(({ tableId }) => selectedIds.has(tableId) && draftLayout.has(tableId))
+      .map(({ tableId, layout }) => ({
+        tableId,
+        patch: {
+          ...layout,
+          bringToFront: tableId === activeTableId,
+        },
+      }));
+    if (changes.length) commitTableChanges(changes, activeTableId);
   }, [commitTableChanges, draftLayout, selectedTableIds]);
 
   const updateCanvas = useCallback((patch) => {
@@ -501,6 +520,7 @@ export function LayoutEditorProvider({ children }) {
     isDirty,
     selectedTableId,
     selectedTableIds,
+    syncSelectedResize,
     selectedDecorationId,
     saving,
     conflictDetails,
@@ -509,6 +529,7 @@ export function LayoutEditorProvider({ children }) {
     exitEdit,
     updateTableLayout,
     moveSelectedTables,
+    resizeSelectedTables,
     updateCanvas,
     addDecoration,
     updateDecoration,
@@ -522,6 +543,7 @@ export function LayoutEditorProvider({ children }) {
     loadLatest,
     setSelectedTableId: selectTable,
     selectTables,
+    setSyncSelectedResize,
     setSelectedDecorationId,
   }), [
     baseLayoutVersion,
@@ -538,11 +560,13 @@ export function LayoutEditorProvider({ children }) {
     saving,
     selectedTableId,
     selectedTableIds,
+    syncSelectedResize,
     selectedDecorationId,
     history,
     updateCanvas,
     updateTableLayout,
     moveSelectedTables,
+    resizeSelectedTables,
     selectTable,
     selectTables,
     addDecoration,

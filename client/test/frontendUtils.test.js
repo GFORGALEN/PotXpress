@@ -13,6 +13,7 @@ import {
   CANVAS_SIZE_PRESETS,
   findSignificantOverlaps,
   normalizeTableLayout,
+  scaleTableSelection,
   serializeLayout,
 } from '../src/utils/layoutEditor.js';
 
@@ -233,6 +234,76 @@ test('canvas resize patch scales table constraints proportionally', () => {
     maxTableHeight: 600,
     gridSize: 20,
   });
+});
+
+test('synchronized resize scales table sizes and spacing from the active handle', () => {
+  const entries = [
+    {
+      tableId: 'a',
+      layout: {
+        xRatio: 0.1, yRatio: 0.2, widthRatio: 0.1, heightRatio: 0.1,
+      },
+    },
+    {
+      tableId: 'b',
+      layout: {
+        xRatio: 0.3, yRatio: 0.4, widthRatio: 0.2, heightRatio: 0.15,
+      },
+    },
+  ];
+
+  assert.deepEqual(
+    scaleTableSelection(entries, 'a', 'right', 2, 1),
+    [
+      {
+        tableId: 'a',
+        layout: {
+          xRatio: 0.1, yRatio: 0.2, widthRatio: 0.2, heightRatio: 0.1,
+        },
+      },
+      {
+        tableId: 'b',
+        layout: {
+          xRatio: 0.5, yRatio: 0.4, widthRatio: 0.4, heightRatio: 0.15,
+        },
+      },
+    ],
+  );
+});
+
+test('synchronized resize uses the opposite edge as its anchor', () => {
+  const entries = [
+    {
+      tableId: 'a',
+      layout: {
+        xRatio: 0.1, yRatio: 0.1, widthRatio: 0.2, heightRatio: 0.2,
+      },
+    },
+    {
+      tableId: 'b',
+      layout: {
+        xRatio: 0.4, yRatio: 0.4, widthRatio: 0.1, heightRatio: 0.1,
+      },
+    },
+  ];
+
+  assert.deepEqual(
+    scaleTableSelection(entries, 'a', 'topLeft', 0.5, 0.5),
+    [
+      {
+        tableId: 'a',
+        layout: {
+          xRatio: 0.2, yRatio: 0.2, widthRatio: 0.1, heightRatio: 0.1,
+        },
+      },
+      {
+        tableId: 'b',
+        layout: {
+          xRatio: 0.35, yRatio: 0.35, widthRatio: 0.05, heightRatio: 0.05,
+        },
+      },
+    ],
+  );
 });
 
 test('overlap detection reports intersections over thirty percent', () => {

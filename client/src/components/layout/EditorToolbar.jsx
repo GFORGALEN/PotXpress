@@ -11,6 +11,7 @@ import {
   RotateCw,
   RotateCcw,
   Save,
+  Scaling,
   Store,
   Trash2,
   Undo2,
@@ -30,6 +31,8 @@ export function EditorToolbar({ onAddTable }) {
     isDirty,
     saving,
     selectedDecorationId,
+    selectedTableIds,
+    syncSelectedResize,
     draftDecorations,
     updateCanvas,
     addDecoration,
@@ -42,6 +45,7 @@ export function EditorToolbar({ onAddTable }) {
     exitEdit,
     saveLayout,
     loadLatest,
+    setSyncSelectedResize,
   } = useLayoutEditor();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmReload, setConfirmReload] = useState(false);
@@ -183,6 +187,25 @@ export function EditorToolbar({ onAddTable }) {
                 onChange={(event) => updateCanvas({
                   gridEnabled: event.target.checked,
                 })}
+              />
+            </label>
+            <label
+              className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
+                syncSelectedResize
+                  ? 'border-violet-400 bg-violet-100 text-violet-950'
+                  : 'border-sky-200 bg-white text-sky-900'
+              } ${selectedTableIds.length < 2 ? 'opacity-50' : ''}`}
+              title={selectedTableIds.length < 2
+                ? '请先选择至少两张桌台'
+                : '拖动任一选中桌台的缩放手柄时，整体同步缩放'}
+            >
+              <Scaling size={16} />
+              同步缩放
+              <input
+                type="checkbox"
+                checked={syncSelectedResize}
+                disabled={selectedTableIds.length < 2}
+                onChange={(event) => setSyncSelectedResize(event.target.checked)}
               />
             </label>
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">

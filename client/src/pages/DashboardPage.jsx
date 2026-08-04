@@ -817,6 +817,8 @@ export function DashboardPage() {
                 onSelectTables={layoutEditor.selectTables}
                 onUpdateTableLayout={layoutEditor.updateTableLayout}
                 onMoveSelectedTables={layoutEditor.moveSelectedTables}
+                syncSelectedResize={layoutEditor.syncSelectedResize}
+                onResizeSelectedTables={layoutEditor.resizeSelectedTables}
                 immersive={canvasFocused}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {

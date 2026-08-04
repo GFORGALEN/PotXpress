@@ -16,6 +16,7 @@ import {
 } from 'react-zoom-pan-pinch';
 import { Rnd } from 'react-rnd';
 import { useCanvasScale } from '../../hooks/useCanvasScale.js';
+import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import { TableNode } from '../tables/TableNode.jsx';
 
 function getClientPoint(event) {
@@ -104,6 +105,8 @@ export function FloorCanvas({
   onSelectTables,
   onUpdateTableLayout,
   onMoveSelectedTables,
+  syncSelectedResize = false,
+  onResizeSelectedTables,
   immersive = false,
   selectedDecorationId = null,
   onSelectDecoration,
@@ -124,6 +127,7 @@ export function FloorCanvas({
   const [rndKeyVersion, setRndKeyVersion] = useState(0);
   const rndRefs = useRef(new Map());
   const groupDragStartRef = useRef(null);
+  const selectionResizeRef = useRef(null);
   const decorationDragStartRef = useRef(null);
   const marqueeRef = useRef(null);
   const suppressSurfaceClickRef = useRef(false);
@@ -731,6 +735,40 @@ export function FloorCanvas({
                     width: Math.round(table.layout.widthRatio * width),
                     height: Math.round(table.layout.heightRatio * height),
                   };
+                  const resizeEntries = syncSelectedResize
+                    && selectedTableIdSet.size > 1
+                    && selectedTableIdSet.has(table.tableId)
+                    ? tables
+                      .filter((item) => selectedTableIdSet.has(item.tableId))
+                      .map((item) => ({
+                        tableId: item.tableId,
+                        layout: { ...item.layout },
+                      }))
+                    : [];
+                  const synchronizedMinWidth = resizeEntries.length > 1
+                    ? Math.max(...resizeEntries.map(({ layout }) => (
+                      canvas.minTableWidth * fitScale
+                      * table.layout.widthRatio / layout.widthRatio
+                    )))
+                    : canvas.minTableWidth * fitScale;
+                  const synchronizedMinHeight = resizeEntries.length > 1
+                    ? Math.max(...resizeEntries.map(({ layout }) => (
+                      canvas.minTableHeight * fitScale
+                      * table.layout.heightRatio / layout.heightRatio
+                    )))
+                    : canvas.minTableHeight * fitScale;
+                  const synchronizedMaxWidth = resizeEntries.length > 1
+                    ? Math.min(...resizeEntries.map(({ layout }) => (
+                      canvas.maxTableWidth * fitScale
+                      * table.layout.widthRatio / layout.widthRatio
+                    )))
+                    : canvas.maxTableWidth * fitScale;
+                  const synchronizedMaxHeight = resizeEntries.length > 1
+                    ? Math.min(...resizeEntries.map(({ layout }) => (
+                      canvas.maxTableHeight * fitScale
+                      * table.layout.heightRatio / layout.heightRatio
+                    )))
+                    : canvas.maxTableHeight * fitScale;
 
                   return (
                     <Rnd
@@ -748,10 +786,10 @@ export function FloorCanvas({
                       scale={scaleRef.current}
                       dragGrid={[gridStep, gridStep]}
                       resizeGrid={[gridStep, gridStep]}
-                      minWidth={Math.round(canvas.minTableWidth * fitScale)}
-                      minHeight={Math.round(canvas.minTableHeight * fitScale)}
-                      maxWidth={Math.round(canvas.maxTableWidth * fitScale)}
-                      maxHeight={Math.round(canvas.maxTableHeight * fitScale)}
+                      minWidth={Math.round(synchronizedMinWidth)}
+                      minHeight={Math.round(synchronizedMinHeight)}
+                      maxWidth={Math.round(synchronizedMaxWidth)}
+                      maxHeight={Math.round(synchronizedMaxHeight)}
                       lockAspectRatio={
                         ['round', 'square'].includes(table.shape) ? 1 : false
                       }
@@ -827,11 +865,66 @@ export function FloorCanvas({
                           });
                         }
                       }}
-                      onResizeStart={() => {
+                      onResizeStart={(_, direction) => {
+                        if (resizeEntries.length > 1) {
+                          selectionResizeRef.current = {
+                            activeId: table.tableId,
+                            direction,
+                            entries: resizeEntries,
+                          };
+                          return;
+                        }
+                        selectionResizeRef.current = null;
                         onSelectTables?.([table.tableId]);
                         onSelectTable?.(table.tableId);
                       }}
-                      onResizeStop={(_, __, element, ___, nextPosition) => {
+                      onResize={(_, direction, element) => {
+                        const group = selectionResizeRef.current;
+                        if (!group || group.activeId !== table.tableId) return;
+                        const scaleX = element.offsetWidth
+                          / (table.layout.widthRatio * width);
+                        const scaleY = element.offsetHeight
+                          / (table.layout.heightRatio * height);
+                        const preview = scaleTableSelection(
+                          group.entries,
+                          table.tableId,
+                          direction,
+                          scaleX,
+                          scaleY,
+                        );
+                        preview.forEach(({ tableId, layout }) => {
+                          if (tableId === table.tableId) return;
+                          const instance = rndRefs.current.get(tableId);
+                          instance?.updatePosition({
+                            x: Math.round(layout.xRatio * width),
+                            y: Math.round(layout.yRatio * height),
+                          });
+                          instance?.updateSize({
+                            width: Math.round(layout.widthRatio * width),
+                            height: Math.round(layout.heightRatio * height),
+                          });
+                        });
+                      }}
+                      onResizeStop={(_, direction, element, ___, nextPosition) => {
+                        const group = selectionResizeRef.current;
+                        selectionResizeRef.current = null;
+                        if (group && group.activeId === table.tableId) {
+                          const scaleX = element.offsetWidth
+                            / (table.layout.widthRatio * width);
+                          const scaleY = element.offsetHeight
+                            / (table.layout.heightRatio * height);
+                          onResizeSelectedTables?.(
+                            table.tableId,
+                            scaleTableSelection(
+                              group.entries,
+                              table.tableId,
+                              direction,
+                              scaleX,
+                              scaleY,
+                            ),
+                          );
+                          return;
+                        }
                         const nextX = nextPosition.x / width;
                         const nextY = nextPosition.y / height;
                         const nextW = element.offsetWidth / width;

@@ -89,6 +89,59 @@ export function normalizeDecoration(item) {
   };
 }
 
+export function scaleTableSelection(
+  entries,
+  activeTableId,
+  direction,
+  scaleX,
+  scaleY,
+) {
+  if (!entries.length) return [];
+
+  const normalizedDirection = String(direction ?? '').toLowerCase();
+  const resizeX = normalizedDirection.includes('left')
+    || normalizedDirection.includes('right')
+    || Math.abs((scaleX ?? 1) - 1) > 0.000001;
+  const resizeY = normalizedDirection.includes('top')
+    || normalizedDirection.includes('bottom')
+    || Math.abs((scaleY ?? 1) - 1) > 0.000001;
+  const safeScaleX = resizeX && Number.isFinite(scaleX)
+    ? Math.max(0.01, scaleX)
+    : 1;
+  const safeScaleY = resizeY && Number.isFinite(scaleY)
+    ? Math.max(0.01, scaleY)
+    : 1;
+  const activeLayout = entries.find(({ tableId }) => (
+    tableId === activeTableId
+  ))?.layout ?? entries[0].layout;
+  const anchorX = normalizedDirection.includes('left')
+    ? activeLayout.xRatio + activeLayout.widthRatio
+    : activeLayout.xRatio;
+  const anchorY = normalizedDirection.includes('top')
+    ? activeLayout.yRatio + activeLayout.heightRatio
+    : activeLayout.yRatio;
+  const stableRatio = (value) => Number(value.toFixed(12));
+
+  return entries.map(({ tableId, layout }) => ({
+    tableId,
+    layout: {
+      ...layout,
+      xRatio: resizeX
+        ? stableRatio(anchorX + (layout.xRatio - anchorX) * safeScaleX)
+        : layout.xRatio,
+      yRatio: resizeY
+        ? stableRatio(anchorY + (layout.yRatio - anchorY) * safeScaleY)
+        : layout.yRatio,
+      widthRatio: resizeX
+        ? stableRatio(layout.widthRatio * safeScaleX)
+        : layout.widthRatio,
+      heightRatio: resizeY
+        ? stableRatio(layout.heightRatio * safeScaleY)
+        : layout.heightRatio,
+    },
+  }));
+}
+
 export function serializeLayout(canvas, layoutMap, decorations = []) {
   const normalizedCanvas = Object.fromEntries(
     CANVAS_FIELDS.map((field) => [field, canvas[field] ?? null]),
