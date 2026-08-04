@@ -76,8 +76,9 @@ export const TableNode = memo(function TableNode({
     <button
       type="button"
       data-table-node={tableId}
+      data-table-status={status}
       className={clsx(
-        'table-node group flex select-none flex-col items-center justify-center overflow-visible border-2 px-[clamp(.35rem,1.1vw,.75rem)] py-[clamp(.3rem,.9vw,.65rem)] text-center outline-none transition-[transform,filter,box-shadow,border-color] duration-200 focus-visible:ring-4 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 active:scale-[.98] md:hover:-translate-y-0.5',
+        'table-node group block select-none overflow-visible border-2 text-center outline-none transition-[transform,filter,box-shadow,border-color] duration-200 focus-visible:ring-4 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 active:scale-[.98] md:hover:-translate-y-0.5',
         shape === 'round' ? 'rounded-full' : 'rounded-[1rem]',
         shape === 'booth' && 'border-[3px] border-double',
         embedded ? 'h-full min-h-0 w-full' : 'absolute min-h-0',
@@ -138,30 +139,32 @@ export const TableNode = memo(function TableNode({
       <span aria-hidden="true" className="table-seat table-seat-bottom" />
       <span aria-hidden="true" className="table-seat table-seat-left" />
 
-      <span className={clsx('absolute left-2 top-2 z-[1] h-2 w-2 rounded-full ring-2 ring-white/80', config.accent)} />
-      <strong className="relative z-[1] max-w-full truncate text-[clamp(.9rem,2.2cqw,1.45rem)] font-black leading-none tracking-tight">
-        {name}
-      </strong>
+      <span className="table-node-content">
+        <span className={clsx('table-node-accent absolute rounded-full ring-1 ring-white/80', config.accent)} />
+        <strong className="table-node-name max-w-full truncate font-black leading-none tracking-tight">
+          {name}
+        </strong>
 
-      {isIdle ? (
-        <span className={clsx('relative z-[1] mt-2 inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 text-[clamp(.58rem,1.35cqw,.72rem)] font-black', config.badge)}>
-          <StatusIcon size={12} />
-          空闲
-        </span>
-      ) : (
-        <>
-          <span className="relative z-[1] mt-1.5 whitespace-nowrap font-mono text-[clamp(.78rem,2.6cqw,1.3rem)] font-black leading-none tabular-nums">
-            {status === 'overtime' ? `超时 ${duration}` : duration}
+        {isIdle ? (
+          <span className={clsx('table-node-status inline-flex max-w-full min-w-0 items-center whitespace-nowrap rounded-full font-black', config.badge)}>
+            <StatusIcon className="table-node-status-icon shrink-0" size={12} />
+            <span className="truncate">空闲</span>
           </span>
-          <span className={clsx('relative z-[1] mt-1.5 inline-flex max-w-full items-center gap-1 truncate whitespace-nowrap rounded-full px-1.5 py-0.5 text-[clamp(.52rem,1.2cqw,.68rem)] font-black', config.badge)}>
-            <StatusIcon size={11} />
-            {TIMER_STATUS_LABELS[status]}
-          </span>
-          <span className="table-node-time relative z-[1] mt-1 truncate text-[10px] font-semibold opacity-60">
-            {formatStoreTime(startTime, timezone)} → {formatStoreTime(effectiveEndTime, timezone)}
-          </span>
-        </>
-      )}
+        ) : (
+          <>
+            <span className="table-node-duration max-w-full truncate whitespace-nowrap font-mono font-black leading-none tabular-nums">
+              {status === 'overtime' ? `超时 ${duration}` : duration}
+            </span>
+            <span className={clsx('table-node-status inline-flex max-w-full min-w-0 items-center truncate whitespace-nowrap rounded-full font-black', config.badge)}>
+              <StatusIcon className="table-node-status-icon shrink-0" size={11} />
+              <span className="truncate">{TIMER_STATUS_LABELS[status]}</span>
+            </span>
+            <span className="table-node-time max-w-full truncate font-semibold opacity-60">
+              {formatStoreTime(startTime, timezone)} → {formatStoreTime(effectiveEndTime, timezone)}
+            </span>
+          </>
+        )}
+      </span>
 
       {groupName ? (
         <span className="absolute -right-1.5 -top-2 z-[2] max-w-[70%] truncate rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-black text-white shadow">

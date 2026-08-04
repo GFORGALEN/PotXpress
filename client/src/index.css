@@ -161,6 +161,69 @@
   width: 24%;
 }
 
+/*
+ * A table is sized from the responsive floor canvas, so its contents must
+ * respond to the table itself instead of the viewport. The outer node keeps
+ * overflow visible for the decorative seats; this inner layer safely clips
+ * labels when a legacy layout contains an exceptionally small table.
+ */
+.table-node-content {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: inherit;
+  padding: 3px 4px;
+  padding: clamp(2px, 4cqh, 10px) clamp(3px, 6cqw, 12px);
+}
+
+.table-node-accent {
+  top: 5px;
+  left: 5px;
+  width: 6px;
+  height: 6px;
+  top: clamp(3px, 7cqh, 8px);
+  left: clamp(3px, 7cqw, 8px);
+  width: clamp(3px, 5cqw, 8px);
+  height: clamp(3px, 5cqw, 8px);
+}
+
+.table-node-name {
+  font-size: 10px;
+  font-size: clamp(7px, min(13cqh, 9cqw), 23px);
+}
+
+.table-node-duration {
+  margin-top: 2px;
+  font-size: 10px;
+  margin-top: clamp(1px, 2.5cqh, 6px);
+  font-size: clamp(7px, min(14cqh, 8cqw), 21px);
+}
+
+.table-node-status {
+  gap: 2px;
+  margin-top: 2px;
+  padding: 2px 3px;
+  font-size: 8px;
+  gap: clamp(1px, 1.5cqw, 4px);
+  margin-top: clamp(1px, 3cqh, 8px);
+  padding: clamp(1px, 1.5cqh, 4px) clamp(2px, 4cqw, 8px);
+  font-size: clamp(6px, min(9cqh, 6.5cqw), 12px);
+  line-height: 1;
+}
+
+.table-node-status-icon {
+  width: 9px;
+  height: 9px;
+  width: clamp(7px, min(10cqh, 9cqw), 12px);
+  height: clamp(7px, min(10cqh, 9cqw), 12px);
+}
+
 @keyframes detail-panel-in {
   from { transform: translateY(100%); opacity: 0.7; }
   to { transform: translateY(0); opacity: 1; }
@@ -179,11 +242,39 @@
 
 .table-node-time {
   display: none;
+  margin-top: 2px;
+  font-size: 8px;
+  margin-top: clamp(1px, 2cqh, 4px);
+  font-size: clamp(6px, min(7cqh, 5cqw), 10px);
 }
 
 @container (min-width: 120px) and (min-height: 74px) {
   .table-node-time {
     display: block;
+  }
+}
+
+@container (max-width: 64px) {
+  .table-node-status-icon {
+    display: none;
+  }
+}
+
+@container (max-height: 48px) {
+  .table-node-name {
+    display: none;
+  }
+
+  .table-node-status {
+    margin-top: 0;
+  }
+
+  .table-node:not([data-table-status="idle"]) .table-node-status {
+    display: none;
+  }
+
+  .table-node-duration {
+    margin-top: 0;
   }
 }
 
