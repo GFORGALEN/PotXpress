@@ -46,6 +46,7 @@ export function EditorToolbar({ onAddTable }) {
     saveLayout,
     loadLatest,
     setSyncSelectedResize,
+    arrangeSelectedTables,
   } = useLayoutEditor();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmReload, setConfirmReload] = useState(false);
@@ -57,7 +58,10 @@ export function EditorToolbar({ onAddTable }) {
   ), [overlaps]);
 
   const requestSave = async () => {
-    const nextOverlaps = findSignificantOverlaps(tables, draftLayout);
+    const nextOverlaps = findSignificantOverlaps(
+      tables.filter((table) => table.enabled !== false),
+      draftLayout,
+    );
 
     if (nextOverlaps.length > 0) {
       setOverlaps(nextOverlaps);
@@ -208,6 +212,29 @@ export function EditorToolbar({ onAddTable }) {
                 onChange={(event) => setSyncSelectedResize(event.target.checked)}
               />
             </label>
+            {[
+              ['smart', '智能整理'],
+              ['uniform-size', '统一尺寸'],
+              ['align-top', '顶部对齐'],
+              ['align-left', '左侧对齐'],
+              ['distribute-horizontal', '横向等距'],
+              ['distribute-vertical', '纵向等距'],
+            ].map(([operation, label]) => (
+              <button
+                key={operation}
+                type="button"
+                onClick={() => arrangeSelectedTables(operation)}
+                disabled={saving || selectedTableIds.length < 2}
+                title={selectedTableIds.length < 2 ? '请先框选至少两张桌台' : label}
+                className={`inline-flex min-h-11 items-center rounded-xl border px-3 text-sm font-bold disabled:opacity-40 ${
+                  operation === 'smart'
+                    ? 'border-ember-200 bg-ember-50 text-ember-700'
+                    : 'border-stone-200 bg-white text-stone-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
               吸附
               <input

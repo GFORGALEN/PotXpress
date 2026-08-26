@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { ROLE_LABELS } from '../../utils/navigation.js';
+import { formatStoreDisplayName } from '../../utils/storeSelection.js';
 import { useSound } from '../../contexts/SoundContext.jsx';
 import { ChangePasswordDialog } from '../auth/ChangePasswordDialog.jsx';
 
@@ -97,7 +98,7 @@ export function TopNavbar({ onOpenMenu }) {
 
   return (
     <>
-    <header className="relative z-30 flex h-[4.5rem] shrink-0 items-center gap-3 border-b border-stone-200 bg-white/90 px-3 backdrop-blur sm:px-5 lg:px-7">
+    <header className="relative z-30 flex h-20 shrink-0 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-7">
       <button
         type="button"
         onClick={onOpenMenu}
@@ -109,9 +110,9 @@ export function TopNavbar({ onOpenMenu }) {
 
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <img
-          src="/potxpress-logo.png"
+          src="/potxpress-logo.png?v=3"
           alt="PotXpress 小锅快线"
-          className="hidden h-10 w-14 shrink-0 rounded-xl object-cover sm:block"
+          className="hidden h-12 w-auto shrink-0 rounded-xl object-contain sm:block"
         />
         <div className="min-w-0">
           <p className="truncate text-sm font-bold tracking-tight text-ink-950 sm:text-base">
@@ -122,14 +123,14 @@ export function TopNavbar({ onOpenMenu }) {
           </p>
           {user.role === 'system_admin' ? (
             <label className="mt-1 flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 shadow-sm transition hover:border-sky-300 hover:bg-sky-100">
-              <ArrowRightLeft className="shrink-0 text-sky-600" size={15} />
+              <ArrowRightLeft className="shrink-0 text-ember-600" size={15} />
               <span className="hidden shrink-0 font-black sm:inline">切换门店</span>
               <select
                 aria-label="选择门店"
                 value={selectedStoreId ?? ''}
                 disabled={loading || enabledStores.length === 0}
                 onChange={(event) => selectStore(event.target.value)}
-                className="min-w-0 max-w-[7rem] cursor-pointer appearance-none truncate bg-transparent pr-5 font-bold text-sky-950 outline-none disabled:cursor-default sm:max-w-[13rem]"
+                className="min-w-0 max-w-[7rem] cursor-pointer appearance-none truncate bg-transparent pr-5 font-bold text-sky-950 outline-none disabled:cursor-default sm:max-w-[22rem] xl:max-w-[34rem]"
               >
                 {enabledStores.length === 0 ? (
                   <option value="">暂无可用门店</option>
@@ -140,11 +141,11 @@ export function TopNavbar({ onOpenMenu }) {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="-ml-6 pointer-events-none shrink-0 text-sky-600" size={14} />
+              <ChevronDown className="-ml-6 pointer-events-none shrink-0 text-ember-600" size={14} />
             </label>
           ) : (
-            <p className="truncate text-xs text-stone-500">
-              {currentStore?.name ?? '正在读取门店'}
+            <p className="truncate text-xs font-medium text-stone-500" title={currentStore?.name}>
+              {formatStoreDisplayName(currentStore?.name) || '正在读取门店'}
             </p>
           )}
         </div>

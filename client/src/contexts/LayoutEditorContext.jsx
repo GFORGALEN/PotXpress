@@ -12,6 +12,7 @@ import { useAuth } from './AuthContext.jsx';
 import { useStore } from './StoreContext.jsx';
 import { useToast } from './ToastContext.jsx';
 import {
+  arrangeTableSelection,
   buildLayoutSavePayload,
   normalizeDecoration,
   normalizeTableLayout,
@@ -281,6 +282,19 @@ export function LayoutEditorProvider({ children }) {
     if (changes.length) commitTableChanges(changes, activeTableId);
   }, [commitTableChanges, draftLayout, selectedTableIds]);
 
+  const arrangeSelectedTables = useCallback((operation) => {
+    const entries = selectedTableIds
+      .map((tableId) => ({ tableId, layout: draftLayout.get(tableId) }))
+      .filter(({ layout }) => Boolean(layout));
+    if (entries.length < 2) return;
+
+    const arranged = arrangeTableSelection(entries, operation, selectedTableId);
+    commitTableChanges(arranged.map(({ tableId, layout }) => ({
+      tableId,
+      patch: layout,
+    })), selectedTableId);
+  }, [commitTableChanges, draftLayout, selectedTableId, selectedTableIds]);
+
   const updateCanvas = useCallback((patch) => {
     rememberCurrent();
     setDraftCanvas((current) => ({ ...current, ...patch }));
@@ -530,6 +544,7 @@ export function LayoutEditorProvider({ children }) {
     updateTableLayout,
     moveSelectedTables,
     resizeSelectedTables,
+    arrangeSelectedTables,
     updateCanvas,
     addDecoration,
     updateDecoration,
@@ -567,6 +582,7 @@ export function LayoutEditorProvider({ children }) {
     updateTableLayout,
     moveSelectedTables,
     resizeSelectedTables,
+    arrangeSelectedTables,
     selectTable,
     selectTables,
     addDecoration,

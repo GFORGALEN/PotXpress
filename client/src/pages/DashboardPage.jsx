@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Link, useLocation } from 'react-router';
 import {
   ArrowUpRight,
   Clock3,
@@ -55,6 +56,8 @@ import {
   calculateClockOffset,
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
+import { isFrontDeskMode } from '../utils/frontDeskMode.js';
+import { formatStoreDisplayName } from '../utils/storeSelection.js';
 
 const TIMER_POLL_INTERVAL = 3000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
@@ -62,6 +65,8 @@ const CLOCK_RECALIBRATION_POLLS = 30;
 const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
 
 export function DashboardPage() {
+  const location = useLocation();
+  const frontDeskMode = isFrontDeskMode(location.search);
   const { token, user } = useAuth();
   const {
     currentStore,
@@ -70,6 +75,7 @@ export function DashboardPage() {
     registerStoreRequest,
   } = useStore();
   const { showToast } = useToast();
+  const displayStoreName = formatStoreDisplayName(currentStore?.name) || '桌台看板';
   const layoutEditor = useLayoutEditor();
   const {
     authorized: soundAuthorized,
@@ -641,36 +647,47 @@ export function DashboardPage() {
   return (
     <div
       ref={fullscreenRootRef}
-      className="mx-auto flex max-w-[110rem] flex-col gap-4 bg-stone-50"
+      className={frontDeskMode
+        ? 'flex h-full min-h-0 w-full flex-col gap-2 bg-canvas'
+        : 'mx-auto flex max-w-[110rem] flex-col gap-4 bg-canvas'}
     >
-      <section className="relative flex flex-col justify-between gap-4 overflow-hidden rounded-[1.75rem] bg-ink-950 px-5 py-5 text-white shadow-[0_24px_52px_-28px_rgba(16,24,21,.55)] sm:flex-row sm:items-center sm:px-6">
-        <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-ember-500/25 blur-3xl" />
+      <section className={`relative flex shrink-0 flex-col justify-between gap-3 overflow-hidden border border-[#eadb62]/70 bg-[#fff8c7] text-ink-950 shadow-[0_20px_44px_-30px_rgba(80,70,20,.35)] sm:flex-row sm:items-center ${frontDeskMode ? 'rounded-2xl px-4 py-3 sm:px-5' : 'rounded-[1.75rem] px-5 py-4 sm:px-6'}`}>
+        <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/55 blur-3xl" />
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-xl font-black tracking-tight text-white sm:text-2xl">
-              {currentStore?.name ?? '桌台看板'}
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-ember-700">当前门店</p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <h1 className="min-w-0 truncate text-xl font-black tracking-tight text-ink-950 sm:text-2xl" title={currentStore?.name}>
+              {displayStoreName}
             </h1>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-400/15 text-emerald-200' : 'bg-amber-300/15 text-amber-100'}`}>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
               <Radio size={12} />
               {realtime.connected ? '实时连接' : '自动重连中'}
             </span>
           </div>
-          <p className="mt-1 text-xs font-medium text-stone-300">
+          <p className="mt-0.5 text-xs font-medium text-stone-600">
             运行模式 · 点击桌台查看计时与操作
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          {frontDeskMode ? (
+            <Link
+              to="/"
+              className="inline-flex min-h-11 items-center rounded-xl border border-[#dfce54] bg-white/65 px-3 text-sm font-bold text-ink-900 transition hover:bg-white"
+            >
+              退出前台模式
+            </Link>
+          ) : null}
           <div className="mr-1 hidden min-w-24 text-right sm:block">
-            <p className="flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-400">
+            <p className="flex items-center justify-end gap-1 text-[10px] font-bold uppercase tracking-wider text-stone-500">
               <Clock3 size={11} /> 门店时间
             </p>
-            <p className="font-mono text-base font-black tabular-nums text-white">{currentTimeLabel}</p>
+            <p className="font-mono text-base font-black tabular-nums text-ink-950">{currentTimeLabel}</p>
           </div>
           <button
             type="button"
             onClick={refreshTimers}
-            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-3 text-sm font-bold text-white transition hover:bg-white/15"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#dfce54] bg-white/65 px-3 text-sm font-bold text-ink-900 transition hover:bg-white"
           >
             <RotateCw size={16} />
             立即同步
@@ -683,7 +700,7 @@ export function DashboardPage() {
                 onSaved: setLayout,
                 onReload: reloadLatestLayout,
               })}
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-4 text-sm font-bold text-ink-950 transition hover:bg-stone-100"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-ember-500 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-ember-600"
             >
               进入布局编辑
               <ArrowUpRight size={16} />
@@ -696,7 +713,7 @@ export function DashboardPage() {
         <EditorToolbar onAddTable={() => openCreateTableDialog()} />
       ) : null}
 
-      {!soundAuthorized ? (
+      {!soundAuthorized && frontDeskMode ? (
         <button
           type="button"
           onClick={enableSound}
@@ -760,8 +777,10 @@ export function DashboardPage() {
             ) : (
             <div className={canvasFocused
               ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-white'
-              : 'relative h-[clamp(32rem,70vh,54rem)] min-h-0'}>
-              {(canManageTables || layoutEditor.mode !== 'view') ? (
+              : frontDeskMode
+                ? 'relative min-h-80 flex-1'
+                : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
+              {layoutEditor.mode === 'view' || canManageTables ? (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
                   <button
                     type="button"

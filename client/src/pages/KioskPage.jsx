@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { Flame, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { kioskLogin } from '../api/auth.js';
 import { storeToken } from '../api/client.js';
+import { FRONT_DESK_PATH } from '../utils/frontDeskMode.js';
 
 // 店员免登录入口：/kiosk/:key
 // 用门店专属 key 换取店员会话后整页跳转画布，
@@ -18,7 +19,7 @@ export function KioskPage() {
       try {
         const result = await kioskLogin(key);
         storeToken(result.token);
-        window.location.replace('/');
+        window.location.replace(FRONT_DESK_PATH);
       } catch (requestError) {
         if (active) {
           setError(requestError.message || '店员入口链接无效，请联系店长');
@@ -41,9 +42,11 @@ export function KioskPage() {
     <main className="relative flex min-h-full flex-col items-center justify-center overflow-hidden bg-ink-950 px-6 py-12 text-center">
       <div className="login-grid absolute inset-0 opacity-25" />
       <div className="relative flex flex-col items-center gap-4">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-ember-500/15 text-ember-300">
-          <Flame className="h-7 w-7" aria-hidden="true" />
-        </span>
+        <img
+          src="/potxpress-logo.png?v=3"
+          alt="PotXpress 小锅快线"
+          className="w-40 rounded-2xl object-contain shadow-soft"
+        />
         {error ? (
           <>
             <TriangleAlert className="h-8 w-8 text-amber-400" aria-hidden="true" />

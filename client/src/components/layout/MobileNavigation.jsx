@@ -53,16 +53,16 @@ export function MobileDrawer({ open, onClose }) {
         onClick={onClose}
         aria-label="关闭导航"
       />
-      <div className="absolute inset-y-0 left-0 w-[min(19rem,86vw)] bg-ink-900 p-5 text-white shadow-soft">
+      <div className="absolute inset-y-0 left-0 w-[min(19rem,86vw)] border-r border-stone-200 bg-white p-5 text-ink-950 shadow-soft">
         <div className="flex h-12 items-center gap-3 px-2">
           <img
-            src="/potxpress-logo.png"
+            src="/potxpress-logo.png?v=3"
             alt="PotXpress 小锅快线"
-            className="h-9 w-12 rounded-xl object-cover"
+            className="h-9 w-auto rounded-xl object-contain"
           />
           <div>
             <p className="text-sm font-semibold">PotXpress</p>
-            <p className="text-xs text-stone-400">桌位计时工作台</p>
+            <p className="text-xs text-stone-500">桌位计时工作台</p>
           </div>
         </div>
         <nav className="mt-6 space-y-1" aria-label="全部导航">
@@ -78,8 +78,8 @@ export function MobileDrawer({ open, onClose }) {
                 className={({ isActive }) => clsx(
                   'flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium',
                   isActive
-                    ? 'bg-white text-ink-950'
-                    : 'text-stone-300 hover:bg-white/10',
+                    ? 'border border-[#eadb62] bg-[#fff8c7] text-ink-950'
+                    : 'border border-transparent text-stone-600 hover:bg-stone-100',
                 )}
               >
                 <Icon size={19} />

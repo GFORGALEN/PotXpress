@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { navigationForRole, ROLE_LABELS } from '../src/utils/navigation.js';
-import { resolveEnabledStore } from '../src/utils/storeSelection.js';
+import {
+  formatStoreDisplayName,
+  resolveEnabledStore,
+} from '../src/utils/storeSelection.js';
 import {
   calculateClockOffset,
   deriveTimerDisplay,
   formatTimerDuration,
 } from '../src/utils/timerDisplay.js';
 import {
+  arrangeTableSelection,
   buildCanvasResizePatch,
   buildLayoutSavePayload,
   CANVAS_SIZE_PRESETS,
@@ -16,6 +20,11 @@ import {
   scaleTableSelection,
   serializeLayout,
 } from '../src/utils/layoutEditor.js';
+import {
+  defaultAuthenticatedPath,
+  FRONT_DESK_PATH,
+  isFrontDeskMode,
+} from '../src/utils/frontDeskMode.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -36,6 +45,15 @@ test('resolveEnabledStore returns null when no store is enabled', () => {
   assert.equal(resolveEnabledStore([{ id: 'closed', enabled: false }], 'closed'), null);
 });
 
+test('store display names remove the repeated PotXpress business prefix', () => {
+  assert.equal(
+    formatStoreDisplayName('Pot Xpress Hotpot Buffet Dominion Road · 本地演示'),
+    'Dominion Road · 本地演示',
+  );
+  assert.equal(formatStoreDisplayName('Albany'), 'Albany');
+  assert.equal(formatStoreDisplayName(null), '');
+});
+
 test('navigation exposes only routes allowed for each role', () => {
   assert.equal(navigationForRole('store_staff').length, 2);
   assert.equal(navigationForRole('store_admin').length, 5);
@@ -52,6 +70,15 @@ test('all supported roles have a user-facing label', () => {
     'store_staff',
     'system_admin',
   ]);
+});
+
+test('store staff enters the simplified front-desk mode by default', () => {
+  assert.equal(defaultAuthenticatedPath('store_staff'), FRONT_DESK_PATH);
+  assert.equal(defaultAuthenticatedPath('store_admin'), '/');
+  assert.equal(defaultAuthenticatedPath('system_admin'), '/');
+  assert.equal(isFrontDeskMode('?mode=frontdesk'), true);
+  assert.equal(isFrontDeskMode('?mode=frontdesk&source=kiosk'), true);
+  assert.equal(isFrontDeskMode('?mode=admin'), false);
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {
@@ -234,6 +261,44 @@ test('canvas resize patch scales table constraints proportionally', () => {
     maxTableHeight: 600,
     gridSize: 20,
   });
+});
+
+test('smart table arrangement normalizes size, alignment and edge gaps', () => {
+  const entries = [
+    { tableId: 'a', layout: normalizeTableLayout({ xRatio: 0.1, yRatio: 0.2, widthRatio: 0.1, heightRatio: 0.1 }) },
+    { tableId: 'b', layout: normalizeTableLayout({ xRatio: 0.3, yRatio: 0.22, widthRatio: 0.12, heightRatio: 0.08 }) },
+    { tableId: 'c', layout: normalizeTableLayout({ xRatio: 0.55, yRatio: 0.19, widthRatio: 0.1, heightRatio: 0.1 }) },
+  ];
+
+  const arranged = arrangeTableSelection(entries, 'smart', 'b');
+  assert.deepEqual(arranged.map(({ layout }) => ({
+    x: layout.xRatio,
+    y: layout.yRatio,
+    width: layout.widthRatio,
+    height: layout.heightRatio,
+  })), [
+    { x: 0.1, y: 0.195, width: 0.1, height: 0.1 },
+    { x: 0.325, y: 0.195, width: 0.1, height: 0.1 },
+    { x: 0.55, y: 0.195, width: 0.1, height: 0.1 },
+  ]);
+});
+
+test('uniform table size follows the active table while preserving centers', () => {
+  const entries = [
+    { tableId: 'a', layout: normalizeTableLayout({ xRatio: 0.1, yRatio: 0.2, widthRatio: 0.1, heightRatio: 0.1 }) },
+    { tableId: 'b', layout: normalizeTableLayout({ xRatio: 0.3, yRatio: 0.22, widthRatio: 0.12, heightRatio: 0.08 }) },
+  ];
+
+  const arranged = arrangeTableSelection(entries, 'uniform-size', 'b');
+  assert.deepEqual(arranged.map(({ layout }) => ({
+    x: layout.xRatio,
+    y: layout.yRatio,
+    width: layout.widthRatio,
+    height: layout.heightRatio,
+  })), [
+    { x: 0.09, y: 0.21, width: 0.12, height: 0.08 },
+    { x: 0.3, y: 0.22, width: 0.12, height: 0.08 },
+  ]);
 });
 
 test('synchronized resize scales table sizes and spacing from the active handle', () => {

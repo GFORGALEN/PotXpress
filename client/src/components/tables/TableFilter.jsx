@@ -10,12 +10,12 @@ import clsx from 'clsx';
 import { TIMER_STATUS_LABELS } from '../../utils/timerDisplay.js';
 
 const FILTERS = [
-  { value: 'all', label: '全部桌台', count: 'total', Icon: Armchair, tone: 'text-ink-900', active: 'border-ink-900 bg-ink-900 text-white' },
-  { value: 'idle', label: '空闲', count: 'idle', Icon: Sparkles, tone: 'text-slate-700', active: 'border-slate-500 bg-slate-700 text-white' },
-  { value: 'running', label: TIMER_STATUS_LABELS.running, count: 'running', Icon: Clock3, tone: 'text-emerald-700', active: 'border-emerald-500 bg-emerald-600 text-white' },
-  { value: 'warning', label: TIMER_STATUS_LABELS.warning, count: 'warning', Icon: AlertTriangle, tone: 'text-amber-700', active: 'border-amber-500 bg-amber-500 text-white' },
-  { value: 'overtime', label: TIMER_STATUS_LABELS.overtime, count: 'overtime', Icon: AlertTriangle, tone: 'text-red-700', active: 'border-red-500 bg-red-500 text-white' },
-  { value: 'paused', label: TIMER_STATUS_LABELS.paused, count: 'paused', Icon: CirclePause, tone: 'text-slate-600', active: 'border-slate-500 bg-slate-500 text-white' },
+  { value: 'all', label: '全部桌台', count: 'total', Icon: Armchair, tone: 'text-ink-900', active: 'border-[#eadb62] bg-[#fff7b8] text-ink-950' },
+  { value: 'idle', label: '空闲', count: 'idle', Icon: Sparkles, tone: 'text-slate-700', active: 'border-slate-300 bg-slate-100 text-slate-800' },
+  { value: 'running', label: TIMER_STATUS_LABELS.running, count: 'running', Icon: Clock3, tone: 'text-emerald-700', active: 'border-emerald-300 bg-emerald-50 text-emerald-800' },
+  { value: 'warning', label: TIMER_STATUS_LABELS.warning, count: 'warning', Icon: AlertTriangle, tone: 'text-amber-700', active: 'border-amber-300 bg-amber-50 text-amber-800' },
+  { value: 'overtime', label: TIMER_STATUS_LABELS.overtime, count: 'overtime', Icon: AlertTriangle, tone: 'text-red-700', active: 'border-red-300 bg-red-50 text-red-700' },
+  { value: 'paused', label: TIMER_STATUS_LABELS.paused, count: 'paused', Icon: CirclePause, tone: 'text-slate-600', active: 'border-slate-300 bg-slate-100 text-slate-700' },
 ];
 
 export function TableFilter({
@@ -44,7 +44,7 @@ export function TableFilter({
             )}
             aria-pressed={status === value}
           >
-            <span className={clsx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', status === value ? 'bg-white/15' : 'bg-white shadow-sm')}>
+            <span className={clsx('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', status === value ? 'bg-white/75 shadow-sm' : 'bg-white shadow-sm')}>
               <Icon size={18} />
             </span>
             <span>

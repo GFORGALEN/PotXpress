@@ -8,8 +8,8 @@ export function Sidebar() {
   const items = navigationForRole(user.role);
 
   return (
-    <aside className="hidden w-60 shrink-0 border-r border-white/10 bg-ink-950 px-3 py-5 text-stone-200 xl:block">
-      <p className="px-3 pb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-500">
+    <aside className="hidden w-60 shrink-0 border-r border-stone-200 bg-white px-3 py-5 text-ink-900 xl:block">
+      <p className="px-3 pb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-stone-400">
         工作台
       </p>
       <nav className="space-y-1" aria-label="主导航">
@@ -24,8 +24,8 @@ export function Sidebar() {
               className={({ isActive }) => clsx(
                 'flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition',
                 isActive
-                  ? 'bg-white text-ink-950 shadow-card'
-                  : 'text-stone-300 hover:bg-white/8 hover:text-white',
+                  ? 'border border-[#eadb62] bg-[#fff8c7] text-ink-950 shadow-card'
+                  : 'border border-transparent text-stone-600 hover:bg-stone-100 hover:text-ink-950',
               )}
             >
               <Icon size={19} strokeWidth={2} />
@@ -34,12 +34,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-        <p className="text-xs font-semibold text-stone-200">快速提示</p>
-        <p className="mt-2 text-xs leading-5 text-stone-400">
-          门店数据会按当前选择隔离，切换门店时旧请求会自动取消。
-        </p>
-      </div>
     </aside>
   );
 }

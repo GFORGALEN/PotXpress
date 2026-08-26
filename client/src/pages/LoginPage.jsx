@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
+import { defaultAuthenticatedPath } from '../utils/frontDeskMode.js';
 
 const DEMO_ACCOUNTS = [
   { role: '系统管理员', username: 'admin', password: 'admin123' },
@@ -15,7 +16,12 @@ const DEMO_ACCOUNTS = [
 ];
 
 export function LoginPage() {
-  const { isAuthenticated, loading: authLoading, login } = useAuth();
+  const {
+    isAuthenticated,
+    loading: authLoading,
+    login,
+    user,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -32,7 +38,7 @@ export function LoginPage() {
   }, [username, password]);
 
   if (!authLoading && isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={defaultAuthenticatedPath(user?.role)} replace />;
   }
 
   const handleSubmit = async (event) => {
@@ -41,10 +47,10 @@ export function LoginPage() {
     setError('');
 
     try {
-      await login(username, password);
+      const loggedInUser = await login(username, password);
       const destination = typeof location.state?.from === 'string'
         ? location.state.from
-        : '/';
+        : defaultAuthenticatedPath(loggedInUser.role);
       navigate(destination, { replace: true });
     } catch (requestError) {
       setError(requestError.message);
@@ -64,9 +70,9 @@ export function LoginPage() {
           <div className="w-full rounded-[2rem] border border-white/80 bg-[#fffdfa] p-6 shadow-[0_28px_70px_-36px_rgba(93,47,9,.32)] sm:p-8">
             <div className="flex flex-col items-center text-center">
               <img
-                src="/potxpress-logo.png"
+                src="/potxpress-logo.png?v=3"
                 alt="PotXpress 小锅快线"
-                className="h-24 w-36 rounded-2xl object-cover shadow-card"
+                className="h-auto w-36 rounded-2xl object-contain shadow-card"
               />
               <p className="mt-3 text-sm font-bold text-stone-500">门店工作台</p>
             </div>

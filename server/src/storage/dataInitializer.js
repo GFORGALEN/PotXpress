@@ -18,11 +18,11 @@ const SEED_IDS = Object.freeze({
 });
 
 export const DEFAULT_CANVAS = Object.freeze({
-  aspectRatio: '16:9',
-  virtualWidth: 2400,
-  virtualHeight: 1350,
+  aspectRatio: 'auto',
+  virtualWidth: 4000,
+  virtualHeight: 2550,
   backgroundImage: null,
-  backgroundColor: '#f5f5f5',
+  backgroundColor: '#f2f0ea',
   gridEnabled: true,
   snapToGrid: true,
   gridSize: 15,
@@ -31,6 +31,14 @@ export const DEFAULT_CANVAS = Object.freeze({
   maxTableWidth: 600,
   maxTableHeight: 450,
 });
+
+const DEFAULT_DECORATIONS = Object.freeze([
+  { id: 'decoration_demo_entrance_main', type: 'entrance', label: '入口', xRatio: 0.382852, yRatio: 0.000264, widthRatio: 0.104774, heightRatio: 0.070602, rotation: 0, zIndex: 63 },
+  { id: 'decoration_demo_cashier', type: 'cashier', label: '收银台', xRatio: 0.663937, yRatio: 0.099438, widthRatio: 0.059766, heightRatio: 0.070602, rotation: 90, zIndex: 64 },
+  { id: 'decoration_demo_entrance_side', type: 'entrance', label: '入口', xRatio: 0.292096, yRatio: 0.589671, widthRatio: 0.08, heightRatio: 0.053529, rotation: 90, zIndex: 164 },
+  { id: 'decoration_demo_wall_main', type: 'wall', label: '墙体', xRatio: 0.379718, yRatio: 0.456898, widthRatio: 0.487717, heightRatio: 0.028935, rotation: 0, zIndex: 331 },
+  { id: 'decoration_demo_wall_side', type: 'wall', label: '墙体', xRatio: 0.160845, yRatio: 0.459782, widthRatio: 0.149783, heightRatio: 0.023148, rotation: 0, zIndex: 332 },
+]);
 
 export async function initializeBootstrapAdmin() {
   const { username, displayName, password } = config.bootstrapAdmin;
@@ -83,34 +91,55 @@ function findConflict(items, id, predicate) {
 }
 
 function buildSeedTables(timestamp) {
-  const positions = [
-    [0.04, 0.12],
-    [0.28, 0.12],
-    [0.52, 0.12],
-    [0.76, 0.12],
-    [0.04, 0.55],
-    [0.28, 0.55],
-    [0.52, 0.55],
-    [0.76, 0.55],
+  const specifications = [
+    ['A1', 'rectangle', 'A区', 0.170705, 0.193992, 0.136595, 0.081255],
+    ['A2', 'rectangle', 'A区', 0.170705, 0.325738, 0.136595, 0.081255],
+    ...Array.from({ length: 6 }, (_, index) => [
+      `B${index + 1}`, 'round', 'B区',
+      0.389888 + index * 0.076572, 0.212261, 0.056163, 0.088099,
+    ]),
+    ...Array.from({ length: 8 }, (_, index) => [
+      `B${index + 7}`, 'round', 'B区',
+      0.399521 + index * 0.067653, 0.35637, 0.05625, 0.088235,
+    ]),
+    ...Array.from({ length: 3 }, (_, index) => [
+      `C${index + 1}`, 'rectangle', 'C区',
+      0.431942 + index * 0.133723, 0.577214, 0.107756, 0.0887,
+    ]),
+    ['C4', 'rectangle', 'C区', 0.839932, 0.573674, 0.056546, 0.136398],
+    ['C5', 'rectangle', 'C区', 0.839932, 0.739344, 0.056546, 0.136398],
+    ['C6', 'rectangle', 'C区', 0.71092, 0.785702, 0.097088, 0.080333],
+    ['C7', 'rectangle', 'C区', 0.56767, 0.785702, 0.097088, 0.080333],
+    ['C8', 'rectangle', 'C区', 0.42442, 0.785702, 0.097088, 0.080333],
+    ['D1', 'rectangle', 'D区', 0.176315, 0.684097, 0.112499, 0.082442],
+    ['D2', 'rectangle', 'D区', 0.176315, 0.519228, 0.112499, 0.082442],
   ];
 
-  return positions.map(([xRatio, yRatio], index) => ({
+  return specifications.map(([
+    name,
+    shape,
+    area,
+    xRatio,
+    yRatio,
+    widthRatio,
+    heightRatio,
+  ], index) => ({
     id: `table_demo_${String(index + 1).padStart(2, '0')}`,
     storeId: SEED_IDS.store,
-    name: `${index + 1}号桌`,
+    name,
     number: index + 1,
     sortOrder: index + 1,
     enabled: true,
-    shape: 'rectangle',
+    shape,
     capacity: 4,
-    area: '大厅',
+    area,
     note: null,
     defaultDurationMinutes: null,
     layout: {
       xRatio,
       yRatio,
-      widthRatio: 0.1,
-      heightRatio: 0.11,
+      widthRatio,
+      heightRatio,
       rotation: 0,
       zIndex: index + 1,
     },
@@ -133,7 +162,7 @@ export async function initializeDemoData() {
 
   const seedStore = {
     id: SEED_IDS.store,
-    name: 'PotXpress 演示门店',
+    name: 'Pot Xpress Hotpot Buffet Dominion Road · 本地演示',
     code: 'DEMO001',
     normalizedCode: normalizeStoreCode('DEMO001'),
     address: null,
@@ -231,7 +260,7 @@ export async function initializeDemoData() {
           storeId: SEED_IDS.store,
           layoutVersion: 1,
           canvas: { ...DEFAULT_CANVAS },
-          decorations: [],
+          decorations: DEFAULT_DECORATIONS.map((item) => ({ ...item })),
           updatedAt: timestamp,
           updatedBy: SEED_IDS.systemAdmin,
         });

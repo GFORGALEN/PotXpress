@@ -142,6 +142,153 @@ export function scaleTableSelection(
   }));
 }
 
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function selectionBounds(entries) {
+  return entries.reduce((bounds, { layout }) => ({
+    left: Math.min(bounds.left, layout.xRatio),
+    top: Math.min(bounds.top, layout.yRatio),
+    right: Math.max(bounds.right, layout.xRatio + layout.widthRatio),
+    bottom: Math.max(bounds.bottom, layout.yRatio + layout.heightRatio),
+  }), {
+    left: Infinity,
+    top: Infinity,
+    right: -Infinity,
+    bottom: -Infinity,
+  });
+}
+
+function distribute(entries, axis, bounds) {
+  const horizontal = axis === 'horizontal';
+  const positionKey = horizontal ? 'xRatio' : 'yRatio';
+  const sizeKey = horizontal ? 'widthRatio' : 'heightRatio';
+  const start = horizontal ? bounds.left : bounds.top;
+  const end = horizontal ? bounds.right : bounds.bottom;
+  const sorted = [...entries].sort((left, right) => (
+    left.layout[positionKey] - right.layout[positionKey]
+  ));
+  const totalSize = sorted.reduce((sum, entry) => sum + entry.layout[sizeKey], 0);
+  const gap = sorted.length > 1
+    ? Math.max(0, (end - start - totalSize) / (sorted.length - 1))
+    : 0;
+  let cursor = start;
+
+  return sorted.map((entry) => {
+    const next = {
+      ...entry,
+      layout: {
+        ...entry.layout,
+        [positionKey]: cursor,
+      },
+    };
+    cursor += entry.layout[sizeKey] + gap;
+    return next;
+  });
+}
+
+/**
+ * Applies predictable geometry operations to a selected set of tables.
+ * Smart arrange normalizes the median size, detects row/column orientation,
+ * aligns the cross-axis and distributes equal edge-to-edge gaps.
+ */
+export function arrangeTableSelection(entries, operation, activeTableId) {
+  if (entries.length < 2) return entries;
+
+  const bounds = selectionBounds(entries);
+  const activeLayout = entries.find(({ tableId }) => tableId === activeTableId)?.layout
+    ?? entries[0].layout;
+  let next = entries.map((entry) => ({
+    ...entry,
+    layout: { ...entry.layout },
+  }));
+
+  if (operation === 'uniform-size' || operation === 'smart') {
+    const targetWidth = operation === 'smart'
+      ? median(entries.map(({ layout }) => layout.widthRatio))
+      : activeLayout.widthRatio;
+    const targetHeight = operation === 'smart'
+      ? median(entries.map(({ layout }) => layout.heightRatio))
+      : activeLayout.heightRatio;
+    next = next.map((entry) => ({
+      ...entry,
+      layout: {
+        ...entry.layout,
+        xRatio: entry.layout.xRatio + (entry.layout.widthRatio - targetWidth) / 2,
+        yRatio: entry.layout.yRatio + (entry.layout.heightRatio - targetHeight) / 2,
+        widthRatio: targetWidth,
+        heightRatio: targetHeight,
+      },
+    }));
+  }
+
+  if (operation === 'align-left') {
+    next = next.map((entry) => ({
+      ...entry,
+      layout: { ...entry.layout, xRatio: bounds.left },
+    }));
+  } else if (operation === 'align-top') {
+    next = next.map((entry) => ({
+      ...entry,
+      layout: { ...entry.layout, yRatio: bounds.top },
+    }));
+  } else if (operation === 'align-center-x') {
+    const center = (bounds.left + bounds.right) / 2;
+    next = next.map((entry) => ({
+      ...entry,
+      layout: { ...entry.layout, xRatio: center - entry.layout.widthRatio / 2 },
+    }));
+  } else if (operation === 'align-center-y') {
+    const center = (bounds.top + bounds.bottom) / 2;
+    next = next.map((entry) => ({
+      ...entry,
+      layout: { ...entry.layout, yRatio: center - entry.layout.heightRatio / 2 },
+    }));
+  } else if (operation === 'distribute-horizontal') {
+    next = distribute(next, 'horizontal', bounds);
+  } else if (operation === 'distribute-vertical') {
+    next = distribute(next, 'vertical', bounds);
+  } else if (operation === 'smart') {
+    const centerXRange = Math.max(...entries.map(({ layout }) => (
+      layout.xRatio + layout.widthRatio / 2
+    ))) - Math.min(...entries.map(({ layout }) => (
+      layout.xRatio + layout.widthRatio / 2
+    )));
+    const centerYRange = Math.max(...entries.map(({ layout }) => (
+      layout.yRatio + layout.heightRatio / 2
+    ))) - Math.min(...entries.map(({ layout }) => (
+      layout.yRatio + layout.heightRatio / 2
+    )));
+    const horizontal = centerXRange >= centerYRange;
+
+    if (horizontal) {
+      const centerY = (bounds.top + bounds.bottom) / 2;
+      next = next.map((entry) => ({
+        ...entry,
+        layout: { ...entry.layout, yRatio: centerY - entry.layout.heightRatio / 2 },
+      }));
+      next = distribute(next, 'horizontal', bounds);
+    } else {
+      const centerX = (bounds.left + bounds.right) / 2;
+      next = next.map((entry) => ({
+        ...entry,
+        layout: { ...entry.layout, xRatio: centerX - entry.layout.widthRatio / 2 },
+      }));
+      next = distribute(next, 'vertical', bounds);
+    }
+  }
+
+  return next.map((entry) => ({
+    ...entry,
+    layout: normalizeTableLayout(entry.layout),
+  }));
+}
+
 export function serializeLayout(canvas, layoutMap, decorations = []) {
   const normalizedCanvas = Object.fromEntries(
     CANVAS_FIELDS.map((field) => [field, canvas[field] ?? null]),

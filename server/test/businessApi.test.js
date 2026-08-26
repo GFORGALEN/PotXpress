@@ -188,7 +188,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
     {
       method: 'POST',
       token: storeAdmin.token,
-      body: { startNumber: 9, count: 20 },
+      body: { startNumber: 101, count: 20 },
     },
   );
   assert.equal(batchResponse.status, 201);
@@ -200,7 +200,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
     { token: storeAdmin.token },
   );
   const allTables = tableList.body.data.tables;
-  assert.equal(allTables.length, 28);
+  assert.equal(allTables.length, 46);
 
   for (let leftIndex = 0; leftIndex < allTables.length; leftIndex += 1) {
     for (

@@ -8,3 +8,10 @@ export function resolveEnabledStore(stores, savedStoreId) {
     ?? null
   );
 }
+
+export function formatStoreDisplayName(name) {
+  if (!name) return '';
+  return name
+    .replace(/^Pot\s*Xpress\s+Hotpot\s+Buffet\s+/i, '')
+    .trim();
+}

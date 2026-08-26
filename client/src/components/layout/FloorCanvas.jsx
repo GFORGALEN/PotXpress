@@ -175,8 +175,8 @@ export function FloorCanvas({
       right: Math.max(bounds.right, item.xRatio + item.widthRatio),
       bottom: Math.max(bounds.bottom, item.yRatio + item.heightRatio),
     }), { left: 1, top: 1, right: 0, bottom: 0 });
-    const horizontalPadding = Math.max(0.035, (raw.right - raw.left) * 0.1);
-    const verticalPadding = Math.max(0.045, (raw.bottom - raw.top) * 0.12);
+    const horizontalPadding = Math.max(0.012, (raw.right - raw.left) * 0.025);
+    const verticalPadding = Math.max(0.015, (raw.bottom - raw.top) * 0.03);
     return {
       left: Math.max(0, raw.left - horizontalPadding),
       top: Math.max(0, raw.top - verticalPadding),
@@ -184,6 +184,15 @@ export function FloorCanvas({
       bottom: Math.min(1, raw.bottom + verticalPadding),
     };
   }, [decorations, fitTables]);
+  const smallestTableRatios = useMemo(() => ({
+    count: fitTables.length,
+    width: fitTables.length
+      ? Math.min(...fitTables.map((table) => table.layout.widthRatio))
+      : 1,
+    height: fitTables.length
+      ? Math.min(...fitTables.map((table) => table.layout.heightRatio))
+      : 1,
+  }), [fitTables]);
   const groupBounds = useMemo(() => {
     const grouped = new Map();
     for (const table of tables) {
@@ -373,12 +382,21 @@ export function FloorCanvas({
     }
     const boundsWidth = Math.max(0.05, contentBounds.right - contentBounds.left);
     const boundsHeight = Math.max(0.05, contentBounds.bottom - contentBounds.top);
+    const boundsScale = Math.max(1, Math.min(
+      (viewportSize.width * 0.985) / (width * boundsWidth),
+      (viewportSize.height * 0.975) / (height * boundsHeight),
+    ));
+    const smallestTableWidth = smallestTableRatios.width * width;
+    const smallestTableHeight = smallestTableRatios.height * height;
+    const readableScale = smallestTableRatios.count
+      ? Math.max(
+        52 / Math.max(1, smallestTableWidth),
+        38 / Math.max(1, smallestTableHeight),
+      )
+      : 1;
     const scale = Math.min(
       maxScale,
-      Math.max(1, Math.min(
-        (viewportSize.width * 0.9) / (width * boundsWidth),
-        (viewportSize.height * 0.88) / (height * boundsHeight),
-      )),
+      Math.max(boundsScale, Math.min(readableScale, boundsScale * 1.12)),
     );
     const centerX = (contentBounds.left + contentBounds.right) / 2;
     const centerY = (contentBounds.top + contentBounds.bottom) / 2;
@@ -403,6 +421,9 @@ export function FloorCanvas({
     contentBounds.top,
     editing,
     height,
+    smallestTableRatios.count,
+    smallestTableRatios.height,
+    smallestTableRatios.width,
     viewportSize.height,
     viewportSize.width,
     width,
@@ -436,9 +457,9 @@ export function FloorCanvas({
         velocityAnimation={{ disabled: true }}
         doubleClick={{ disabled: true }}
         panning={{
-          disabled: !editing,
+          disabled: false,
           velocityDisabled: true,
-          allowLeftClickPan: false,
+          allowLeftClickPan: !editing,
           allowMiddleClickPan: true,
           allowRightClickPan: false,
           excluded: [
@@ -449,7 +470,7 @@ export function FloorCanvas({
           ],
         }}
         pinch={{
-          allowPanning: editing,
+          allowPanning: true,
           excluded: ['table-node', 'canvas-control', 'potx-decoration-node'],
         }}
         // smooth 模式下缩放步长 = step × |deltaY|。Windows 滚轮一格 deltaY≈100，
@@ -561,7 +582,7 @@ export function FloorCanvas({
                     <div
                       className={[
                         'flex h-full w-full select-none items-center justify-center text-center font-black',
-                        item.type === 'wall' ? 'rounded-full bg-stone-600/80' : '',
+                        item.type === 'wall' ? 'floor-wall rounded-full' : '',
                         item.type === 'entrance' ? 'rounded-xl border-2 border-dashed border-emerald-500 bg-emerald-50/80 text-emerald-800' : '',
                         item.type === 'cashier' ? 'rounded-xl border border-amber-400 bg-amber-100/80 text-amber-950 shadow-sm' : '',
                         item.type === 'area' ? 'rounded-3xl border border-dashed border-sky-300 bg-sky-100/20 text-sky-700/80' : '',
@@ -573,7 +594,16 @@ export function FloorCanvas({
                         transform: `rotate(${item.rotation ?? 0}deg)`,
                       }}
                     >
-                      {['wall', 'seat'].includes(item.type) ? null : item.label}
+                      {['wall', 'seat'].includes(item.type) ? null : (
+                        <span
+                          className="decoration-label"
+                          style={item.type === 'cashier' ? {
+                            transform: `rotate(${-(item.rotation ?? 0)}deg)`,
+                          } : undefined}
+                        >
+                          {item.label}
+                        </span>
+                      )}
                     </div>
                   );
 
