@@ -766,7 +766,10 @@ export function FloorCanvas({
         selectionMode={SelectionMode.Partial}
         selectionKeyCode={editing ? 'Shift' : null}
         multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
-        panOnDrag={editing && multiSelectMode ? [1, 2] : true}
+        // React Flow treats touch independently from mouse-button arrays.
+        // Disable pane panning entirely here so a one-finger empty-pane drag
+        // commits the marquee selection instead of being consumed as a pan.
+        panOnDrag={editing && multiSelectMode ? false : true}
         zoomOnPinch
         zoomOnScroll
         zoomOnDoubleClick={false}
