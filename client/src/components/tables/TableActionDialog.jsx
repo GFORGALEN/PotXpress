@@ -37,6 +37,7 @@ export function TableActionDialog({
   table,
   timezone,
   defaultDurationMinutes = 90,
+  initialCustomOpen = false,
   onRefresh,
   onClose,
 }) {
@@ -56,8 +57,9 @@ export function TableActionDialog({
       return;
     }
 
+    setCustomOpen(initialCustomOpen && table.status === 'idle');
     closeRef.current?.focus();
-  }, [table?.tableId]);
+  }, [initialCustomOpen, table?.tableId, table?.status]);
 
   useEffect(() => {
     if (!table) {

@@ -42,6 +42,7 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         selected={data.uiSelected}
         timezone={data.timezone}
         onTableClick={data.onActivate}
+        onTableDoubleClick={data.onDoubleActivate}
         onTableContextMenu={data.onTableContextMenu}
       />
     </div>

@@ -143,6 +143,7 @@ export function FloorCanvas({
   decorations = [],
   timezone,
   onTableClick,
+  onTableDoubleClick,
   onCanvasContextMenu,
   onTableContextMenu,
   editing = false,
@@ -155,6 +156,7 @@ export function FloorCanvas({
   syncSelectedResize = false,
   onResizeSelectedTables,
   immersive = false,
+  viewportLocked = false,
   selectedDecorationId = null,
   onSelectDecoration,
   onUpdateDecoration,
@@ -284,7 +286,7 @@ export function FloorCanvas({
 
   const handleTableActivate = useCallback((tableId, event) => {
     if (!editing) {
-      onTableClick?.(tableId);
+      onTableClick?.(tableId, event);
       return;
     }
     const additive = multiSelectMode
@@ -310,6 +312,11 @@ export function FloorCanvas({
     onTableClick,
     selectedTableIdSet,
   ]);
+
+  const handleTableDoubleActivate = useCallback((tableId, event) => {
+    if (editing) return;
+    onTableDoubleClick?.(tableId, event);
+  }, [editing, onTableDoubleClick]);
 
   const handleDecorationActivate = useCallback((id) => {
     if (!editing || multiSelectMode) return;
@@ -553,6 +560,7 @@ export function FloorCanvas({
         timezone,
         ...getTableResizeLimits(table),
         onActivate: handleTableActivate,
+        onDoubleActivate: handleTableDoubleActivate,
         onTableContextMenu,
         onResizeStart: handleResizeStart,
         onResize: handleResize,
@@ -570,6 +578,7 @@ export function FloorCanvas({
     handleResizeEnd,
     handleResizeStart,
     handleTableActivate,
+    handleTableDoubleActivate,
     multiSelectMode,
     onTableContextMenu,
     selectedDecorationId,
@@ -767,9 +776,9 @@ export function FloorCanvas({
         selectionKeyCode={editing ? 'Shift' : null}
         multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
         // React Flow treats touch independently from mouse-button arrays.
-        // Disable pane panning entirely here so a one-finger empty-pane drag
-        // commits the marquee selection instead of being consumed as a pan.
-        panOnDrag={editing && multiSelectMode ? false : true}
+        // Multi-select reserves one-finger drag for the marquee; focused mode
+        // intentionally locks one-finger panning altogether.
+        panOnDrag={viewportLocked || (editing && multiSelectMode) ? false : true}
         zoomOnPinch
         zoomOnScroll
         zoomOnDoubleClick={false}

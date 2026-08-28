@@ -9,7 +9,7 @@ const statusClasses = {
   overtime: 'bg-red-100 text-red-800',
 };
 
-export function TableListView({ tables, onTableClick }) {
+export function TableListView({ tables, onTableClick, onTableDoubleClick }) {
   const priority = { overtime: 0, warning: 1, paused: 2, running: 3, idle: 4 };
   const sorted = [...tables].sort((left, right) => (
     priority[left.status] - priority[right.status]
@@ -33,6 +33,7 @@ export function TableListView({ tables, onTableClick }) {
             key={table.tableId}
             type="button"
             onClick={() => onTableClick(table.tableId)}
+            onDoubleClick={() => onTableDoubleClick?.(table.tableId)}
             className="flex min-h-[5.5rem] items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-card transition active:scale-[0.99]"
           >
             <span className="min-w-0">
