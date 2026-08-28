@@ -30,6 +30,7 @@ export const DEFAULT_CANVAS = Object.freeze({
   minTableHeight: 90,
   maxTableWidth: 600,
   maxTableHeight: 450,
+  defaultViewBounds: null,
 });
 
 const DEFAULT_DECORATIONS = Object.freeze([

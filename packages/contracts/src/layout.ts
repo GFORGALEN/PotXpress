@@ -6,6 +6,17 @@ import {
   tableShapeSchema,
 } from './table.js';
 
+export const defaultViewBoundsSchema = z.object({
+  xRatio: z.number().min(0).max(1),
+  yRatio: z.number().min(0).max(1),
+  widthRatio: z.number().positive().max(1),
+  heightRatio: z.number().positive().max(1),
+}).strict().refine(
+  (bounds) => bounds.xRatio + bounds.widthRatio <= 1.000001
+    && bounds.yRatio + bounds.heightRatio <= 1.000001,
+  '默认展示范围不能超出画布边界',
+);
+
 export const canvasSchema = z.object({
   aspectRatio: z.string().trim().min(1).max(10),
   virtualWidth: z.number().int().min(800).max(50000),
@@ -19,6 +30,7 @@ export const canvasSchema = z.object({
   minTableHeight: z.number().int().min(20).max(2000),
   maxTableWidth: z.number().int().min(40).max(4000),
   maxTableHeight: z.number().int().min(40).max(4000),
+  defaultViewBounds: defaultViewBoundsSchema.nullable().optional().default(null),
 }).passthrough();
 
 export const decorationSchema = z.object({
@@ -87,6 +99,7 @@ export const saveLayoutInputSchema = z.object({
     minTableHeight: z.number().int().min(20).max(2000).optional(),
     maxTableWidth: z.number().int().min(40).max(4000).optional(),
     maxTableHeight: z.number().int().min(40).max(4000).optional(),
+    defaultViewBounds: defaultViewBoundsSchema.nullable().optional(),
   }).strict(),
   decorations: z.array(decorationSchema).max(100),
   tables: z.array(z.object({
@@ -100,6 +113,7 @@ export const saveLayoutResultSchema = z.object({
 }).strict();
 
 export type Canvas = z.infer<typeof canvasSchema>;
+export type DefaultViewBounds = z.infer<typeof defaultViewBoundsSchema>;
 export type Decoration = z.infer<typeof decorationSchema>;
 export type StoredLayout = z.infer<typeof storedLayoutSchema>;
 export type LayoutTable = z.infer<typeof layoutTableSchema>;

@@ -1,9 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canvasSchema,
   timerListSnapshotSchema,
   webSocketServerMessageSchema,
 } from '../dist/index.js';
+
+const baseCanvas = {
+  aspectRatio: '16:9',
+  virtualWidth: 2400,
+  virtualHeight: 1350,
+  backgroundImage: null,
+  backgroundColor: '#ffffff',
+  gridEnabled: true,
+  snapToGrid: true,
+  gridSize: 15,
+  minTableWidth: 120,
+  minTableHeight: 90,
+  maxTableWidth: 600,
+  maxTableHeight: 450,
+};
 
 const activeTimer = {
   id: 'timer_1',
@@ -68,4 +84,31 @@ test('WebSocket 服务消息使用可辨识联合并拒绝未知事件类型', (
     }).success,
     false,
   );
+});
+
+test('画布契约兼容旧数据并校验默认展示范围', () => {
+  assert.equal(canvasSchema.parse(baseCanvas).defaultViewBounds, null);
+  assert.deepEqual(canvasSchema.parse({
+    ...baseCanvas,
+    defaultViewBounds: {
+      xRatio: 0.1,
+      yRatio: 0.2,
+      widthRatio: 0.7,
+      heightRatio: 0.6,
+    },
+  }).defaultViewBounds, {
+    xRatio: 0.1,
+    yRatio: 0.2,
+    widthRatio: 0.7,
+    heightRatio: 0.6,
+  });
+  assert.equal(canvasSchema.safeParse({
+    ...baseCanvas,
+    defaultViewBounds: {
+      xRatio: 0.8,
+      yRatio: 0.2,
+      widthRatio: 0.4,
+      heightRatio: 0.6,
+    },
+  }).success, false);
 });

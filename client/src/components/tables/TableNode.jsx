@@ -57,8 +57,10 @@ export const TableNode = memo(function TableNode({
   timezone,
   highlighted,
   onTableClick,
+  onTableDoubleClick,
   onTableContextMenu,
   embedded = false,
+  editing = false,
   selected = false,
   shape = 'rectangle',
   groupName = null,
@@ -90,6 +92,7 @@ export const TableNode = memo(function TableNode({
       style={embedded ? {
         fontSize: 'clamp(12px, 1.1vw, 16px)',
         containerType: 'size',
+        touchAction: 'none',
       } : {
         left: `${layout.xRatio * 100}%`,
         top: `${layout.yRatio * 100}%`,
@@ -106,7 +109,7 @@ export const TableNode = memo(function TableNode({
           suppressClickRef.current = false;
           return;
         }
-        onTableClick(tableId);
+        onTableClick(tableId, event);
       }}
       onContextMenu={(event) => {
         if (!onTableContextMenu) return;
@@ -131,8 +134,11 @@ export const TableNode = memo(function TableNode({
       }}
       onPointerUp={() => clearTimeout(longPressTimerRef.current)}
       onPointerCancel={() => clearTimeout(longPressTimerRef.current)}
-      onDoubleClick={(event) => event.stopPropagation()}
-      aria-label={`${name}，${embedded ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '超时' : '剩余'} ${duration}`}`}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onTableDoubleClick?.(tableId, event);
+      }}
+      aria-label={`${name}，${editing ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '超时' : '剩余'} ${duration}`}`}
     >
       <span aria-hidden="true" className="table-seat table-seat-top" />
       <span aria-hidden="true" className="table-seat table-seat-right" />

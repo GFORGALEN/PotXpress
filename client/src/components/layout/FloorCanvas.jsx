@@ -1,9 +1,16 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import {
+  applyNodeChanges,
+  ReactFlow,
+  SelectionMode,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import {
   Maximize2,
   Minus,
@@ -11,35 +18,74 @@ import {
   ScanLine,
 } from 'lucide-react';
 import {
-  TransformComponent,
-  TransformWrapper,
-} from 'react-zoom-pan-pinch';
-import { Rnd } from 'react-rnd';
-import { useCanvasScale } from '../../hooks/useCanvasScale.js';
+  fitViewportToBounds,
+  getWorldContentBounds,
+  ratioBoundsToWorld,
+  viewportToWorldBounds,
+} from '../../utils/layoutCoordinates.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
-import { TableNode } from '../tables/TableNode.jsx';
+import {
+  FlowCanvasSurfaceNode,
+  FlowDecorationNode,
+  FlowGroupNode,
+  FlowTableNode,
+} from './ReactFlowNodes.jsx';
 
-function getClientPoint(event) {
-  const point = event?.changedTouches?.[0] ?? event?.touches?.[0] ?? event;
-  return {
-    x: point?.clientX ?? 0,
-    y: point?.clientY ?? 0,
-  };
+const EMPTY_EDGES = Object.freeze([]);
+const INITIAL_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 1 });
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 4;
+const CANVAS_NODE_ID = '__potx_canvas__';
+const DECORATION_PREFIX = 'decoration:';
+
+const NODE_TYPES = Object.freeze({
+  table: FlowTableNode,
+  wall: FlowDecorationNode,
+  entrance: FlowDecorationNode,
+  cashier: FlowDecorationNode,
+  area: FlowDecorationNode,
+  seat: FlowDecorationNode,
+  canvas: FlowCanvasSurfaceNode,
+  group: FlowGroupNode,
+});
+
+function decorationNodeId(id) {
+  return `${DECORATION_PREFIX}${id}`;
+}
+
+function decorationIdFromNode(id) {
+  return id.startsWith(DECORATION_PREFIX)
+    ? id.slice(DECORATION_PREFIX.length)
+    : null;
+}
+
+function resizeDirectionLabel(direction = []) {
+  return [
+    direction[1] < 0 ? 'top' : direction[1] > 0 ? 'bottom' : '',
+    direction[0] < 0 ? 'left' : direction[0] > 0 ? 'right' : '',
+  ].join('');
+}
+
+function hasGeometryChanged(left, right) {
+  return ['x', 'y', 'width', 'height'].some((key) => (
+    Math.abs((left[key] ?? 0) - (right[key] ?? 0)) > 0.000001
+  ));
+}
+
+function getDecorationMinimums(type) {
+  if (type === 'wall') return { minWidth: 30, minHeight: 8 };
+  if (type === 'seat') return { minWidth: 36, minHeight: 32 };
+  return { minWidth: 70, minHeight: 35 };
 }
 
 function ZoomControls({
-  zoomIn,
-  zoomOut,
-  fitView,
-  fitScale,
-  actualSizeScale,
-  transformScale,
+  viewport,
   editing,
+  immersive,
+  onZoom,
+  onFit,
+  onActualSize,
 }) {
-  const displayPercent = Math.round(
-    fitScale * transformScale * 100,
-  );
-
   return (
     <div
       className="canvas-control absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-soft backdrop-blur"
@@ -47,18 +93,18 @@ function ZoomControls({
     >
       <button
         type="button"
-        onClick={() => zoomOut(0.2, 180)}
+        onClick={() => onZoom(viewport.zoom / 1.2)}
         className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
         aria-label="缩小画布"
       >
         <Minus size={17} />
       </button>
       <span className="min-w-14 text-center font-mono text-xs font-bold tabular-nums text-ink-900">
-        {displayPercent}%
+        {Math.round(viewport.zoom * 100)}%
       </span>
       <button
         type="button"
-        onClick={() => zoomIn(0.2, 180)}
+        onClick={() => onZoom(viewport.zoom * 1.2)}
         className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
         aria-label="放大画布"
       >
@@ -67,19 +113,20 @@ function ZoomControls({
       <span className="mx-0.5 h-6 w-px bg-stone-200" />
       <button
         type="button"
-        onClick={() => fitView()}
-        className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
-        title="适应屏幕"
-        aria-label="画布适应屏幕"
+        onClick={onFit}
+        className="canvas-control inline-flex items-center gap-1 rounded-xl px-2 py-2 text-stone-600 transition hover:bg-stone-100"
+        title="回到门店全景"
+        aria-label="回到门店全景"
       >
         <Maximize2 size={17} />
+        {immersive ? <span className="text-xs font-bold">门店全景</span> : null}
       </button>
       {editing ? (
         <button
           type="button"
-          onClick={() => fitView(actualSizeScale)}
+          onClick={onActualSize}
           className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
-          title="虚拟像素 100%"
+          title="世界坐标 100%"
           aria-label="画布显示为百分之百"
         >
           <ScanLine size={17} />
@@ -96,6 +143,7 @@ export function FloorCanvas({
   decorations = [],
   timezone,
   onTableClick,
+  onTableDoubleClick,
   onCanvasContextMenu,
   onTableContextMenu,
   editing = false,
@@ -108,902 +156,668 @@ export function FloorCanvas({
   syncSelectedResize = false,
   onResizeSelectedTables,
   immersive = false,
+  viewportLocked = false,
   selectedDecorationId = null,
   onSelectDecoration,
   onUpdateDecoration,
+  multiSelectMode = false,
+  viewport = INITIAL_VIEWPORT,
+  viewportInitialized = false,
+  onViewportChange,
+  onInitializeViewport,
+  onVisibleWorldBoundsChange,
 }) {
-  const viewportRef = useRef(null);
-  const surfaceRef = useRef(null);
-  const transformApiRef = useRef(null);
-  const lastZoomUpdateRef = useRef(0);
-  const zoomUpdateTimerRef = useRef(null);
-  const transformSettleTimerRef = useRef(null);
-  const pendingScaleRef = useRef(1);
-  const scaleRef = useRef(1);
-  const [transformScale, setTransformScale] = useState(1);
-  const [draggingTableId, setDraggingTableId] = useState(null);
-  const [draggingDecorationId, setDraggingDecorationId] = useState(null);
-  const [selectionBox, setSelectionBox] = useState(null);
-  const [rndKeyVersion, setRndKeyVersion] = useState(0);
-  const rndRefs = useRef(new Map());
-  const groupDragStartRef = useRef(null);
-  const selectionResizeRef = useRef(null);
-  const decorationDragStartRef = useRef(null);
-  const marqueeRef = useRef(null);
-  const suppressSurfaceClickRef = useRef(false);
-  const editingViewInitializedRef = useRef(false);
+  const rootRef = useRef(null);
+  const reactFlowRef = useRef(null);
+  const previousImmersiveRef = useRef(immersive);
+  const immersiveFitPendingRef = useRef(false);
+  const interactionRef = useRef(null);
+  const dragStartRef = useRef(null);
+  const resizeRef = useRef(null);
+  const marqueeSelectionRef = useRef([]);
+  const [flowReady, setFlowReady] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [flowNodes, setFlowNodes] = useState([]);
   const selectedTableIdSet = useMemo(
-    () => new Set(selectedTableIds.length ? selectedTableIds : [selectedTableId].filter(Boolean)),
+    () => new Set(selectedTableIds.length
+      ? selectedTableIds
+      : [selectedTableId].filter(Boolean)),
     [selectedTableId, selectedTableIds],
   );
-  const {
-    fitScale,
-    width,
-    height,
-    actualSizeScale,
-    viewportSize,
-  } = useCanvasScale(viewportRef, canvas, editing);
-  const maxScale = Math.max(
-    4,
-    Math.min(8, actualSizeScale),
+  const tableById = useMemo(
+    () => new Map(tables.map((table) => [table.tableId, table])),
+    [tables],
   );
-  const gridStyle = useMemo(() => {
-    if (!editing || !canvas.gridEnabled) {
-      return {};
-    }
+  const decorationById = useMemo(
+    () => new Map(decorations.map((item) => [item.id, item])),
+    [decorations],
+  );
 
-    const gridSize = Math.max(2, canvas.gridSize * fitScale);
-    return {
-      backgroundImage: [
-        'linear-gradient(to right, rgba(71,85,105,0.09) 1px, transparent 1px)',
-        'linear-gradient(to bottom, rgba(71,85,105,0.09) 1px, transparent 1px)',
-      ].join(','),
-      backgroundSize: `${gridSize}px ${gridSize}px`,
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const updateSize = () => {
+      const bounds = root.getBoundingClientRect();
+      setViewportSize((current) => (
+        current.width === bounds.width && current.height === bounds.height
+          ? current
+          : { width: bounds.width, height: bounds.height }
+      ));
     };
-  }, [canvas.gridEnabled, canvas.gridSize, editing, fitScale]);
-  const contentBounds = useMemo(() => {
-    const items = [
-      ...fitTables.map((table) => table.layout),
-      ...decorations,
-    ];
-    if (items.length === 0) {
-      return { left: 0, top: 0, right: 1, bottom: 1 };
-    }
-    const raw = items.reduce((bounds, item) => ({
-      left: Math.min(bounds.left, item.xRatio),
-      top: Math.min(bounds.top, item.yRatio),
-      right: Math.max(bounds.right, item.xRatio + item.widthRatio),
-      bottom: Math.max(bounds.bottom, item.yRatio + item.heightRatio),
-    }), { left: 1, top: 1, right: 0, bottom: 0 });
-    const horizontalPadding = Math.max(0.012, (raw.right - raw.left) * 0.025);
-    const verticalPadding = Math.max(0.015, (raw.bottom - raw.top) * 0.03);
-    return {
-      left: Math.max(0, raw.left - horizontalPadding),
-      top: Math.max(0, raw.top - verticalPadding),
-      right: Math.min(1, raw.right + horizontalPadding),
-      bottom: Math.min(1, raw.bottom + verticalPadding),
-    };
-  }, [decorations, fitTables]);
-  const smallestTableRatios = useMemo(() => ({
-    count: fitTables.length,
-    width: fitTables.length
-      ? Math.min(...fitTables.map((table) => table.layout.widthRatio))
-      : 1,
-    height: fitTables.length
-      ? Math.min(...fitTables.map((table) => table.layout.heightRatio))
-      : 1,
-  }), [fitTables]);
-  const groupBounds = useMemo(() => {
-    const grouped = new Map();
-    for (const table of tables) {
-      if (!table.groupId) continue;
-      const current = grouped.get(table.groupId) ?? {
-        id: table.groupId,
-        name: table.groupName,
-        left: 1,
-        top: 1,
-        right: 0,
-        bottom: 0,
-      };
-      current.left = Math.min(current.left, table.layout.xRatio);
-      current.top = Math.min(current.top, table.layout.yRatio);
-      current.right = Math.max(
-        current.right,
-        table.layout.xRatio + table.layout.widthRatio,
-      );
-      current.bottom = Math.max(
-        current.bottom,
-        table.layout.yRatio + table.layout.heightRatio,
-      );
-      grouped.set(table.groupId, current);
-    }
-    return [...grouped.values()];
-  }, [tables]);
-
-  useEffect(() => () => {
-    if (zoomUpdateTimerRef.current) {
-      clearTimeout(zoomUpdateTimerRef.current);
-    }
-    if (transformSettleTimerRef.current) {
-      clearTimeout(transformSettleTimerRef.current);
-    }
-    rndRefs.current.clear();
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(root);
+    return () => observer.disconnect();
   }, []);
 
-  useEffect(() => {
-    if (!editing) {
-      editingViewInitializedRef.current = false;
-      setSelectionBox(null);
-    }
-  }, [editing]);
+  const contentBounds = useMemo(() => getWorldContentBounds([
+    ...fitTables.map((table) => table.layout),
+    ...decorations,
+  ], canvas), [canvas, decorations, fitTables]);
 
-  useEffect(() => {
-    const handleMouseMove = (event) => {
-      const marquee = marqueeRef.current;
-      if (!marquee) return;
-      const currentX = Math.min(1, Math.max(0, (event.clientX - marquee.bounds.left) / marquee.bounds.width));
-      const currentY = Math.min(1, Math.max(0, (event.clientY - marquee.bounds.top) / marquee.bounds.height));
-      if (Math.abs(currentX - marquee.startX) > 0.003 || Math.abs(currentY - marquee.startY) > 0.003) {
-        suppressSurfaceClickRef.current = true;
-      }
-      setSelectionBox({
-        startX: marquee.startX,
-        startY: marquee.startY,
-        currentX,
-        currentY,
-      });
-    };
-    const handleMouseUp = (event) => {
-      const marquee = marqueeRef.current;
-      if (!marquee) return;
-      const currentX = Math.min(1, Math.max(0, (event.clientX - marquee.bounds.left) / marquee.bounds.width));
-      const currentY = Math.min(1, Math.max(0, (event.clientY - marquee.bounds.top) / marquee.bounds.height));
-      const left = Math.min(marquee.startX, currentX);
-      const right = Math.max(marquee.startX, currentX);
-      const top = Math.min(marquee.startY, currentY);
-      const bottom = Math.max(marquee.startY, currentY);
-      const dragged = right - left > 0.003 || bottom - top > 0.003;
-      if (dragged) {
-        const ids = tables.filter((table) => (
-          table.layout.xRatio < right
-          && table.layout.xRatio + table.layout.widthRatio > left
-          && table.layout.yRatio < bottom
-          && table.layout.yRatio + table.layout.heightRatio > top
-        )).map((table) => table.tableId);
-        onSelectTables?.(ids);
-        onSelectDecoration?.(null);
-        suppressSurfaceClickRef.current = true;
-      }
-      marqueeRef.current = null;
-      setSelectionBox(null);
-    };
-    window.addEventListener('mousemove', handleMouseMove, true);
-    window.addEventListener('mouseup', handleMouseUp, true);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove, true);
-      window.removeEventListener('mouseup', handleMouseUp, true);
-    };
-  }, [onSelectDecoration, onSelectTables, tables]);
-
-  useEffect(() => {
-    const surface = surfaceRef.current;
-    if (!editing || !surface) return undefined;
-    const handleMouseDown = (event) => {
-      if (event.button !== 0 || event.target !== surface) return;
-      const bounds = surface.getBoundingClientRect();
-      const startX = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
-      const startY = Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height));
-      marqueeRef.current = { startX, startY, bounds };
-      suppressSurfaceClickRef.current = false;
-      setSelectionBox({ startX, startY, currentX: startX, currentY: startY });
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    surface.addEventListener('mousedown', handleMouseDown, true);
-    return () => surface.removeEventListener('mousedown', handleMouseDown, true);
-  }, [editing, height, width]);
-
-  const queueScaleDisplayUpdate = (scale) => {
-    pendingScaleRef.current = scale;
-    const elapsed = Date.now() - lastZoomUpdateRef.current;
-
-    if (elapsed >= 200) {
-      lastZoomUpdateRef.current = Date.now();
-      setTransformScale(scale);
-      return;
-    }
-
-    if (!zoomUpdateTimerRef.current) {
-      zoomUpdateTimerRef.current = setTimeout(() => {
-        zoomUpdateTimerRef.current = null;
-        lastZoomUpdateRef.current = Date.now();
-        setTransformScale(pendingScaleRef.current);
-      }, 200 - elapsed);
-    }
-  };
-
-  // 只有真正产生位移/尺寸变化时才更新 ratio，避免纯点击因取整导致漂移。
-  const hasMoved = (nextX, nextY, currentX, currentY) => (
-    Math.abs(nextX - currentX) > 0.00001
-    || Math.abs(nextY - currentY) > 0.00001
-  );
-  const hasResized = (nextW, nextH, currentW, currentH) => (
-    Math.abs(nextW - currentW) > 0.00001
-    || Math.abs(nextH - currentH) > 0.00001
-  );
-
-  const refreshRndOffset = (id) => {
-    const rnd = rndRefs.current.get(id);
-    if (rnd && typeof rnd.updateOffsetFromParent === 'function') {
-      rnd.updateOffsetFromParent();
-    }
-  };
-
-  const refreshAllRndOffsets = () => {
-    rndRefs.current.forEach((rnd) => {
-      if (rnd && typeof rnd.updateOffsetFromParent === 'function') {
-        rnd.updateOffsetFromParent();
-        if (typeof rnd.forceUpdate === 'function') {
-          rnd.forceUpdate();
-        }
-      }
+  const applyBoundsViewport = useCallback((bounds, initialize = false) => {
+    if (!viewportSize.width || !viewportSize.height) return;
+    const nextViewport = fitViewportToBounds(bounds, viewportSize, {
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+      padding: immersive ? 24 : 32,
     });
-  };
+    if (initialize) {
+      onInitializeViewport?.(nextViewport);
+    } else {
+      onViewportChange?.(nextViewport);
+    }
+  }, [immersive, onInitializeViewport, onViewportChange, viewportSize]);
 
-  // Programmatic centerView/setTransform animations do not reliably emit the
-  // user-interaction stop callbacks. Refresh react-rnd after every transform
-  // sequence settles so it never starts the next drag with stale geometry.
-  const scheduleRndOffsetRefresh = () => {
-    if (transformSettleTimerRef.current) {
-      clearTimeout(transformSettleTimerRef.current);
-    }
-    transformSettleTimerRef.current = setTimeout(() => {
-      transformSettleTimerRef.current = null;
-      setRndKeyVersion((version) => version + 1);
-      requestAnimationFrame(refreshAllRndOffsets);
-    }, 80);
-  };
-
-  const fitOperationalView = (forcedScale = null) => {
-    const api = transformApiRef.current;
-    if (!api || !width || !height || !viewportSize.width || !viewportSize.height) return;
-    if (editing) {
-      const editingScale = forcedScale ?? Math.min(
-        1,
-        viewportSize.width / width,
-        viewportSize.height / height,
-      );
-      api.centerView(editingScale, 0);
-      return;
-    }
-    if (forcedScale) {
-      api.centerView(forcedScale, 220, 'easeOut');
-      return;
-    }
-    const boundsWidth = Math.max(0.05, contentBounds.right - contentBounds.left);
-    const boundsHeight = Math.max(0.05, contentBounds.bottom - contentBounds.top);
-    const boundsScale = Math.max(1, Math.min(
-      (viewportSize.width * 0.985) / (width * boundsWidth),
-      (viewportSize.height * 0.975) / (height * boundsHeight),
-    ));
-    const smallestTableWidth = smallestTableRatios.width * width;
-    const smallestTableHeight = smallestTableRatios.height * height;
-    const readableScale = smallestTableRatios.count
-      ? Math.max(
-        52 / Math.max(1, smallestTableWidth),
-        38 / Math.max(1, smallestTableHeight),
-      )
-      : 1;
-    const scale = Math.min(
-      maxScale,
-      Math.max(boundsScale, Math.min(readableScale, boundsScale * 1.12)),
-    );
-    const centerX = (contentBounds.left + contentBounds.right) / 2;
-    const centerY = (contentBounds.top + contentBounds.bottom) / 2;
-    api.setTransform(
-      viewportSize.width / 2 - centerX * width * scale,
-      viewportSize.height / 2 - centerY * height * scale,
-      scale,
-      260,
-      'easeOut',
-    );
-  };
+  const fitStoreOverview = useCallback(() => {
+    applyBoundsViewport(contentBounds);
+  }, [applyBoundsViewport, contentBounds]);
 
   useEffect(() => {
-    if (editing && editingViewInitializedRef.current) return undefined;
-    if (editing) editingViewInitializedRef.current = true;
-    const frame = requestAnimationFrame(() => fitOperationalView());
-    return () => cancelAnimationFrame(frame);
+    if (!flowReady || viewportInitialized
+      || !viewportSize.width || !viewportSize.height) return;
+    applyBoundsViewport(contentBounds, true);
   }, [
-    contentBounds.bottom,
-    contentBounds.left,
-    contentBounds.right,
-    contentBounds.top,
-    editing,
-    height,
-    smallestTableRatios.count,
-    smallestTableRatios.height,
-    smallestTableRatios.width,
+    applyBoundsViewport,
+    contentBounds,
+    flowReady,
+    viewportInitialized,
     viewportSize.height,
     viewportSize.width,
-    width,
   ]);
+
+  useEffect(() => {
+    const enteringImmersive = immersive && !previousImmersiveRef.current;
+    previousImmersiveRef.current = immersive;
+    if (enteringImmersive) immersiveFitPendingRef.current = true;
+    if (!immersive) {
+      immersiveFitPendingRef.current = false;
+      return;
+    }
+    if (!immersiveFitPendingRef.current || editing || !viewportInitialized) return;
+
+    // Effects run after the focused/fullscreen class has changed layout. Read
+    // the DOM directly so the one permitted entry fit uses the new panel size
+    // instead of the previous ResizeObserver snapshot.
+    const rootBounds = rootRef.current?.getBoundingClientRect();
+    if (!rootBounds?.width || !rootBounds?.height) return;
+    const defaultBounds = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
+    immersiveFitPendingRef.current = false;
+    onViewportChange?.(fitViewportToBounds(
+      defaultBounds ?? contentBounds,
+      { width: rootBounds.width, height: rootBounds.height },
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: 24 },
+    ));
+  }, [
+    canvas,
+    contentBounds,
+    editing,
+    immersive,
+    onViewportChange,
+    viewportInitialized,
+  ]);
+
+  useEffect(() => {
+    if (!viewportSize.width || !viewportSize.height) return;
+    onVisibleWorldBoundsChange?.(
+      viewportToWorldBounds(viewport, viewportSize, canvas),
+    );
+  }, [canvas, onVisibleWorldBoundsChange, viewport, viewportSize]);
+
+  const handleTableActivate = useCallback((tableId, event) => {
+    if (!editing) {
+      onTableClick?.(tableId, event);
+      return;
+    }
+    const additive = multiSelectMode
+      || event?.shiftKey
+      || event?.ctrlKey
+      || event?.metaKey;
+    if (additive) {
+      const nextIds = selectedTableIdSet.has(tableId)
+        ? [...selectedTableIdSet].filter((id) => id !== tableId)
+        : [...selectedTableIdSet, tableId];
+      onSelectTables?.(nextIds);
+    } else {
+      onSelectTables?.([tableId]);
+      onSelectTable?.(tableId);
+    }
+    onSelectDecoration?.(null);
+  }, [
+    editing,
+    multiSelectMode,
+    onSelectDecoration,
+    onSelectTable,
+    onSelectTables,
+    onTableClick,
+    selectedTableIdSet,
+  ]);
+
+  const handleTableDoubleActivate = useCallback((tableId, event) => {
+    if (editing) return;
+    onTableDoubleClick?.(tableId, event);
+  }, [editing, onTableDoubleClick]);
+
+  const handleDecorationActivate = useCallback((id) => {
+    if (!editing || multiSelectMode) return;
+    onSelectDecoration?.(id);
+    onSelectTables?.([]);
+    onSelectTable?.(null);
+  }, [
+    editing,
+    multiSelectMode,
+    onSelectDecoration,
+    onSelectTable,
+    onSelectTables,
+  ]);
+
+  const handleResizeStart = useCallback((nodeId) => {
+    interactionRef.current = 'resize';
+    const decorationId = decorationIdFromNode(nodeId);
+    if (decorationId) {
+      const item = decorationById.get(decorationId);
+      resizeRef.current = item ? {
+        kind: 'decoration',
+        id: decorationId,
+        start: { ...item },
+      } : null;
+      return;
+    }
+    const table = tableById.get(nodeId);
+    if (!table) return;
+    const entries = syncSelectedResize
+      && selectedTableIdSet.size > 1
+      && selectedTableIdSet.has(nodeId)
+      ? tables
+        .filter((item) => selectedTableIdSet.has(item.tableId))
+        .map((item) => ({ tableId: item.tableId, layout: { ...item.layout } }))
+      : [{ tableId: nodeId, layout: { ...table.layout } }];
+    resizeRef.current = {
+      kind: 'table',
+      id: nodeId,
+      start: { ...table.layout },
+      entries,
+      direction: '',
+    };
+    if (!selectedTableIdSet.has(nodeId)) onSelectTables?.([nodeId]);
+  }, [
+    decorationById,
+    onSelectTables,
+    selectedTableIdSet,
+    syncSelectedResize,
+    tableById,
+    tables,
+  ]);
+
+  const handleResize = useCallback((nodeId, params) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.kind !== 'table' || resize.id !== nodeId
+      || resize.entries.length < 2) return;
+    resize.direction = resizeDirectionLabel(params.direction);
+    const preview = scaleTableSelection(
+      resize.entries,
+      resize.id,
+      resize.direction,
+      params.width / resize.start.width,
+      params.height / resize.start.height,
+    );
+    const previewById = new Map(preview.map((entry) => [entry.tableId, entry.layout]));
+    setFlowNodes((current) => current.map((node) => {
+      const layout = previewById.get(node.id);
+      return layout ? {
+        ...node,
+        position: { x: layout.x, y: layout.y },
+        width: layout.width,
+        height: layout.height,
+      } : node;
+    }));
+  }, []);
+
+  const handleResizeEnd = useCallback((nodeId, params) => {
+    const resize = resizeRef.current;
+    resizeRef.current = null;
+    interactionRef.current = null;
+    if (!resize || resize.id !== nodeId) return;
+    if (resize.kind === 'decoration') {
+      const next = {
+        x: params.x,
+        y: params.y,
+        width: params.width,
+        height: params.height,
+      };
+      if (hasGeometryChanged(resize.start, next)) {
+        onUpdateDecoration?.(resize.id, next);
+      }
+      return;
+    }
+    if (resize.entries.length > 1) {
+      const nextLayouts = scaleTableSelection(
+        resize.entries,
+        resize.id,
+        resize.direction,
+        params.width / resize.start.width,
+        params.height / resize.start.height,
+      );
+      onResizeSelectedTables?.(resize.id, nextLayouts);
+      return;
+    }
+    const next = {
+      x: params.x,
+      y: params.y,
+      width: params.width,
+      height: params.height,
+    };
+    if (hasGeometryChanged(resize.start, next)) {
+      onUpdateTableLayout?.(resize.id, next);
+    }
+  }, [onResizeSelectedTables, onUpdateDecoration, onUpdateTableLayout]);
+
+  const groupNodes = useMemo(() => {
+    const groups = new Map();
+    for (const table of tables) {
+      if (!table.groupId) continue;
+      const current = groups.get(table.groupId) ?? {
+        id: table.groupId,
+        name: table.groupName,
+        left: Infinity,
+        top: Infinity,
+        right: -Infinity,
+        bottom: -Infinity,
+      };
+      current.left = Math.min(current.left, table.layout.x);
+      current.top = Math.min(current.top, table.layout.y);
+      current.right = Math.max(current.right, table.layout.x + table.layout.width);
+      current.bottom = Math.max(current.bottom, table.layout.y + table.layout.height);
+      groups.set(table.groupId, current);
+    }
+    return [...groups.values()].map((group) => {
+      const padding = 22;
+      const x = Math.max(0, group.left - padding);
+      const y = Math.max(0, group.top - padding);
+      const right = Math.min(canvas.virtualWidth, group.right + padding);
+      const bottom = Math.min(canvas.virtualHeight, group.bottom + padding);
+      return {
+        id: `group:${group.id}`,
+        type: 'group',
+        position: { x, y },
+        width: right - x,
+        height: bottom - y,
+        zIndex: -1,
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        data: { name: group.name },
+      };
+    });
+  }, [canvas.virtualHeight, canvas.virtualWidth, tables]);
+
+  const getTableResizeLimits = useCallback((table) => {
+    const entries = syncSelectedResize
+      && selectedTableIdSet.size > 1
+      && selectedTableIdSet.has(table.tableId)
+      ? tables.filter((item) => selectedTableIdSet.has(item.tableId))
+      : [];
+    if (entries.length < 2) {
+      return {
+        minWidth: canvas.minTableWidth,
+        minHeight: canvas.minTableHeight,
+        maxWidth: canvas.maxTableWidth,
+        maxHeight: canvas.maxTableHeight,
+      };
+    }
+    return {
+      minWidth: Math.max(...entries.map((entry) => (
+        canvas.minTableWidth * table.layout.width / entry.layout.width
+      ))),
+      minHeight: Math.max(...entries.map((entry) => (
+        canvas.minTableHeight * table.layout.height / entry.layout.height
+      ))),
+      maxWidth: Math.min(...entries.map((entry) => (
+        canvas.maxTableWidth * table.layout.width / entry.layout.width
+      ))),
+      maxHeight: Math.min(...entries.map((entry) => (
+        canvas.maxTableHeight * table.layout.height / entry.layout.height
+      ))),
+    };
+  }, [canvas, selectedTableIdSet, syncSelectedResize, tables]);
+
+  const sourceNodes = useMemo(() => [
+    {
+      id: CANVAS_NODE_ID,
+      type: 'canvas',
+      position: { x: 0, y: 0 },
+      width: canvas.virtualWidth,
+      height: canvas.virtualHeight,
+      zIndex: -1000,
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      data: { canvas, editing },
+    },
+    ...groupNodes,
+    ...decorations.map((item) => {
+      const minimums = getDecorationMinimums(item.type);
+      return {
+        id: decorationNodeId(item.id),
+        type: item.type,
+        position: { x: item.x, y: item.y },
+        width: item.width,
+        height: item.height,
+        zIndex: item.zIndex,
+        draggable: editing,
+        selectable: editing && !multiSelectMode,
+        focusable: editing && !multiSelectMode,
+        selected: editing && !multiSelectMode && selectedDecorationId === item.id,
+        data: {
+          item,
+          editing,
+          uiSelected: selectedDecorationId === item.id,
+          ...minimums,
+          maxWidth: canvas.virtualWidth,
+          maxHeight: canvas.virtualHeight,
+          onActivate: handleDecorationActivate,
+          onResizeStart: handleResizeStart,
+          onResize: handleResize,
+          onResizeEnd: handleResizeEnd,
+        },
+      };
+    }),
+    ...tables.map((table) => ({
+      id: table.tableId,
+      type: 'table',
+      position: { x: table.layout.x, y: table.layout.y },
+      width: table.layout.width,
+      height: table.layout.height,
+      zIndex: table.layout.zIndex,
+      draggable: editing,
+      selectable: editing,
+      focusable: true,
+      selected: editing && selectedTableIdSet.has(table.tableId),
+      data: {
+        table,
+        editing,
+        uiSelected: selectedTableIdSet.has(table.tableId),
+        timezone,
+        ...getTableResizeLimits(table),
+        onActivate: handleTableActivate,
+        onDoubleActivate: handleTableDoubleActivate,
+        onTableContextMenu,
+        onResizeStart: handleResizeStart,
+        onResize: handleResize,
+        onResizeEnd: handleResizeEnd,
+      },
+    })),
+  ], [
+    canvas,
+    decorations,
+    editing,
+    getTableResizeLimits,
+    groupNodes,
+    handleDecorationActivate,
+    handleResize,
+    handleResizeEnd,
+    handleResizeStart,
+    handleTableActivate,
+    handleTableDoubleActivate,
+    multiSelectMode,
+    onTableContextMenu,
+    selectedDecorationId,
+    selectedTableIdSet,
+    tables,
+    timezone,
+  ]);
+
+  useEffect(() => {
+    setFlowNodes((current) => {
+      if (!current.length) return sourceNodes;
+      const currentById = new Map(current.map((node) => [node.id, node]));
+      const preservePreview = Boolean(interactionRef.current);
+      return sourceNodes.map((source) => {
+        const existing = currentById.get(source.id);
+        if (!existing || !preservePreview) return source;
+        return {
+          ...source,
+          position: existing.position,
+          width: existing.width,
+          height: existing.height,
+          measured: existing.measured,
+          dragging: existing.dragging,
+          resizing: existing.resizing,
+        };
+      });
+    });
+  }, [sourceNodes]);
+
+  const handleNodesChange = useCallback((changes) => {
+    setFlowNodes((current) => applyNodeChanges(
+      changes.filter((change) => (
+        change.type !== 'select'
+        || interactionRef.current === 'selection'
+      )),
+      current,
+    ));
+  }, []);
+
+  // React Flow disables pointer events for nodes that are neither draggable
+  // nor selectable unless a framework-level pointer handler exists. The
+  // actual table action remains inside TableNode; this keeps operating-mode
+  // table buttons clickable without making their nodes editable.
+  const enableNodePointerEvents = useCallback(() => {}, []);
+
+  const handleNodeDragStart = useCallback((_, node) => {
+    if (!editing) return;
+    interactionRef.current = 'drag';
+    const decorationId = decorationIdFromNode(node.id);
+    if (decorationId) {
+      const item = decorationById.get(decorationId);
+      dragStartRef.current = item ? {
+        kind: 'decoration',
+        id: decorationId,
+        x: item.x,
+        y: item.y,
+      } : null;
+      handleDecorationActivate(decorationId);
+      return;
+    }
+    const table = tableById.get(node.id);
+    dragStartRef.current = table ? {
+      kind: 'table',
+      id: node.id,
+      x: table.layout.x,
+      y: table.layout.y,
+    } : null;
+    if (!selectedTableIdSet.has(node.id)) onSelectTables?.([node.id]);
+  }, [
+    decorationById,
+    editing,
+    handleDecorationActivate,
+    onSelectTables,
+    selectedTableIdSet,
+    tableById,
+  ]);
+
+  const handleNodeDragStop = useCallback((_, node) => {
+    const start = dragStartRef.current;
+    dragStartRef.current = null;
+    interactionRef.current = null;
+    if (!start || start.id !== (decorationIdFromNode(node.id) ?? node.id)) return;
+    const deltaX = node.position.x - start.x;
+    const deltaY = node.position.y - start.y;
+    if (Math.hypot(deltaX, deltaY) <= 0.000001) return;
+    if (start.kind === 'decoration') {
+      onUpdateDecoration?.(start.id, {
+        x: node.position.x,
+        y: node.position.y,
+      });
+    } else {
+      onMoveSelectedTables?.(start.id, deltaX, deltaY);
+    }
+  }, [onMoveSelectedTables, onUpdateDecoration]);
+
+  const handleSelectionChange = useCallback(({ nodes }) => {
+    if (!editing || interactionRef.current !== 'selection') return;
+    marqueeSelectionRef.current = nodes
+      .filter((node) => node.type === 'table')
+      .map((node) => node.id);
+  }, [editing]);
+
+  const handleSelectionStart = useCallback(() => {
+    if (!editing || !multiSelectMode) return;
+    interactionRef.current = 'selection';
+    marqueeSelectionRef.current = [];
+  }, [editing, multiSelectMode]);
+
+  const handleSelectionEnd = useCallback(() => {
+    if (interactionRef.current !== 'selection') return;
+    interactionRef.current = null;
+    onSelectTables?.(marqueeSelectionRef.current);
+    onSelectDecoration?.(null);
+  }, [onSelectDecoration, onSelectTables]);
+
+  const handlePaneClick = useCallback(() => {
+    if (!editing) return;
+    onSelectTables?.([]);
+    onSelectTable?.(null);
+    onSelectDecoration?.(null);
+  }, [editing, onSelectDecoration, onSelectTable, onSelectTables]);
+
+  const handlePaneContextMenu = useCallback((event) => {
+    if (!onCanvasContextMenu || !reactFlowRef.current) return;
+    event.preventDefault();
+    const point = reactFlowRef.current.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
+    onCanvasContextMenu({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: point.x,
+      y: point.y,
+    });
+  }, [onCanvasContextMenu]);
+
+  const zoomAroundCenter = useCallback((requestedZoom) => {
+    if (!viewportSize.width || !viewportSize.height) return;
+    const nextZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, requestedZoom));
+    const centerX = (viewportSize.width / 2 - viewport.x) / viewport.zoom;
+    const centerY = (viewportSize.height / 2 - viewport.y) / viewport.zoom;
+    onViewportChange?.({
+      x: viewportSize.width / 2 - centerX * nextZoom,
+      y: viewportSize.height / 2 - centerY * nextZoom,
+      zoom: nextZoom,
+    });
+  }, [onViewportChange, viewport, viewportSize]);
+
+  const resetAbortedTouchDrag = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (interactionRef.current !== 'drag') return;
+      interactionRef.current = null;
+      dragStartRef.current = null;
+      setFlowNodes(sourceNodes);
+    });
+  }, [sourceNodes]);
 
   return (
     <div
-      ref={viewportRef}
-      className={`floor-viewport relative h-full min-h-0 w-full touch-none overflow-hidden ${immersive
+      ref={rootRef}
+      className={`floor-viewport relative h-full min-h-0 w-full overflow-hidden ${immersive
         ? 'rounded-none border-0 shadow-none'
         : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
-      style={immersive ? {
-        backgroundColor: canvas.backgroundColor,
-        backgroundImage: [
-          'linear-gradient(90deg, rgb(120 113 108 / 0.025) 1px, transparent 1px)',
-          'linear-gradient(rgb(120 113 108 / 0.025) 1px, transparent 1px)',
-        ].join(','),
-        backgroundSize: '54px 54px',
-      } : undefined}
       aria-label="门店桌台布局画布"
+      onTouchEnd={resetAbortedTouchDrag}
+      onTouchCancel={resetAbortedTouchDrag}
     >
-      <TransformWrapper
-        minScale={0.5}
-        maxScale={maxScale}
-        initialScale={1}
-        centerOnInit={false}
-        centerZoomedOut={false}
-        limitToBounds={false}
-        disablePadding
-        autoAlignment={{ disabled: true, sizeX: 0, sizeY: 0 }}
-        velocityAnimation={{ disabled: true }}
-        doubleClick={{ disabled: true }}
-        panning={{
-          disabled: false,
-          velocityDisabled: true,
-          allowLeftClickPan: !editing,
-          allowMiddleClickPan: true,
-          allowRightClickPan: false,
-          excluded: [
-            'table-node',
-            'canvas-control',
-            'potx-table-node',
-            'potx-decoration-node',
-          ],
+      <ReactFlow
+        nodes={flowNodes}
+        edges={EMPTY_EDGES}
+        nodeTypes={NODE_TYPES}
+        viewport={viewport}
+        onViewportChange={onViewportChange}
+        onInit={(instance) => {
+          reactFlowRef.current = instance;
+          setFlowReady(true);
         }}
-        pinch={{
-          allowPanning: true,
-          excluded: ['table-node', 'canvas-control', 'potx-decoration-node'],
-        }}
-        // smooth 模式下缩放步长 = step × |deltaY|。Windows 滚轮一格 deltaY≈100，
-        // step 必须足够小，否则一格滚轮直接顶到 maxScale。
-        wheel={{ step: 0.0015, excluded: ['canvas-control'] }}
-        onInit={(ref) => {
-          transformApiRef.current = ref;
-          scaleRef.current = ref.state.scale;
-          setTransformScale(ref.state.scale);
-          fitOperationalView();
-          // centerOnInit 会在当前回调之后才真正完成居中，
-          // 导致 Rnd 在挂载时计算的 offsetFromParent 过时。
-          // 等一帧后强制 Rnd 重新挂载，重新计算 offset。
-          requestAnimationFrame(() => {
-            setRndKeyVersion((v) => v + 1);
-            refreshAllRndOffsets();
-          });
-        }}
-        onTransformed={(_, state) => {
-          scheduleRndOffsetRefresh();
-          if (Math.abs(scaleRef.current - state.scale) >= 0.0001) {
-            scaleRef.current = state.scale;
-            queueScaleDisplayUpdate(state.scale);
-          }
-        }}
-        onZoomStop={(ref) => {
-          scaleRef.current = ref.state.scale;
-          setTransformScale(ref.state.scale);
-          requestAnimationFrame(refreshAllRndOffsets);
-        }}
-        onPanningStop={() => {
-          requestAnimationFrame(refreshAllRndOffsets);
-        }}
-      >
-        {({
-          zoomIn,
-          zoomOut,
-          centerView,
-        }) => (
-          <>
-            <TransformComponent
-              wrapperStyle={{ width: '100%', height: '100%' }}
-              contentStyle={{
-                width,
-                height,
-              }}
-            >
-              <div
-                ref={surfaceRef}
-                className={`floor-surface relative ${immersive ? 'rounded-none border-0' : 'rounded-[1.35rem]'} ${editing ? 'overflow-visible' : 'overflow-hidden'}`}
-                style={{
-                  width,
-                  height,
-                  ...(editing ? {
-                    backgroundColor: canvas.backgroundColor,
-                    ...gridStyle,
-                  } : {}),
-                }}
-                onDoubleClick={(event) => {
-                  if (event.target !== event.currentTarget) {
-                    return;
-                  }
-
-                  if (editing) {
-                    const nextScale = Math.abs(scaleRef.current - 1) < 0.05
-                      ? actualSizeScale
-                      : 1;
-                    centerView(nextScale, 240, 'easeOut');
-                  }
-                }}
-                onClick={(event) => {
-                  if (editing && event.target === event.currentTarget) {
-                    if (suppressSurfaceClickRef.current) {
-                      suppressSurfaceClickRef.current = false;
-                      return;
-                    }
-                    onSelectTables?.([]);
-                    onSelectTable?.(null);
-                    onSelectDecoration?.(null);
-                  }
-                }}
-                onContextMenu={(event) => {
-                  if (!onCanvasContextMenu || event.target !== event.currentTarget) {
-                    return;
-                  }
-                  event.preventDefault();
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  onCanvasContextMenu({
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                    xRatio: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-                    yRatio: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
-                  });
-                }}
-              >
-                {selectionBox ? (
-                  <div
-                    className="pointer-events-none absolute z-[50000] border-2 border-sky-500 bg-sky-300/20"
-                    style={{
-                      left: `${Math.min(selectionBox.startX, selectionBox.currentX) * 100}%`,
-                      top: `${Math.min(selectionBox.startY, selectionBox.currentY) * 100}%`,
-                      width: `${Math.abs(selectionBox.currentX - selectionBox.startX) * 100}%`,
-                      height: `${Math.abs(selectionBox.currentY - selectionBox.startY) * 100}%`,
-                    }}
-                  />
-                ) : null}
-                {decorations.map((item) => {
-                  const content = (
-                    <div
-                      className={[
-                        'flex h-full w-full select-none items-center justify-center text-center font-black',
-                        item.type === 'wall' ? 'floor-wall rounded-full' : '',
-                        item.type === 'entrance' ? 'rounded-xl border-2 border-dashed border-emerald-500 bg-emerald-50/80 text-emerald-800' : '',
-                        item.type === 'cashier' ? 'rounded-xl border border-amber-400 bg-amber-100/80 text-amber-950 shadow-sm' : '',
-                        item.type === 'area' ? 'rounded-3xl border border-dashed border-sky-300 bg-sky-100/20 text-sky-700/80' : '',
-                        item.type === 'seat' ? 'rounded-[42%] border-2 border-slate-300 bg-white/70 shadow-[0_5px_12px_-8px_rgba(15,23,42,.45)]' : '',
-                        selectedDecorationId === item.id ? 'ring-4 ring-sky-500 ring-offset-2' : '',
-                      ].join(' ')}
-                      style={{
-                        fontSize: 'clamp(10px, 1vw, 15px)',
-                        transform: `rotate(${item.rotation ?? 0}deg)`,
-                      }}
-                    >
-                      {['wall', 'seat'].includes(item.type) ? null : (
-                        <span
-                          className="decoration-label"
-                          style={item.type === 'cashier' ? {
-                            transform: `rotate(${-(item.rotation ?? 0)}deg)`,
-                          } : undefined}
-                        >
-                          {item.label}
-                        </span>
-                      )}
-                    </div>
-                  );
-
-                  if (!editing) {
-                    return (
-                      <div
-                        key={item.id}
-                        className="pointer-events-none absolute"
-                        style={{
-                          left: `${item.xRatio * 100}%`,
-                          top: `${item.yRatio * 100}%`,
-                          width: `${item.widthRatio * 100}%`,
-                          height: `${item.heightRatio * 100}%`,
-                          zIndex: item.zIndex,
-                        }}
-                      >
-                        {content}
-                      </div>
-                    );
-                  }
-
-                  const gridStep = canvas.snapToGrid
-                    ? Math.max(1, canvas.gridSize * fitScale)
-                    : 1;
-                  return (
-                    <Rnd
-                      key={`${item.id}:${width}:${height}:${rndKeyVersion}`}
-                      ref={(instance) => {
-                        if (instance) {
-                          rndRefs.current.set(item.id, instance);
-                        } else {
-                          rndRefs.current.delete(item.id);
-                        }
-                      }}
-                      className="potx-decoration-node"
-                      position={{
-                        x: Math.round(item.xRatio * width),
-                        y: Math.round(item.yRatio * height),
-                      }}
-                      size={{
-                        width: Math.round(item.widthRatio * width),
-                        height: Math.round(item.heightRatio * height),
-                      }}
-                      scale={scaleRef.current}
-                      dragGrid={[gridStep, gridStep]}
-                      resizeGrid={[gridStep, gridStep]}
-                      minWidth={item.type === 'wall' ? 30 : item.type === 'seat' ? 36 : 70}
-                      minHeight={item.type === 'wall' ? 8 : item.type === 'seat' ? 32 : 35}
-                      style={{ zIndex: item.zIndex + (draggingDecorationId === item.id ? 10000 : 0) }}
-                      onMouseDown={() => {
-                        onSelectDecoration?.(item.id);
-                      }}
-                      onDragStart={(event) => {
-                        const point = getClientPoint(event);
-                        decorationDragStartRef.current = {
-                          id: item.id,
-                          clientX: point.x,
-                          clientY: point.y,
-                        };
-                        setDraggingDecorationId(item.id);
-                      }}
-                      onDragStop={(event) => {
-                        setDraggingDecorationId(null);
-                        const dragStart = decorationDragStartRef.current;
-                        decorationDragStartRef.current = null;
-                        const point = getClientPoint(event);
-                        const deltaXPixels = dragStart?.id === item.id
-                          ? point.x - dragStart.clientX
-                          : 0;
-                        const deltaYPixels = dragStart?.id === item.id
-                          ? point.y - dragStart.clientY
-                          : 0;
-                        if (Math.hypot(deltaXPixels, deltaYPixels) < 3) {
-                          rndRefs.current.get(item.id)?.updatePosition({
-                            x: Math.round(item.xRatio * width),
-                            y: Math.round(item.yRatio * height),
-                          });
-                          return;
-                        }
-                        const deltaX = deltaXPixels / (width * scaleRef.current);
-                        const deltaY = deltaYPixels / (height * scaleRef.current);
-                        const nextX = item.xRatio + deltaX;
-                        const nextY = item.yRatio + deltaY;
-                        if (hasMoved(nextX, nextY, item.xRatio, item.yRatio)) {
-                          onUpdateDecoration?.(item.id, {
-                            xRatio: nextX,
-                            yRatio: nextY,
-                          });
-                        }
-                      }}
-                      onResizeStop={(_, __, element, ___, position) => {
-                        const nextX = position.x / width;
-                        const nextY = position.y / height;
-                        const nextW = element.offsetWidth / width;
-                        const nextH = element.offsetHeight / height;
-                        if (
-                          hasMoved(nextX, nextY, item.xRatio, item.yRatio)
-                          || hasResized(nextW, nextH, item.widthRatio, item.heightRatio)
-                        ) {
-                          onUpdateDecoration?.(item.id, {
-                            xRatio: nextX,
-                            yRatio: nextY,
-                            widthRatio: nextW,
-                            heightRatio: nextH,
-                          });
-                        }
-                      }}
-                    >
-                      {content}
-                    </Rnd>
-                  );
-                })}
-                {groupBounds.map((group) => {
-                  const padding = 0.008;
-                  const left = Math.max(0, group.left - padding);
-                  const top = Math.max(0, group.top - padding);
-                  const right = Math.min(1, group.right + padding);
-                  const bottom = Math.min(1, group.bottom + padding);
-                  return (
-                    <div
-                      key={group.id}
-                      className="pointer-events-none absolute rounded-3xl border-2 border-dashed border-violet-500 bg-violet-500/5"
-                      style={{
-                        left: `${left * 100}%`,
-                        top: `${top * 100}%`,
-                        width: `${(right - left) * 100}%`,
-                        height: `${(bottom - top) * 100}%`,
-                        zIndex: 0,
-                      }}
-                    >
-                      <span className="absolute -top-6 left-2 rounded-full bg-violet-600 px-2 py-1 text-[10px] font-black text-white shadow">
-                        {group.name}
-                      </span>
-                    </div>
-                  );
-                })}
-                {tables.map((table) => {
-                  if (!editing) {
-                    return (
-                      <TableNode
-                        key={table.tableId}
-                        {...table}
-                        timezone={timezone}
-                        onTableClick={onTableClick}
-                        onTableContextMenu={onTableContextMenu}
-                        selected={selectedTableIdSet.has(table.tableId)}
-                      />
-                    );
-                  }
-
-                  const gridStep = canvas.snapToGrid
-                    ? Math.max(1, canvas.gridSize * fitScale)
-                    : 1;
-                  const position = {
-                    x: Math.round(table.layout.xRatio * width),
-                    y: Math.round(table.layout.yRatio * height),
-                  };
-                  const size = {
-                    width: Math.round(table.layout.widthRatio * width),
-                    height: Math.round(table.layout.heightRatio * height),
-                  };
-                  const resizeEntries = syncSelectedResize
-                    && selectedTableIdSet.size > 1
-                    && selectedTableIdSet.has(table.tableId)
-                    ? tables
-                      .filter((item) => selectedTableIdSet.has(item.tableId))
-                      .map((item) => ({
-                        tableId: item.tableId,
-                        layout: { ...item.layout },
-                      }))
-                    : [];
-                  const synchronizedMinWidth = resizeEntries.length > 1
-                    ? Math.max(...resizeEntries.map(({ layout }) => (
-                      canvas.minTableWidth * fitScale
-                      * table.layout.widthRatio / layout.widthRatio
-                    )))
-                    : canvas.minTableWidth * fitScale;
-                  const synchronizedMinHeight = resizeEntries.length > 1
-                    ? Math.max(...resizeEntries.map(({ layout }) => (
-                      canvas.minTableHeight * fitScale
-                      * table.layout.heightRatio / layout.heightRatio
-                    )))
-                    : canvas.minTableHeight * fitScale;
-                  const synchronizedMaxWidth = resizeEntries.length > 1
-                    ? Math.min(...resizeEntries.map(({ layout }) => (
-                      canvas.maxTableWidth * fitScale
-                      * table.layout.widthRatio / layout.widthRatio
-                    )))
-                    : canvas.maxTableWidth * fitScale;
-                  const synchronizedMaxHeight = resizeEntries.length > 1
-                    ? Math.min(...resizeEntries.map(({ layout }) => (
-                      canvas.maxTableHeight * fitScale
-                      * table.layout.heightRatio / layout.heightRatio
-                    )))
-                    : canvas.maxTableHeight * fitScale;
-
-                  return (
-                    <Rnd
-                      key={`${table.tableId}:${width}:${height}:${rndKeyVersion}`}
-                      ref={(instance) => {
-                        if (instance) {
-                          rndRefs.current.set(table.tableId, instance);
-                        } else {
-                          rndRefs.current.delete(table.tableId);
-                        }
-                      }}
-                      className="potx-table-node"
-                      position={position}
-                      size={size}
-                      scale={scaleRef.current}
-                      dragGrid={[gridStep, gridStep]}
-                      resizeGrid={[gridStep, gridStep]}
-                      minWidth={Math.round(synchronizedMinWidth)}
-                      minHeight={Math.round(synchronizedMinHeight)}
-                      maxWidth={Math.round(synchronizedMaxWidth)}
-                      maxHeight={Math.round(synchronizedMaxHeight)}
-                      lockAspectRatio={
-                        ['round', 'square'].includes(table.shape) ? 1 : false
-                      }
-                      style={{ zIndex: table.layout.zIndex + (draggingTableId === table.tableId ? 10000 : 0) }}
-                      onMouseDown={(event) => {
-                        if (event.button !== 0) return;
-                        if (event.shiftKey || event.ctrlKey || event.metaKey) {
-                          const nextIds = selectedTableIdSet.has(table.tableId)
-                            ? [...selectedTableIdSet].filter((id) => id !== table.tableId)
-                            : [...selectedTableIdSet, table.tableId];
-                          onSelectTables?.(nextIds);
-                        } else if (!selectedTableIdSet.has(table.tableId)) {
-                          onSelectTables?.([table.tableId]);
-                          onSelectTable?.(table.tableId);
-                        }
-                      }}
-                      onDragStart={(event) => {
-                        const point = getClientPoint(event);
-                        setDraggingTableId(table.tableId);
-                        const ids = selectedTableIdSet.has(table.tableId)
-                          ? [...selectedTableIdSet]
-                          : [table.tableId];
-                        groupDragStartRef.current = {
-                          activeId: table.tableId,
-                          clientX: point.x,
-                          clientY: point.y,
-                          positions: new Map(ids.map((id) => {
-                            const entry = tables.find((item) => item.tableId === id);
-                            return [id, {
-                              x: Math.round(entry.layout.xRatio * width),
-                              y: Math.round(entry.layout.yRatio * height),
-                            }];
-                          })),
-                        };
-                      }}
-                      onDrag={(event) => {
-                        const group = groupDragStartRef.current;
-                        if (!group || group.activeId !== table.tableId || group.positions.size < 2) return;
-                        const point = getClientPoint(event);
-                        const deltaX = (point.x - group.clientX) / scaleRef.current;
-                        const deltaY = (point.y - group.clientY) / scaleRef.current;
-                        group.positions.forEach((start, id) => {
-                          if (id === table.tableId) return;
-                          rndRefs.current.get(id)?.updatePosition({
-                            x: start.x + deltaX,
-                            y: start.y + deltaY,
-                          });
-                        });
-                      }}
-                      onDragStop={(event) => {
-                        setDraggingTableId(null);
-                        const dragStart = groupDragStartRef.current;
-                        const point = getClientPoint(event);
-                        const deltaXPixels = dragStart?.activeId === table.tableId
-                          ? point.x - dragStart.clientX
-                          : 0;
-                        const deltaYPixels = dragStart?.activeId === table.tableId
-                          ? point.y - dragStart.clientY
-                          : 0;
-                        groupDragStartRef.current = null;
-                        if (Math.hypot(deltaXPixels, deltaYPixels) >= 3) {
-                          const deltaX = deltaXPixels / (width * scaleRef.current);
-                          const deltaY = deltaYPixels / (height * scaleRef.current);
-                          onMoveSelectedTables?.(table.tableId, deltaX, deltaY);
-                        } else {
-                          dragStart?.positions.forEach((start, id) => {
-                            rndRefs.current.get(id)?.updatePosition(start);
-                          });
-                          // 纯点击：强制恢复原位置，只把 zIndex 提到最前。
-                          onUpdateTableLayout?.(table.tableId, {
-                            ...table.layout,
-                            bringToFront: true,
-                          });
-                        }
-                      }}
-                      onResizeStart={(_, direction) => {
-                        if (resizeEntries.length > 1) {
-                          selectionResizeRef.current = {
-                            activeId: table.tableId,
-                            direction,
-                            entries: resizeEntries,
-                          };
-                          return;
-                        }
-                        selectionResizeRef.current = null;
-                        onSelectTables?.([table.tableId]);
-                        onSelectTable?.(table.tableId);
-                      }}
-                      onResize={(_, direction, element) => {
-                        const group = selectionResizeRef.current;
-                        if (!group || group.activeId !== table.tableId) return;
-                        const scaleX = element.offsetWidth
-                          / (table.layout.widthRatio * width);
-                        const scaleY = element.offsetHeight
-                          / (table.layout.heightRatio * height);
-                        const preview = scaleTableSelection(
-                          group.entries,
-                          table.tableId,
-                          direction,
-                          scaleX,
-                          scaleY,
-                        );
-                        preview.forEach(({ tableId, layout }) => {
-                          if (tableId === table.tableId) return;
-                          const instance = rndRefs.current.get(tableId);
-                          instance?.updatePosition({
-                            x: Math.round(layout.xRatio * width),
-                            y: Math.round(layout.yRatio * height),
-                          });
-                          instance?.updateSize({
-                            width: Math.round(layout.widthRatio * width),
-                            height: Math.round(layout.heightRatio * height),
-                          });
-                        });
-                      }}
-                      onResizeStop={(_, direction, element, ___, nextPosition) => {
-                        const group = selectionResizeRef.current;
-                        selectionResizeRef.current = null;
-                        if (group && group.activeId === table.tableId) {
-                          const scaleX = element.offsetWidth
-                            / (table.layout.widthRatio * width);
-                          const scaleY = element.offsetHeight
-                            / (table.layout.heightRatio * height);
-                          onResizeSelectedTables?.(
-                            table.tableId,
-                            scaleTableSelection(
-                              group.entries,
-                              table.tableId,
-                              direction,
-                              scaleX,
-                              scaleY,
-                            ),
-                          );
-                          return;
-                        }
-                        const nextX = nextPosition.x / width;
-                        const nextY = nextPosition.y / height;
-                        const nextW = element.offsetWidth / width;
-                        const nextH = element.offsetHeight / height;
-                        if (
-                          hasMoved(nextX, nextY, table.layout.xRatio, table.layout.yRatio)
-                          || hasResized(nextW, nextH, table.layout.widthRatio, table.layout.heightRatio)
-                        ) {
-                          onUpdateTableLayout?.(table.tableId, {
-                            ...table.layout,
-                            xRatio: nextX,
-                            yRatio: nextY,
-                            widthRatio: nextW,
-                            heightRatio: nextH,
-                            bringToFront: true,
-                          });
-                        }
-                      }}
-                    >
-                      <TableNode
-                        {...table}
-                        embedded
-                        selected={selectedTableIdSet.has(table.tableId)}
-                        timezone={timezone}
-                        onTableClick={() => {
-                          if (!selectedTableIdSet.has(table.tableId)) {
-                            onSelectTables?.([table.tableId]);
-                            onSelectTable?.(table.tableId);
-                          }
-                        }}
-                        onTableContextMenu={onTableContextMenu}
-                      />
-                    </Rnd>
-                  );
-                })}
-              </div>
-            </TransformComponent>
-            <ZoomControls
-              zoomIn={zoomIn}
-              zoomOut={zoomOut}
-              fitView={fitOperationalView}
-              fitScale={fitScale}
-              actualSizeScale={actualSizeScale}
-              transformScale={transformScale}
-              editing={editing}
-            />
-          </>
-        )}
-      </TransformWrapper>
+        onNodesChange={handleNodesChange}
+        onNodeClick={enableNodePointerEvents}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDragStop={handleNodeDragStop}
+        onSelectionStart={handleSelectionStart}
+        onSelectionChange={handleSelectionChange}
+        onSelectionEnd={handleSelectionEnd}
+        onPaneClick={handlePaneClick}
+        onPaneContextMenu={handlePaneContextMenu}
+        nodesDraggable={editing}
+        nodesConnectable={false}
+        edgesReconnectable={false}
+        elementsSelectable={editing}
+        selectNodesOnDrag={false}
+        selectionOnDrag={editing && multiSelectMode}
+        selectionMode={SelectionMode.Partial}
+        selectionKeyCode={editing ? 'Shift' : null}
+        multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
+        // React Flow treats touch independently from mouse-button arrays.
+        // Multi-select reserves one-finger drag for the marquee; focused mode
+        // intentionally locks one-finger panning altogether.
+        panOnDrag={viewportLocked || (editing && multiSelectMode) ? false : true}
+        zoomOnPinch
+        zoomOnScroll
+        zoomOnDoubleClick={false}
+        panOnScroll={false}
+        preventScrolling
+        nodeDragThreshold={6}
+        nodeClickDistance={6}
+        paneClickDistance={6}
+        snapToGrid={editing && canvas.snapToGrid}
+        snapGrid={[canvas.gridSize, canvas.gridSize]}
+        nodeExtent={[[0, 0], [canvas.virtualWidth, canvas.virtualHeight]]}
+        translateExtent={[
+          [-canvas.virtualWidth, -canvas.virtualHeight],
+          [canvas.virtualWidth * 2, canvas.virtualHeight * 2],
+        ]}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
+        autoPanOnNodeDrag={false}
+        autoPanOnSelection={false}
+        autoPanOnNodeFocus={false}
+        elevateNodesOnSelect={false}
+        zIndexMode="manual"
+        deleteKeyCode={null}
+        proOptions={{ hideAttribution: true }}
+        className={immersive ? 'potx-react-flow immersive' : 'potx-react-flow'}
+      />
+      {editing && multiSelectMode ? (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-violet-300 bg-violet-100/95 px-4 py-2 text-xs font-black text-violet-950 shadow-lg backdrop-blur">
+          多选模式 · 拖动空白区域框选桌台
+        </div>
+      ) : null}
+      <ZoomControls
+        viewport={viewport}
+        editing={editing}
+        immersive={immersive}
+        onZoom={zoomAroundCenter}
+        onFit={fitStoreOverview}
+        onActualSize={() => zoomAroundCenter(1)}
+      />
     </div>
   );
 }

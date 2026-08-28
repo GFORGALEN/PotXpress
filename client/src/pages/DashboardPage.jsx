@@ -23,7 +23,7 @@ import {
   updateTable,
 } from '../api/admin.js';
 import { getLayout } from '../api/layout.ts';
-import { listTimers } from '../api/timers.ts';
+import { listTimers, startTimer } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
 import {
   OvertimeAlertDialog,
@@ -58,11 +58,16 @@ import {
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
+import {
+  apiDecorationToWorld,
+  apiLayoutToWorld,
+} from '../utils/layoutCoordinates.js';
 
 const TIMER_POLL_INTERVAL = 3000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
 const CLOCK_RECALIBRATION_POLLS = 30;
 const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
+const TABLE_DOUBLE_CLICK_DELAY = 320;
 
 export function DashboardPage() {
   const location = useLocation();
@@ -92,6 +97,7 @@ export function DashboardPage() {
   const [areaFilter, setAreaFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [customDurationTableId, setCustomDurationTableId] = useState(null);
   const [canvasFocused, setCanvasFocused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState(null);
@@ -110,6 +116,8 @@ export function DashboardPage() {
   const pollingFailedRef = useRef(false);
   const realtimeRefreshRef = useRef(() => {});
   const fullscreenRootRef = useRef(null);
+  const pendingTableClickRef = useRef(null);
+  const quickStartTableIdsRef = useRef(new Set());
   const now = useSecondTick(Boolean(selectedStoreId));
 
   const loadSettings = useCallback(async () => {
@@ -143,6 +151,10 @@ export function DashboardPage() {
     setLayoutError(null);
     setTimersError(null);
     setSelectedTableId(null);
+    setCustomDurationTableId(null);
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
+    quickStartTableIdsRef.current.clear();
     setCanvasFocused(false);
     setCanvasMenu(null);
     setTableDialog(null);
@@ -346,6 +358,34 @@ export function DashboardPage() {
       ...table,
       highlighted: Boolean(normalizedSearch),
     })), [allTables, areaFilter, normalizedSearch, statusFilter]);
+  const canvasAllTables = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? allTables.map((table) => ({
+        ...table,
+        layout: apiLayoutToWorld(table.layout, layout?.canvas),
+      }))
+      : allTables
+  ), [allTables, layout?.canvas, layoutEditor.mode]);
+  const canvasVisibleTables = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? visibleTables.map((table) => ({
+        ...table,
+        layout: apiLayoutToWorld(table.layout, layout?.canvas),
+      }))
+      : visibleTables
+  ), [layout?.canvas, layoutEditor.mode, visibleTables]);
+  const canvasDecorations = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? (layout?.decorations ?? []).map((item) => (
+        apiDecorationToWorld(item, layout?.canvas)
+      ))
+      : layoutEditor.draftDecorations
+  ), [
+    layout?.canvas,
+    layout?.decorations,
+    layoutEditor.draftDecorations,
+    layoutEditor.mode,
+  ]);
   const areas = useMemo(
     () => [...new Set(allTables.map((table) => table.area).filter(Boolean))]
       .sort((left, right) => left.localeCompare(right, 'zh-CN')),
@@ -402,16 +442,58 @@ export function DashboardPage() {
       });
     }
   }, [correctedNow, currentStore?.timezone]);
+  useEffect(() => () => clearTimeout(pendingTableClickRef.current), []);
+
   const handleTableClick = useCallback((tableId) => {
     if (layoutEditor.mode !== 'view') {
       layoutEditor.setSelectedTableId(tableId);
       return;
     }
 
+    const table = allTables.find((item) => item.tableId === tableId);
+    if (!table || table.status !== 'idle') {
+      setCustomDurationTableId(null);
+      setSelectedTableId(tableId);
+      return;
+    }
+
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = setTimeout(async () => {
+      pendingTableClickRef.current = null;
+      if (quickStartTableIdsRef.current.has(tableId)) return;
+      quickStartTableIdsRef.current.add(tableId);
+      const durationMinutes = table.defaultDurationMinutes
+        ?? settings?.defaultDurationMinutes
+        ?? 90;
+      try {
+        await startTimer(selectedStoreId, tableId, durationMinutes);
+        await refreshTimers();
+        showToast(`${table.name} 已开始计时（${durationMinutes} 分钟）`, 'success');
+      } catch (error) {
+        showToast(
+          error.code === 'TIMER_STATE_CONFLICT'
+            ? '桌台状态已被其他设备更新，已同步最新状态'
+            : error.message,
+          'error',
+        );
+        await refreshTimers();
+      } finally {
+        quickStartTableIdsRef.current.delete(tableId);
+      }
+    }, TABLE_DOUBLE_CLICK_DELAY);
+  }, [allTables, layoutEditor, refreshTimers, selectedStoreId, settings, showToast]);
+
+  const handleTableDoubleClick = useCallback((tableId) => {
+    if (layoutEditor.mode !== 'view') return;
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
+    setCustomDurationTableId(tableId);
     setSelectedTableId(tableId);
-  }, [layoutEditor]);
+  }, [layoutEditor.mode]);
+
   const handleCloseDialog = useCallback(() => {
     setSelectedTableId(null);
+    setCustomDurationTableId(null);
   }, []);
   const retryInitialLoad = useCallback(() => {
     setLayoutError(null);
@@ -773,6 +855,7 @@ export function DashboardPage() {
               <TableListView
                 tables={visibleTables}
                 onTableClick={handleTableClick}
+                onTableDoubleClick={handleTableDoubleClick}
               />
             ) : (
             <div className={canvasFocused
@@ -786,9 +869,11 @@ export function DashboardPage() {
                     type="button"
                     onClick={toggleCanvasFocus}
                     className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-stone-200 bg-white/95 px-3 text-xs font-black text-ink-900 shadow-lg backdrop-blur transition hover:bg-stone-50"
-                    aria-label={isFullscreen || canvasFocused
-                      ? '退出全屏运营'
-                      : '进入全屏运营'}
+                    aria-label={layoutEditor.mode === 'view'
+                      ? (isFullscreen || canvasFocused
+                        ? '退出全屏运营'
+                        : '进入全屏运营')
+                      : (canvasFocused ? '退出专注画布' : '进入专注画布')}
                   >
                     {canvasFocused ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
                     {layoutEditor.mode === 'view'
@@ -808,16 +893,31 @@ export function DashboardPage() {
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
                 tables={layoutEditor.mode === 'view'
-                  ? visibleTables
-                  : allTables}
-                fitTables={allTables}
-                decorations={layoutEditor.mode === 'view'
-                  ? layout.decorations ?? []
-                  : layoutEditor.draftDecorations}
+                  ? canvasVisibleTables
+                  : canvasAllTables}
+                fitTables={canvasAllTables}
+                decorations={canvasDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
+                onTableDoubleClick={handleTableDoubleClick}
                 onCanvasContextMenu={canManageTables
-                  ? (position) => setCanvasMenu({ type: 'canvas', ...position })
+                  ? (position) => {
+                    const activeCanvas = layoutEditor.mode === 'view'
+                      ? layout.canvas
+                      : layoutEditor.draftCanvas;
+                    setCanvasMenu({
+                      type: 'canvas',
+                      ...position,
+                      xRatio: Math.max(0, Math.min(
+                        1,
+                        position.x / activeCanvas.virtualWidth,
+                      )),
+                      yRatio: Math.max(0, Math.min(
+                        1,
+                        position.y / activeCanvas.virtualHeight,
+                      )),
+                    });
+                  }
                   : undefined}
                 onTableContextMenu={canManageTables
                   ? ({ tableId, clientX, clientY }) => {
@@ -839,12 +939,19 @@ export function DashboardPage() {
                 syncSelectedResize={layoutEditor.syncSelectedResize}
                 onResizeSelectedTables={layoutEditor.resizeSelectedTables}
                 immersive={canvasFocused}
+                viewportLocked={canvasFocused && layoutEditor.mode === 'editing'}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {
                   layoutEditor.setSelectedDecorationId(id);
                   if (id) layoutEditor.setSelectedTableId(null);
                 }}
                 onUpdateDecoration={layoutEditor.updateDecoration}
+                multiSelectMode={layoutEditor.multiSelectMode}
+                viewport={layoutEditor.viewport}
+                viewportInitialized={layoutEditor.viewportInitialized}
+                onViewportChange={layoutEditor.setViewport}
+                onInitializeViewport={layoutEditor.initializeViewport}
+                onVisibleWorldBoundsChange={layoutEditor.setVisibleWorldBounds}
               />
             </div>
             )
@@ -860,6 +967,7 @@ export function DashboardPage() {
           ?? settings?.defaultDurationMinutes
           ?? 90
         }
+        initialCustomOpen={customDurationTableId === selectedTableId}
         onRefresh={refreshTimers}
         onClose={handleCloseDialog}
       />

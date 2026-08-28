@@ -15,15 +15,14 @@
   },
   "dependencies": {
     "@potxpress/contracts": "*",
+    "@xyflow/react": "^12.11.5",
     "axios": "^1.19.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-rnd": "^10.5.2",
     "react-router": "^7.18.2",
-    "react-zoom-pan-pinch": "^4.0.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
