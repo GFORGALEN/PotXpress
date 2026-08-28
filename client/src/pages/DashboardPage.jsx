@@ -58,6 +58,10 @@ import {
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
+import {
+  apiDecorationToWorld,
+  apiLayoutToWorld,
+} from '../utils/layoutCoordinates.js';
 
 const TIMER_POLL_INTERVAL = 3000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
@@ -346,6 +350,34 @@ export function DashboardPage() {
       ...table,
       highlighted: Boolean(normalizedSearch),
     })), [allTables, areaFilter, normalizedSearch, statusFilter]);
+  const canvasAllTables = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? allTables.map((table) => ({
+        ...table,
+        layout: apiLayoutToWorld(table.layout, layout?.canvas),
+      }))
+      : allTables
+  ), [allTables, layout?.canvas, layoutEditor.mode]);
+  const canvasVisibleTables = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? visibleTables.map((table) => ({
+        ...table,
+        layout: apiLayoutToWorld(table.layout, layout?.canvas),
+      }))
+      : visibleTables
+  ), [layout?.canvas, layoutEditor.mode, visibleTables]);
+  const canvasDecorations = useMemo(() => (
+    layoutEditor.mode === 'view'
+      ? (layout?.decorations ?? []).map((item) => (
+        apiDecorationToWorld(item, layout?.canvas)
+      ))
+      : layoutEditor.draftDecorations
+  ), [
+    layout?.canvas,
+    layout?.decorations,
+    layoutEditor.draftDecorations,
+    layoutEditor.mode,
+  ]);
   const areas = useMemo(
     () => [...new Set(allTables.map((table) => table.area).filter(Boolean))]
       .sort((left, right) => left.localeCompare(right, 'zh-CN')),
@@ -808,16 +840,30 @@ export function DashboardPage() {
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
                 tables={layoutEditor.mode === 'view'
-                  ? visibleTables
-                  : allTables}
-                fitTables={allTables}
-                decorations={layoutEditor.mode === 'view'
-                  ? layout.decorations ?? []
-                  : layoutEditor.draftDecorations}
+                  ? canvasVisibleTables
+                  : canvasAllTables}
+                fitTables={canvasAllTables}
+                decorations={canvasDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
                 onCanvasContextMenu={canManageTables
-                  ? (position) => setCanvasMenu({ type: 'canvas', ...position })
+                  ? (position) => {
+                    const activeCanvas = layoutEditor.mode === 'view'
+                      ? layout.canvas
+                      : layoutEditor.draftCanvas;
+                    setCanvasMenu({
+                      type: 'canvas',
+                      ...position,
+                      xRatio: Math.max(0, Math.min(
+                        1,
+                        position.x / activeCanvas.virtualWidth,
+                      )),
+                      yRatio: Math.max(0, Math.min(
+                        1,
+                        position.y / activeCanvas.virtualHeight,
+                      )),
+                    });
+                  }
                   : undefined}
                 onTableContextMenu={canManageTables
                   ? ({ tableId, clientX, clientY }) => {
@@ -845,6 +891,12 @@ export function DashboardPage() {
                   if (id) layoutEditor.setSelectedTableId(null);
                 }}
                 onUpdateDecoration={layoutEditor.updateDecoration}
+                multiSelectMode={layoutEditor.multiSelectMode}
+                viewport={layoutEditor.viewport}
+                viewportInitialized={layoutEditor.viewportInitialized}
+                onViewportChange={layoutEditor.setViewport}
+                onInitializeViewport={layoutEditor.initializeViewport}
+                onVisibleWorldBoundsChange={layoutEditor.setVisibleWorldBounds}
               />
             </div>
             )

@@ -10,6 +10,17 @@ const ratioSchema = z.number()
   .max(1)
   .refine(hasAtMostSixDecimals, '比例最多保留 6 位小数');
 
+const defaultViewBoundsSchema = z.object({
+  xRatio: ratioSchema,
+  yRatio: ratioSchema,
+  widthRatio: ratioSchema.refine((value) => value > 0, '宽度必须大于 0'),
+  heightRatio: ratioSchema.refine((value) => value > 0, '高度必须大于 0'),
+}).strict().refine(
+  (bounds) => bounds.xRatio + bounds.widthRatio <= 1.000001
+    && bounds.yRatio + bounds.heightRatio <= 1.000001,
+  '默认展示范围不能超出画布边界',
+);
+
 const submittedLayoutSchema = z.object({
   xRatio: ratioSchema,
   yRatio: ratioSchema,
@@ -31,6 +42,7 @@ const canvasChangesSchema = z.object({
   minTableHeight: z.number().int().min(20).max(2000).optional(),
   maxTableWidth: z.number().int().min(40).max(4000).optional(),
   maxTableHeight: z.number().int().min(40).max(4000).optional(),
+  defaultViewBounds: defaultViewBoundsSchema.nullable().optional(),
 }).strict();
 
 const decorationSchema = z.object({

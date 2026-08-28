@@ -5,6 +5,7 @@ import {
   DoorOpen,
   Grid3X3,
   Map,
+  MousePointer2,
   Pencil,
   Plus,
   Redo2,
@@ -15,15 +16,18 @@ import {
   Store,
   Trash2,
   Undo2,
+  Users,
   X,
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
 import { useLayoutEditor } from '../../contexts/LayoutEditorContext.jsx';
+import { useToast } from '../../contexts/ToastContext.jsx';
 import {
   findSignificantOverlaps,
 } from '../../utils/layoutEditor.js';
 
 export function EditorToolbar({ onAddTable }) {
+  const { showToast } = useToast();
   const {
     draftCanvas,
     draftLayout,
@@ -47,10 +51,16 @@ export function EditorToolbar({ onAddTable }) {
     loadLatest,
     setSyncSelectedResize,
     arrangeSelectedTables,
+    multiSelectMode,
+    setMultiSelectMode,
+    setDefaultViewFromViewport,
+    clearDefaultView,
+    tablesOutsideDefaultView,
   } = useLayoutEditor();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmReload, setConfirmReload] = useState(false);
   const [overlaps, setOverlaps] = useState([]);
+  const [outsideDefaultView, setOutsideDefaultView] = useState([]);
   const overlapDescription = useMemo(() => (
     overlaps.slice(0, 6)
       .map((item) => `${item.left}×${item.right}`)
@@ -63,8 +73,10 @@ export function EditorToolbar({ onAddTable }) {
       draftLayout,
     );
 
-    if (nextOverlaps.length > 0) {
+    const nextOutside = tablesOutsideDefaultView;
+    if (nextOverlaps.length > 0 || nextOutside.length > 0) {
       setOverlaps(nextOverlaps);
+      setOutsideDefaultView(nextOutside);
       return;
     }
 
@@ -77,14 +89,29 @@ export function EditorToolbar({ onAddTable }) {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-sm font-black text-sky-950">
-              编辑模式：拖动调整位置，拖角调整大小
+              编辑模式：{multiSelectMode ? '多选' : '选择 / 移动'}
             </p>
             <p className="mt-1 text-xs text-sky-700">
-              滚轮可缩放，中键拖动可平移；按住空白区域拖动可框选桌台，再拖动任一选中桌台即可整体移动。
+              {multiSelectMode
+                ? '点击桌台增减选择，拖动空白区域框选；完成多选后可继续平移画布。'
+                : '拖动桌台调整位置，拖动空白区域平移画布；双指或滚轮缩放。'}
               {isDirty ? ' 当前有未保存修改。' : ' 当前布局未修改。'}
             </p>
           </div>
           <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0 xl:flex-wrap xl:overflow-visible xl:pb-0">
+            <button
+              type="button"
+              onClick={() => setMultiSelectMode((current) => !current)}
+              disabled={saving}
+              className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-black transition disabled:opacity-50 ${
+                multiSelectMode
+                  ? 'border-violet-500 bg-violet-600 text-white shadow-sm'
+                  : 'border-sky-300 bg-white text-sky-950'
+              }`}
+            >
+              {multiSelectMode ? <MousePointer2 size={16} /> : <Users size={16} />}
+              {multiSelectMode ? '完成多选' : '多选'}
+            </button>
             <button
               type="button"
               onClick={onAddTable}
@@ -180,8 +207,30 @@ export function EditorToolbar({ onAddTable }) {
               </>
             ) : null}
             <span className="inline-flex min-h-11 items-center rounded-xl border border-sky-200 bg-white px-3 text-xs font-bold text-sky-900">
-              无限画布 · 靠近边缘自动扩展
+              固定画布 · {draftCanvas.virtualWidth}×{draftCanvas.virtualHeight}
             </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (setDefaultViewFromViewport()) {
+                  showToast('已记录当前门店展示范围，保存布局后生效', 'success');
+                }
+              }}
+              disabled={saving}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3 text-sm font-black text-emerald-900 disabled:opacity-50"
+            >
+              <Map size={16} />设为默认展示范围
+            </button>
+            {draftCanvas.defaultViewBounds ? (
+              <button
+                type="button"
+                onClick={clearDefaultView}
+                disabled={saving}
+                className="inline-flex min-h-11 items-center rounded-xl border border-stone-200 bg-white px-3 text-sm font-bold text-stone-600 disabled:opacity-50"
+              >
+                清除默认范围
+              </button>
+            ) : null}
             <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900">
               <Grid3X3 size={16} />
               网格
@@ -307,13 +356,21 @@ export function EditorToolbar({ onAddTable }) {
         }}
       />
       <ConfirmDialog
-        open={overlaps.length > 0}
-        title={`检测到 ${overlaps.length} 处桌台重叠`}
-        description={`${overlapDescription}${overlaps.length > 6 ? '…' : ''}。真实店面可能需要特殊布局，仍要保存吗？`}
+        open={overlaps.length > 0 || outsideDefaultView.length > 0}
+        title="布局保存警告"
+        description={`${overlaps.length
+          ? `检测到 ${overlaps.length} 处桌台重叠：${overlapDescription}${overlaps.length > 6 ? '…' : ''}。`
+          : ''}${outsideDefaultView.length
+          ? ` 默认展示范围外有 ${outsideDefaultView.length} 张桌台：${outsideDefaultView.slice(0, 6).map((table) => table.name).join('、')}${outsideDefaultView.length > 6 ? '…' : ''}。`
+          : ''}仍要保存吗？`}
         confirmText="仍然保存"
-        onCancel={() => setOverlaps([])}
+        onCancel={() => {
+          setOverlaps([]);
+          setOutsideDefaultView([]);
+        }}
         onConfirm={async () => {
           setOverlaps([]);
+          setOutsideDefaultView([]);
           await saveLayout();
         }}
       />

@@ -246,6 +246,12 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
       token: storeAdmin.token,
       body: completeLayoutBody(originalLayout, {
         backgroundColor: '#fff8e7',
+        defaultViewBounds: {
+          xRatio: 0.1,
+          yRatio: 0.15,
+          widthRatio: 0.7,
+          heightRatio: 0.65,
+        },
       }),
     },
   );
@@ -277,6 +283,12 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
     { token: storeAdmin.token },
   );
   const currentLayout = currentLayoutResponse.body.data;
+  assert.deepEqual(currentLayout.canvas.defaultViewBounds, {
+    xRatio: 0.1,
+    yRatio: 0.15,
+    widthRatio: 0.7,
+    heightRatio: 0.65,
+  });
   const invalidBody = completeLayoutBody(currentLayout);
   invalidBody.tables[0].layout = {
     ...invalidBody.tables[0].layout,

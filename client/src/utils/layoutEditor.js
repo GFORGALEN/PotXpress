@@ -1,3 +1,10 @@
+import {
+  apiDecorationToWorld,
+  apiLayoutToWorld,
+  worldDecorationToApi,
+  worldLayoutToApi,
+} from './layoutCoordinates.js';
+
 const CANVAS_FIELDS = [
   'aspectRatio',
   'virtualWidth',
@@ -11,6 +18,7 @@ const CANVAS_FIELDS = [
   'minTableHeight',
   'maxTableWidth',
   'maxTableHeight',
+  'defaultViewBounds',
 ];
 
 const EDITABLE_CANVAS_FIELDS = [
@@ -25,67 +33,19 @@ const EDITABLE_CANVAS_FIELDS = [
   'minTableHeight',
   'maxTableWidth',
   'maxTableHeight',
+  'defaultViewBounds',
 ];
 
-// 画布尺寸预设档位。切换尺寸时必须按比例缩放桌台尺寸约束，
-// 否则已有桌台换算成新画布的虚拟像素后可能超出 maxTableWidth 校验。
-export const CANVAS_SIZE_PRESETS = [
-  { label: '小 1600×900', aspectRatio: '16:9', virtualWidth: 1600, virtualHeight: 900 },
-  { label: '中 2400×1350', aspectRatio: '16:9', virtualWidth: 2400, virtualHeight: 1350 },
-  { label: '大 3200×1800', aspectRatio: '16:9', virtualWidth: 3200, virtualHeight: 1800 },
-  { label: '超大 4800×2700', aspectRatio: '16:9', virtualWidth: 4800, virtualHeight: 2700 },
-  { label: '方形 2000×2000', aspectRatio: '1:1', virtualWidth: 2000, virtualHeight: 2000 },
-  { label: '条形 3000×1200', aspectRatio: '5:2', virtualWidth: 3000, virtualHeight: 1200 },
-];
-
-export function buildCanvasResizePatch(canvas, preset) {
-  const scaleX = preset.virtualWidth / canvas.virtualWidth;
-  const scaleY = preset.virtualHeight / canvas.virtualHeight;
-  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-
+export function readLayoutIntoWorld(layout) {
   return {
-    aspectRatio: preset.aspectRatio,
-    virtualWidth: preset.virtualWidth,
-    virtualHeight: preset.virtualHeight,
-    minTableWidth: clamp(Math.round(canvas.minTableWidth * scaleX), 20, 2000),
-    minTableHeight: clamp(Math.round(canvas.minTableHeight * scaleY), 20, 2000),
-    maxTableWidth: clamp(Math.round(canvas.maxTableWidth * scaleX), 40, 4000),
-    maxTableHeight: clamp(Math.round(canvas.maxTableHeight * scaleY), 40, 4000),
-    gridSize: clamp(Math.round(canvas.gridSize * scaleX), 5, 100),
-  };
-}
-
-export function roundRatio(value) {
-  return Number(Math.max(0, Math.min(1, value)).toFixed(6));
-}
-
-export function normalizeTableLayout(layout) {
-  const widthRatio = roundRatio(layout.widthRatio);
-  const heightRatio = roundRatio(layout.heightRatio);
-
-  return {
-    xRatio: roundRatio(Math.min(layout.xRatio, 1 - widthRatio)),
-    yRatio: roundRatio(Math.min(layout.yRatio, 1 - heightRatio)),
-    widthRatio,
-    heightRatio,
-    rotation: Number((layout.rotation ?? 0).toFixed(6)),
-    zIndex: Math.max(1, Math.round(layout.zIndex ?? 1)),
-  };
-}
-
-export function normalizeDecoration(item) {
-  const widthRatio = Math.max(0.001, roundRatio(item.widthRatio));
-  const heightRatio = Math.max(0.001, roundRatio(item.heightRatio));
-  return {
-    ...item,
-    xRatio: roundRatio(Math.min(item.xRatio, 1 - widthRatio)),
-    yRatio: roundRatio(Math.min(item.yRatio, 1 - heightRatio)),
-    widthRatio,
-    heightRatio,
-    rotation: [0, 90, 180, 270].includes(item.rotation)
-      ? item.rotation
-      : 0,
-    zIndex: Math.max(0, Math.round(item.zIndex ?? 1)),
+    canvas: structuredClone(layout.canvas),
+    tables: layout.tables.map((table) => ({
+      ...table,
+      layout: apiLayoutToWorld(table.layout, layout.canvas),
+    })),
+    decorations: (layout.decorations ?? []).map((item) => (
+      apiDecorationToWorld(item, layout.canvas)
+    )),
   };
 }
 
@@ -115,29 +75,29 @@ export function scaleTableSelection(
     tableId === activeTableId
   ))?.layout ?? entries[0].layout;
   const anchorX = normalizedDirection.includes('left')
-    ? activeLayout.xRatio + activeLayout.widthRatio
-    : activeLayout.xRatio;
+    ? activeLayout.x + activeLayout.width
+    : activeLayout.x;
   const anchorY = normalizedDirection.includes('top')
-    ? activeLayout.yRatio + activeLayout.heightRatio
-    : activeLayout.yRatio;
+    ? activeLayout.y + activeLayout.height
+    : activeLayout.y;
   const stableRatio = (value) => Number(value.toFixed(12));
 
   return entries.map(({ tableId, layout }) => ({
     tableId,
     layout: {
       ...layout,
-      xRatio: resizeX
-        ? stableRatio(anchorX + (layout.xRatio - anchorX) * safeScaleX)
-        : layout.xRatio,
-      yRatio: resizeY
-        ? stableRatio(anchorY + (layout.yRatio - anchorY) * safeScaleY)
-        : layout.yRatio,
-      widthRatio: resizeX
-        ? stableRatio(layout.widthRatio * safeScaleX)
-        : layout.widthRatio,
-      heightRatio: resizeY
-        ? stableRatio(layout.heightRatio * safeScaleY)
-        : layout.heightRatio,
+      x: resizeX
+        ? stableRatio(anchorX + (layout.x - anchorX) * safeScaleX)
+        : layout.x,
+      y: resizeY
+        ? stableRatio(anchorY + (layout.y - anchorY) * safeScaleY)
+        : layout.y,
+      width: resizeX
+        ? stableRatio(layout.width * safeScaleX)
+        : layout.width,
+      height: resizeY
+        ? stableRatio(layout.height * safeScaleY)
+        : layout.height,
     },
   }));
 }
@@ -152,10 +112,10 @@ function median(values) {
 
 function selectionBounds(entries) {
   return entries.reduce((bounds, { layout }) => ({
-    left: Math.min(bounds.left, layout.xRatio),
-    top: Math.min(bounds.top, layout.yRatio),
-    right: Math.max(bounds.right, layout.xRatio + layout.widthRatio),
-    bottom: Math.max(bounds.bottom, layout.yRatio + layout.heightRatio),
+    left: Math.min(bounds.left, layout.x),
+    top: Math.min(bounds.top, layout.y),
+    right: Math.max(bounds.right, layout.x + layout.width),
+    bottom: Math.max(bounds.bottom, layout.y + layout.height),
   }), {
     left: Infinity,
     top: Infinity,
@@ -166,8 +126,8 @@ function selectionBounds(entries) {
 
 function distribute(entries, axis, bounds) {
   const horizontal = axis === 'horizontal';
-  const positionKey = horizontal ? 'xRatio' : 'yRatio';
-  const sizeKey = horizontal ? 'widthRatio' : 'heightRatio';
+  const positionKey = horizontal ? 'x' : 'y';
+  const sizeKey = horizontal ? 'width' : 'height';
   const start = horizontal ? bounds.left : bounds.top;
   const end = horizontal ? bounds.right : bounds.bottom;
   const sorted = [...entries].sort((left, right) => (
@@ -210,19 +170,19 @@ export function arrangeTableSelection(entries, operation, activeTableId) {
 
   if (operation === 'uniform-size' || operation === 'smart') {
     const targetWidth = operation === 'smart'
-      ? median(entries.map(({ layout }) => layout.widthRatio))
-      : activeLayout.widthRatio;
+      ? median(entries.map(({ layout }) => layout.width))
+      : activeLayout.width;
     const targetHeight = operation === 'smart'
-      ? median(entries.map(({ layout }) => layout.heightRatio))
-      : activeLayout.heightRatio;
+      ? median(entries.map(({ layout }) => layout.height))
+      : activeLayout.height;
     next = next.map((entry) => ({
       ...entry,
       layout: {
         ...entry.layout,
-        xRatio: entry.layout.xRatio + (entry.layout.widthRatio - targetWidth) / 2,
-        yRatio: entry.layout.yRatio + (entry.layout.heightRatio - targetHeight) / 2,
-        widthRatio: targetWidth,
-        heightRatio: targetHeight,
+        x: entry.layout.x + (entry.layout.width - targetWidth) / 2,
+        y: entry.layout.y + (entry.layout.height - targetHeight) / 2,
+        width: targetWidth,
+        height: targetHeight,
       },
     }));
   }
@@ -230,24 +190,24 @@ export function arrangeTableSelection(entries, operation, activeTableId) {
   if (operation === 'align-left') {
     next = next.map((entry) => ({
       ...entry,
-      layout: { ...entry.layout, xRatio: bounds.left },
+      layout: { ...entry.layout, x: bounds.left },
     }));
   } else if (operation === 'align-top') {
     next = next.map((entry) => ({
       ...entry,
-      layout: { ...entry.layout, yRatio: bounds.top },
+      layout: { ...entry.layout, y: bounds.top },
     }));
   } else if (operation === 'align-center-x') {
     const center = (bounds.left + bounds.right) / 2;
     next = next.map((entry) => ({
       ...entry,
-      layout: { ...entry.layout, xRatio: center - entry.layout.widthRatio / 2 },
+      layout: { ...entry.layout, x: center - entry.layout.width / 2 },
     }));
   } else if (operation === 'align-center-y') {
     const center = (bounds.top + bounds.bottom) / 2;
     next = next.map((entry) => ({
       ...entry,
-      layout: { ...entry.layout, yRatio: center - entry.layout.heightRatio / 2 },
+      layout: { ...entry.layout, y: center - entry.layout.height / 2 },
     }));
   } else if (operation === 'distribute-horizontal') {
     next = distribute(next, 'horizontal', bounds);
@@ -255,14 +215,14 @@ export function arrangeTableSelection(entries, operation, activeTableId) {
     next = distribute(next, 'vertical', bounds);
   } else if (operation === 'smart') {
     const centerXRange = Math.max(...entries.map(({ layout }) => (
-      layout.xRatio + layout.widthRatio / 2
+      layout.x + layout.width / 2
     ))) - Math.min(...entries.map(({ layout }) => (
-      layout.xRatio + layout.widthRatio / 2
+      layout.x + layout.width / 2
     )));
     const centerYRange = Math.max(...entries.map(({ layout }) => (
-      layout.yRatio + layout.heightRatio / 2
+      layout.y + layout.height / 2
     ))) - Math.min(...entries.map(({ layout }) => (
-      layout.yRatio + layout.heightRatio / 2
+      layout.y + layout.height / 2
     )));
     const horizontal = centerXRange >= centerYRange;
 
@@ -270,23 +230,20 @@ export function arrangeTableSelection(entries, operation, activeTableId) {
       const centerY = (bounds.top + bounds.bottom) / 2;
       next = next.map((entry) => ({
         ...entry,
-        layout: { ...entry.layout, yRatio: centerY - entry.layout.heightRatio / 2 },
+        layout: { ...entry.layout, y: centerY - entry.layout.height / 2 },
       }));
       next = distribute(next, 'horizontal', bounds);
     } else {
       const centerX = (bounds.left + bounds.right) / 2;
       next = next.map((entry) => ({
         ...entry,
-        layout: { ...entry.layout, xRatio: centerX - entry.layout.widthRatio / 2 },
+        layout: { ...entry.layout, x: centerX - entry.layout.width / 2 },
       }));
       next = distribute(next, 'vertical', bounds);
     }
   }
 
-  return next.map((entry) => ({
-    ...entry,
-    layout: normalizeTableLayout(entry.layout),
-  }));
+  return next;
 }
 
 export function serializeLayout(canvas, layoutMap, decorations = []) {
@@ -297,12 +254,12 @@ export function serializeLayout(canvas, layoutMap, decorations = []) {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([tableId, layout]) => ({
       tableId,
-      layout: normalizeTableLayout(layout),
+      layout,
     }));
   return JSON.stringify({
     canvas: normalizedCanvas,
     tables,
-    decorations: [...decorations].map(normalizeDecoration).sort((left, right) => (
+    decorations: [...decorations].sort((left, right) => (
       left.id.localeCompare(right.id)
     )),
   });
@@ -321,12 +278,14 @@ export function buildLayoutSavePayload({
       .filter((table) => !layoutMap.has(table.tableId))
       .map((table) => table.tableId),
     canvas: Object.fromEntries(
-      EDITABLE_CANVAS_FIELDS.map((field) => [field, canvas[field]]),
+      EDITABLE_CANVAS_FIELDS
+        .filter((field) => canvas[field] !== undefined)
+        .map((field) => [field, canvas[field]]),
     ),
-    decorations: decorations.map(normalizeDecoration),
+    decorations: decorations.map((item) => worldDecorationToApi(item, canvas)),
     tables: tables.filter((table) => layoutMap.has(table.tableId)).map((table) => ({
       tableId: table.tableId,
-      layout: normalizeTableLayout(layoutMap.get(table.tableId)),
+      layout: worldLayoutToApi(layoutMap.get(table.tableId), canvas),
     })),
   };
 }
@@ -352,21 +311,21 @@ export function findSignificantOverlaps(tables, layoutMap) {
       const overlapWidth = Math.max(
         0,
         Math.min(
-          left.xRatio + left.widthRatio,
-          right.xRatio + right.widthRatio,
-        ) - Math.max(left.xRatio, right.xRatio),
+          left.x + left.width,
+          right.x + right.width,
+        ) - Math.max(left.x, right.x),
       );
       const overlapHeight = Math.max(
         0,
         Math.min(
-          left.yRatio + left.heightRatio,
-          right.yRatio + right.heightRatio,
-        ) - Math.max(left.yRatio, right.yRatio),
+          left.y + left.height,
+          right.y + right.height,
+        ) - Math.max(left.y, right.y),
       );
       const overlapArea = overlapWidth * overlapHeight;
       const smallerArea = Math.min(
-        left.widthRatio * left.heightRatio,
-        right.widthRatio * right.heightRatio,
+        left.width * left.height,
+        right.width * right.height,
       );
 
       if (smallerArea > 0 && overlapArea / smallerArea > 0.3) {
