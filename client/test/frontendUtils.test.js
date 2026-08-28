@@ -126,6 +126,17 @@ test('deriveTimerDisplay keeps paused time frozen', () => {
   );
 });
 
+test('deriveTimerDisplay never exceeds the server snapshot after clock correction', () => {
+  const display = deriveTimerDisplay({
+    status: 'running',
+    remainingSeconds: 5400,
+    effectiveEndTime: '2026-01-01T01:30:00.750Z',
+  }, Date.parse('2026-01-01T00:00:00.000Z'));
+
+  assert.equal(display.remainingSeconds, 5400);
+  assert.equal(formatTimerDuration(display.remainingSeconds), '90:00');
+});
+
 test('clock offset uses the request midpoint and rejects slow samples', () => {
   assert.equal(calculateClockOffset({
     serverTime: '1970-01-01T00:00:02.100Z',

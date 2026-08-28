@@ -26,7 +26,13 @@ export function deriveTimerDisplay(timer, correctedNow) {
   const rawRemainingSeconds = (
     Date.parse(timer.effectiveEndTime) - correctedNow
   ) / 1000;
-  const remainingSeconds = Math.max(0, Math.ceil(rawRemainingSeconds));
+  const snapshotRemainingSeconds = Number.isFinite(timer.remainingSeconds)
+    ? Math.max(0, Math.floor(timer.remainingSeconds))
+    : Number.POSITIVE_INFINITY;
+  const remainingSeconds = Math.max(0, Math.min(
+    snapshotRemainingSeconds,
+    Math.ceil(rawRemainingSeconds),
+  ));
   const overtimeSeconds = Math.max(0, Math.floor(-rawRemainingSeconds));
   let status = timer.status;
 
