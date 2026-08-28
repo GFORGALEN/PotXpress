@@ -3,12 +3,10 @@ import { NodeResizer } from '@xyflow/react';
 import { TableNode } from '../tables/TableNode.jsx';
 
 const RESIZE_HANDLE_STYLE = Object.freeze({
-  width: 30,
-  height: 30,
-  borderRadius: 999,
-  border: '8px solid rgb(255 255 255 / 0.9)',
-  background: '#0284c7',
-  boxShadow: '0 2px 8px rgb(15 23 42 / 0.32)',
+  width: 32,
+  height: 32,
+  border: 0,
+  background: 'transparent',
 });
 
 const RESIZE_LINE_STYLE = Object.freeze({
@@ -28,6 +26,8 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         maxHeight={data.maxHeight}
         keepAspectRatio={['round', 'square'].includes(table.shape)}
         autoScale
+        handleClassName="potx-resize-handle"
+        lineClassName="potx-resize-line"
         handleStyle={RESIZE_HANDLE_STYLE}
         lineStyle={RESIZE_LINE_STYLE}
         onResizeStart={(_, params) => data.onResizeStart?.(id, params)}
@@ -60,7 +60,10 @@ const DECORATION_CLASSES = Object.freeze({
 export const FlowDecorationNode = memo(function FlowDecorationNode({ id, data, selected }) {
   const item = data.item;
   return (
-    <div className="potx-flow-node potx-flow-decoration h-full w-full">
+    <div
+      className="potx-flow-node potx-flow-decoration h-full w-full"
+      style={{ containerType: 'size' }}
+    >
       <NodeResizer
         isVisible={data.editing && selected}
         minWidth={data.minWidth}
@@ -68,6 +71,8 @@ export const FlowDecorationNode = memo(function FlowDecorationNode({ id, data, s
         maxWidth={data.maxWidth}
         maxHeight={data.maxHeight}
         autoScale
+        handleClassName="potx-resize-handle"
+        lineClassName="potx-resize-line"
         handleStyle={RESIZE_HANDLE_STYLE}
         lineStyle={RESIZE_LINE_STYLE}
         onResizeStart={(_, params) => data.onResizeStart?.(id, params)}
@@ -78,7 +83,6 @@ export const FlowDecorationNode = memo(function FlowDecorationNode({ id, data, s
         type="button"
         className={`h-full w-full select-none text-center font-black ${DECORATION_CLASSES[item.type]} ${data.uiSelected ? 'ring-4 ring-sky-500 ring-offset-2' : ''}`}
         style={{
-          fontSize: 'clamp(10px, 1vw, 15px)',
           transform: `rotate(${item.rotation ?? 0}deg)`,
           touchAction: 'none',
         }}
