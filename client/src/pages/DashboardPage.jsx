@@ -59,6 +59,7 @@ import {
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
 import { shouldLockCanvasPan } from '../utils/canvasInteraction.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
+import { deriveServerContactHealth } from '../utils/connectionHealth.js';
 import {
   apiDecorationToWorld,
   apiLayoutToWorld,
@@ -107,6 +108,7 @@ export function DashboardPage() {
   const [tableMutationBusy, setTableMutationBusy] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
+  const [lastServerContactAt, setLastServerContactAt] = useState(null);
   const [mobileView, setMobileView] = useState(
     () => localStorage.getItem(MOBILE_VIEW_STORAGE_KEY) || 'list',
   );
@@ -167,6 +169,7 @@ export function DashboardPage() {
     timersLoadedRef.current = false;
     pollingFailedRef.current = false;
     setTimerEventVersion(0);
+    setLastServerContactAt(null);
   }, [selectedStoreId, storeEpoch]);
 
   useEffect(() => {
@@ -256,6 +259,7 @@ export function DashboardPage() {
     }
 
     timerPollCountRef.current += 1;
+    setLastServerContactAt(Date.now());
     setTimers(result.timers);
     setTimerEventVersion(
       Number.isSafeInteger(result.eventVersion) ? result.eventVersion : 0,
@@ -287,6 +291,7 @@ export function DashboardPage() {
     token,
     snapshotVersion: timerEventVersion,
     onSnapshotRequired: handleRealtimeSnapshotRequired,
+    onServerContact: setLastServerContactAt,
   });
   const refreshTimers = usePolling(
     fetchTimers,
@@ -313,6 +318,10 @@ export function DashboardPage() {
     [timers],
   );
   const correctedNow = now + clockOffsetRef.current;
+  const serverContactHealth = deriveServerContactHealth(lastServerContactAt, now);
+  const serverSilenceLabel = serverContactHealth.silenceSeconds >= 60
+    ? `${Math.floor(serverContactHealth.silenceSeconds / 60)}分${serverContactHealth.silenceSeconds % 60}秒`
+    : `${serverContactHealth.silenceSeconds}秒`;
   const displayTables = useMemo(() => (
     (layout?.tables ?? [])
       .filter((table) => (
@@ -807,6 +816,20 @@ export function DashboardPage() {
         </button>
       ) : null}
 
+      {serverContactHealth.level !== 'healthy' ? (
+        <button
+          type="button"
+          onClick={refreshTimers}
+          className={`min-h-12 rounded-2xl border px-4 text-left text-sm font-black shadow-card ${serverContactHealth.level === 'stale'
+            ? 'border-red-300 bg-red-50 text-red-900'
+            : 'border-amber-300 bg-amber-50 text-amber-950'}`}
+        >
+          {serverContactHealth.level === 'stale'
+            ? `服务器已 ${serverSilenceLabel} 未回应，可能正在唤醒。点击立即同步。`
+            : `服务器响应变慢，${serverContactHealth.staleInSeconds} 秒后将提示重新连接。点击立即检查。`}
+        </button>
+      ) : null}
+
       <TimerStatusBanner
         status="overtime"
         tables={overtimeTables}
@@ -884,9 +907,23 @@ export function DashboardPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-3 text-right">
-                      <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                        <Radio size={11} />{realtime.connected ? '实时连接' : '重连中'}
-                      </span>
+                      {serverContactHealth.level === 'healthy' ? (
+                        <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          <Radio size={11} />{realtime.connected ? '实时连接' : '重连中'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={refreshTimers}
+                          className={`hidden rounded-full px-3 py-1 text-[10px] font-black sm:inline-flex ${serverContactHealth.level === 'stale'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-amber-100 text-amber-900'}`}
+                        >
+                          {serverContactHealth.level === 'stale'
+                            ? `已 ${serverSilenceLabel} 未同步 · 点击重连`
+                            : `${serverContactHealth.staleInSeconds}秒后检查连接`}
+                        </button>
+                      )}
                       <span className="min-w-[4.5rem] font-mono text-sm font-black tabular-nums text-stone-800">
                         {currentTimeLabel}
                       </span>

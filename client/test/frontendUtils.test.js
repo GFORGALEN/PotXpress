@@ -35,6 +35,7 @@ import {
   isImmersiveViewportReady,
   shouldLockCanvasPan,
 } from '../src/utils/canvasInteraction.js';
+import { deriveServerContactHealth } from '../src/utils/connectionHealth.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -107,6 +108,21 @@ test('immersive fit waits for the canvas to reach the browser viewport', () => {
     { width: 3839, height: 2159 },
     { width: 3840, height: 2160 },
   ), true);
+});
+
+test('server contact health counts down before showing a reconnect reminder', () => {
+  const now = Date.parse('2026-08-30T12:00:00.000Z');
+  assert.equal(deriveServerContactHealth(now - 89_000, now).level, 'healthy');
+  assert.deepEqual(deriveServerContactHealth(now - 95_000, now), {
+    level: 'warning',
+    silenceSeconds: 95,
+    staleInSeconds: 25,
+  });
+  assert.deepEqual(deriveServerContactHealth(now - 125_000, now), {
+    level: 'stale',
+    silenceSeconds: 125,
+    staleInSeconds: 0,
+  });
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {
