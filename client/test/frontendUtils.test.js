@@ -499,6 +499,17 @@ test('default display bounds round-trip and fit independently per viewport size'
   );
 });
 
+test('viewport fit supports a reserved immersive header inset', () => {
+  const bounds = { x: 0, y: 0, width: 1000, height: 500 };
+  const fitted = fitViewportToBounds(bounds, { width: 1200, height: 800 }, {
+    padding: { top: 100, right: 50, bottom: 50, left: 50 },
+  });
+
+  assert.equal(fitted.zoom, 1.1);
+  assert.equal(fitted.x, 50);
+  assert.equal(fitted.y, 150);
+});
+
 test('default display range reports tables outside it', () => {
   const bounds = { x: 100, y: 100, width: 800, height: 500 };
   assert.equal(isLayoutInsideBounds({

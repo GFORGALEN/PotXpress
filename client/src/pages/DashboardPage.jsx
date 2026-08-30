@@ -860,11 +860,39 @@ export function DashboardPage() {
               />
             ) : (
             <div className={canvasFocused
-              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-white'
+              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-[#f2f0ea]'
               : frontDeskMode
                 ? 'relative min-h-80 flex-1'
                 : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
+                canvasFocused && layoutEditor.mode === 'view' ? (
+                  <div className="absolute inset-x-0 top-0 z-40 flex h-16 items-center gap-3 border-b border-stone-300/70 bg-[#f8f6f1]/95 px-4 shadow-[0_8px_28px_-22px_rgba(28,25,23,.55)] backdrop-blur-xl sm:px-6">
+                    <button
+                      type="button"
+                      onClick={toggleCanvasFocus}
+                      className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border border-stone-300 bg-white px-4 text-xs font-black text-stone-800 shadow-sm transition hover:bg-stone-50"
+                      aria-label="退出全屏运营"
+                    >
+                      <Minimize2 size={16} />退出全屏
+                    </button>
+                    <div className="min-w-0 flex-1 text-center">
+                      <p className="truncate text-sm font-black tracking-tight text-ink-950 sm:text-base">
+                        {displayStoreName}
+                      </p>
+                      <p className="hidden text-[10px] font-bold text-stone-500 sm:block">
+                        点击桌台立即开始 · 双击调整时长
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3 text-right">
+                      <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                        <Radio size={11} />{realtime.connected ? '实时连接' : '重连中'}
+                      </span>
+                      <span className="min-w-[4.5rem] font-mono text-sm font-black tabular-nums text-stone-800">
+                        {currentTimeLabel}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -881,12 +909,8 @@ export function DashboardPage() {
                       ? (canvasFocused ? '退出全屏' : '全屏运营')
                       : (canvasFocused ? '退出专注' : '专注画布')}
                   </button>
-                  {canvasFocused && layoutEditor.mode === 'view' ? (
-                    <span className="rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2 text-xs font-black text-emerald-800 shadow-lg backdrop-blur">
-                      点击桌台即可开始或调整计时
-                    </span>
-                  ) : null}
                 </div>
+                )
               ) : null}
               <FloorCanvas
                 key={selectedStoreId}

@@ -86,6 +86,22 @@ function ZoomControls({
   onFit,
   onActualSize,
 }) {
+  if (immersive && !editing) {
+    return (
+      <button
+        type="button"
+        onClick={onFit}
+        className="canvas-control absolute bottom-5 right-5 z-30 inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-200/80 bg-white/90 px-4 text-xs font-black text-stone-700 shadow-lg backdrop-blur transition hover:bg-white"
+        title="重置门店全景"
+        aria-label="重置门店全景"
+        data-canvas-control
+      >
+        <Maximize2 size={16} />
+        重置全景
+      </button>
+    );
+  }
+
   return (
     <div
       className="canvas-control absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-soft backdrop-blur"
@@ -220,7 +236,9 @@ export function FloorCanvas({
     const nextViewport = fitViewportToBounds(bounds, viewportSize, {
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      padding: immersive ? 24 : 32,
+      padding: immersive && !editing
+        ? { top: 88, right: 40, bottom: 40, left: 40 }
+        : 32,
     });
     if (initialize) {
       onInitializeViewport?.(nextViewport);
@@ -743,6 +761,7 @@ export function FloorCanvas({
         ? 'floor-viewport--immersive rounded-none border-0 shadow-none'
         : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
       aria-label="门店桌台布局画布"
+      style={{ '--potx-canvas-background': canvas.backgroundColor }}
       onTouchEnd={resetAbortedTouchDrag}
       onTouchCancel={resetAbortedTouchDrag}
     >

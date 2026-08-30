@@ -150,14 +150,12 @@
 
 .floor-viewport--immersive {
   background:
-    radial-gradient(circle at center, rgb(68 64 60 / 0.72), #292524 72%);
+    radial-gradient(circle at 50% 42%, rgb(255 255 255 / 0.44), transparent 64%),
+    var(--potx-canvas-background, #f2f0ea);
 }
 
 .floor-viewport--immersive .floor-surface {
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 0.18),
-    0 24px 70px rgb(0 0 0 / 0.38),
-    inset 0 0 44px rgb(87 83 78 / 0.055);
+  box-shadow: none;
 }
 
 .floor-surface {
