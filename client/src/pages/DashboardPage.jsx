@@ -176,9 +176,6 @@ export function DashboardPage() {
     const handleFullscreenChange = () => {
       const active = document.fullscreenElement === fullscreenRootRef.current;
       setIsFullscreen(active);
-      if (!document.fullscreenElement) {
-        setCanvasFocused(false);
-      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -187,6 +184,29 @@ export function DashboardPage() {
       handleFullscreenChange,
     );
   }, []);
+
+  useEffect(() => {
+    if (!canvasFocused) return undefined;
+
+    const root = fullscreenRootRef.current;
+    if (!root) return undefined;
+
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+    const previousBodyOverscroll = document.body.style.overscrollBehavior;
+    document.documentElement.style.overscrollBehavior = 'none';
+    document.body.style.overscrollBehavior = 'none';
+
+    const preventTouchNavigation = (event) => {
+      if (event.cancelable) event.preventDefault();
+    };
+    root.addEventListener('touchmove', preventTouchNavigation, { passive: false });
+
+    return () => {
+      root.removeEventListener('touchmove', preventTouchNavigation);
+      document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+      document.body.style.overscrollBehavior = previousBodyOverscroll;
+    };
+  }, [canvasFocused]);
 
   useEffect(() => {
     loadSettings();
@@ -525,6 +545,7 @@ export function DashboardPage() {
 
     if (document.fullscreenElement) {
       await document.exitFullscreen?.();
+      setCanvasFocused(false);
       return;
     }
 
@@ -535,7 +556,7 @@ export function DashboardPage() {
 
     setCanvasFocused(true);
     try {
-      await fullscreenRootRef.current?.requestFullscreen?.();
+      await fullscreenRootRef.current?.requestFullscreen?.({ navigationUI: 'hide' });
     } catch {
       // Keep the focused canvas fallback when the browser blocks fullscreen.
       setIsFullscreen(false);
@@ -887,7 +908,7 @@ export function DashboardPage() {
               />
             ) : (
             <div className={canvasFocused
-              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-[#f2f0ea]'
+              ? 'fullscreen-canvas-shell fixed inset-0 z-50 min-h-0 overflow-hidden bg-[#f2f0ea]'
               : frontDeskMode
                 ? 'relative min-h-80 flex-1'
                 : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
