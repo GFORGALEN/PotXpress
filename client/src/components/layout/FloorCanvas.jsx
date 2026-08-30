@@ -20,9 +20,9 @@ import {
 import {
   fitViewportToBounds,
   getWorldContentBounds,
-  ratioBoundsToWorld,
   viewportToWorldBounds,
 } from '../../utils/layoutCoordinates.js';
+import { isImmersiveViewportReady } from '../../utils/canvasInteraction.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import {
   FlowCanvasSurfaceNode,
@@ -86,6 +86,22 @@ function ZoomControls({
   onFit,
   onActualSize,
 }) {
+  if (immersive && !editing) {
+    return (
+      <button
+        type="button"
+        onClick={onFit}
+        className="canvas-control absolute bottom-5 right-5 z-30 inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-200/80 bg-white/90 px-4 text-xs font-black text-stone-700 shadow-lg backdrop-blur transition hover:bg-white"
+        title="重置门店全景"
+        aria-label="重置门店全景"
+        data-canvas-control
+      >
+        <Maximize2 size={16} />
+        重置全景
+      </button>
+    );
+  }
+
   return (
     <div
       className="canvas-control absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-soft backdrop-blur"
@@ -156,6 +172,7 @@ export function FloorCanvas({
   syncSelectedResize = false,
   onResizeSelectedTables,
   immersive = false,
+  immersiveStage = 'inline',
   viewportLocked = false,
   selectedDecorationId = null,
   onSelectDecoration,
@@ -170,6 +187,7 @@ export function FloorCanvas({
   const rootRef = useRef(null);
   const reactFlowRef = useRef(null);
   const previousImmersiveRef = useRef(immersive);
+  const previousImmersiveStageRef = useRef(immersiveStage);
   const immersiveFitPendingRef = useRef(false);
   const interactionRef = useRef(null);
   const dragStartRef = useRef(null);
@@ -220,7 +238,9 @@ export function FloorCanvas({
     const nextViewport = fitViewportToBounds(bounds, viewportSize, {
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      padding: immersive ? 24 : 32,
+      padding: immersive && !editing
+        ? { top: 88, right: 40, bottom: 40, left: 40 }
+        : 32,
     });
     if (initialize) {
       onInitializeViewport?.(nextViewport);
@@ -248,33 +268,38 @@ export function FloorCanvas({
 
   useEffect(() => {
     const enteringImmersive = immersive && !previousImmersiveRef.current;
+    const immersiveStageChanged = immersive
+      && immersiveStage !== previousImmersiveStageRef.current;
     previousImmersiveRef.current = immersive;
-    if (enteringImmersive) immersiveFitPendingRef.current = true;
+    previousImmersiveStageRef.current = immersiveStage;
+    if (enteringImmersive || immersiveStageChanged) {
+      immersiveFitPendingRef.current = true;
+    }
     if (!immersive) {
       immersiveFitPendingRef.current = false;
       return;
     }
     if (!immersiveFitPendingRef.current || editing || !viewportInitialized) return;
 
-    // Effects run after the focused/fullscreen class has changed layout. Read
-    // the DOM directly so the one permitted entry fit uses the new panel size
-    // instead of the previous ResizeObserver snapshot.
+    // Keep the pending fit until the fixed/fullscreen container has actually
+    // reached the browser viewport. On large displays the first effect can run
+    // while the canvas still reports its smaller dashboard size.
     const rootBounds = rootRef.current?.getBoundingClientRect();
-    if (!rootBounds?.width || !rootBounds?.height) return;
-    const defaultBounds = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
+    const documentElement = rootRef.current?.ownerDocument?.documentElement;
+    if (!isImmersiveViewportReady(rootBounds, {
+      width: documentElement?.clientWidth,
+      height: documentElement?.clientHeight,
+    })) return;
     immersiveFitPendingRef.current = false;
-    onViewportChange?.(fitViewportToBounds(
-      defaultBounds ?? contentBounds,
-      { width: rootBounds.width, height: rootBounds.height },
-      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: 24 },
-    ));
+    fitStoreOverview();
   }, [
-    canvas,
-    contentBounds,
     editing,
+    fitStoreOverview,
     immersive,
-    onViewportChange,
+    immersiveStage,
     viewportInitialized,
+    viewportSize.height,
+    viewportSize.width,
   ]);
 
   useEffect(() => {
@@ -741,9 +766,10 @@ export function FloorCanvas({
     <div
       ref={rootRef}
       className={`floor-viewport relative h-full min-h-0 w-full overflow-hidden ${immersive
-        ? 'rounded-none border-0 shadow-none'
+        ? 'floor-viewport--immersive rounded-none border-0 shadow-none'
         : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
       aria-label="门店桌台布局画布"
+      style={{ '--potx-canvas-background': canvas.backgroundColor }}
       onTouchEnd={resetAbortedTouchDrag}
       onTouchCancel={resetAbortedTouchDrag}
     >
@@ -776,8 +802,8 @@ export function FloorCanvas({
         selectionKeyCode={editing ? 'Shift' : null}
         multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
         // React Flow treats touch independently from mouse-button arrays.
-        // Multi-select reserves one-finger drag for the marquee; focused mode
-        // intentionally locks one-finger panning altogether.
+        // Multi-select reserves one-finger drag for the marquee. The parent
+        // locks one-finger panning while full-screen operations are active.
         panOnDrag={viewportLocked || (editing && multiSelectMode) ? false : true}
         zoomOnPinch
         zoomOnScroll

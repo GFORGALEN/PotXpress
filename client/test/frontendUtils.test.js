@@ -31,6 +31,11 @@ import {
   FRONT_DESK_PATH,
   isFrontDeskMode,
 } from '../src/utils/frontDeskMode.js';
+import {
+  isImmersiveViewportReady,
+  shouldLockCanvasPan,
+} from '../src/utils/canvasInteraction.js';
+import { deriveServerContactHealth } from '../src/utils/connectionHealth.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -85,6 +90,45 @@ test('store staff enters the simplified front-desk mode by default', () => {
   assert.equal(isFrontDeskMode('?mode=frontdesk'), true);
   assert.equal(isFrontDeskMode('?mode=frontdesk&source=kiosk'), true);
   assert.equal(isFrontDeskMode('?mode=admin'), false);
+});
+
+test('only full-screen operations lock one-finger canvas panning', () => {
+  assert.equal(shouldLockCanvasPan({ editing: false, immersive: true }), true);
+  assert.equal(shouldLockCanvasPan({ editing: true, immersive: true }), false);
+  assert.equal(shouldLockCanvasPan({ editing: false, immersive: false }), false);
+  assert.equal(shouldLockCanvasPan({ editing: true, immersive: false }), false);
+});
+
+test('immersive fit waits for the canvas to reach the browser viewport', () => {
+  assert.equal(isImmersiveViewportReady(
+    { width: 1280, height: 640 },
+    { width: 3840, height: 2160 },
+  ), false);
+  assert.equal(isImmersiveViewportReady(
+    { width: 3839, height: 2159 },
+    { width: 3840, height: 2160 },
+  ), true);
+});
+
+test('server contact health counts down before showing a reconnect reminder', () => {
+  const now = Date.parse('2026-08-30T12:00:00.000Z');
+  assert.equal(deriveServerContactHealth(now - 89_000, now).level, 'healthy');
+  assert.deepEqual(deriveServerContactHealth(now - 95_000, now), {
+    level: 'warning',
+    silenceSeconds: 95,
+    staleInSeconds: 25,
+    nextKeepaliveInSeconds: 0,
+  });
+  assert.deepEqual(deriveServerContactHealth(now - 125_000, now), {
+    level: 'stale',
+    silenceSeconds: 125,
+    staleInSeconds: 0,
+    nextKeepaliveInSeconds: 0,
+  });
+  assert.equal(
+    deriveServerContactHealth(now - 7_400, now).nextKeepaliveInSeconds,
+    18,
+  );
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {
@@ -475,6 +519,17 @@ test('default display bounds round-trip and fit independently per viewport size'
     (768 / 2 - tabletPortrait.x) / tabletPortrait.zoom,
     restored.x + restored.width / 2,
   );
+});
+
+test('viewport fit supports a reserved immersive header inset', () => {
+  const bounds = { x: 0, y: 0, width: 1000, height: 500 };
+  const fitted = fitViewportToBounds(bounds, { width: 1200, height: 800 }, {
+    padding: { top: 100, right: 50, bottom: 50, left: 50 },
+  });
+
+  assert.equal(fitted.zoom, 1.1);
+  assert.equal(fitted.x, 50);
+  assert.equal(fitted.y, 150);
 });
 
 test('default display range reports tables outside it', () => {

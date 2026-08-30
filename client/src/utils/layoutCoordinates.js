@@ -151,16 +151,32 @@ export function fitViewportToBounds(
   viewportSize,
   { padding = 24, minZoom = 0.05, maxZoom = 4 } = {},
 ) {
-  const availableWidth = Math.max(1, viewportSize.width - padding * 2);
-  const availableHeight = Math.max(1, viewportSize.height - padding * 2);
+  const insets = typeof padding === 'number'
+    ? { top: padding, right: padding, bottom: padding, left: padding }
+    : {
+      top: padding.top ?? padding.y ?? 0,
+      right: padding.right ?? padding.x ?? 0,
+      bottom: padding.bottom ?? padding.y ?? 0,
+      left: padding.left ?? padding.x ?? 0,
+    };
+  const availableWidth = Math.max(
+    1,
+    viewportSize.width - insets.left - insets.right,
+  );
+  const availableHeight = Math.max(
+    1,
+    viewportSize.height - insets.top - insets.bottom,
+  );
   const zoom = clamp(Math.min(
     availableWidth / Math.max(1, bounds.width),
     availableHeight / Math.max(1, bounds.height),
   ), minZoom, maxZoom);
 
   return {
-    x: viewportSize.width / 2 - (bounds.x + bounds.width / 2) * zoom,
-    y: viewportSize.height / 2 - (bounds.y + bounds.height / 2) * zoom,
+    x: insets.left + availableWidth / 2
+      - (bounds.x + bounds.width / 2) * zoom,
+    y: insets.top + availableHeight / 2
+      - (bounds.y + bounds.height / 2) * zoom,
     zoom,
   };
 }

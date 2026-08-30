@@ -148,6 +148,16 @@
   background-size: 60px 60px;
 }
 
+.floor-viewport--immersive {
+  background:
+    radial-gradient(circle at 50% 42%, rgb(255 255 255 / 0.44), transparent 64%),
+    var(--potx-canvas-background, #f2f0ea);
+}
+
+.floor-viewport--immersive .floor-surface {
+  box-shadow: none;
+}
+
 .floor-surface {
   background-color: #f2f0ea;
   background-image:

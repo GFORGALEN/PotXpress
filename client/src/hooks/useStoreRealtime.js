@@ -29,6 +29,7 @@ export function useStoreRealtime({
   token,
   snapshotVersion,
   onSnapshotRequired,
+  onServerContact,
 }) {
   const {
     connectionStatus,
@@ -38,12 +39,17 @@ export function useStoreRealtime({
     setReconnecting,
   } = useErrorContext();
   const snapshotCallbackRef = useRef(onSnapshotRequired);
+  const contactCallbackRef = useRef(onServerContact);
   const activeStoreRef = useRef(storeId);
   const highestSeenVersionRef = useRef(0);
 
   useEffect(() => {
     snapshotCallbackRef.current = onSnapshotRequired;
   }, [onSnapshotRequired]);
+
+  useEffect(() => {
+    contactCallbackRef.current = onServerContact;
+  }, [onServerContact]);
 
   useEffect(() => {
     if (
@@ -153,6 +159,8 @@ export function useStoreRealtime({
           nextSocket.close(4400, 'INVALID_SERVER_MESSAGE');
           return;
         }
+
+        contactCallbackRef.current?.(Date.now());
 
         if (message.type === 'ready' && message.storeId === storeId) {
           reconnectAttempt = 0;

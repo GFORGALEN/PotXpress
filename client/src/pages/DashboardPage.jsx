@@ -57,7 +57,9 @@ import {
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
+import { shouldLockCanvasPan } from '../utils/canvasInteraction.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
+import { deriveServerContactHealth } from '../utils/connectionHealth.js';
 import {
   apiDecorationToWorld,
   apiLayoutToWorld,
@@ -106,6 +108,7 @@ export function DashboardPage() {
   const [tableMutationBusy, setTableMutationBusy] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
+  const [lastServerContactAt, setLastServerContactAt] = useState(null);
   const [mobileView, setMobileView] = useState(
     () => localStorage.getItem(MOBILE_VIEW_STORAGE_KEY) || 'list',
   );
@@ -166,6 +169,7 @@ export function DashboardPage() {
     timersLoadedRef.current = false;
     pollingFailedRef.current = false;
     setTimerEventVersion(0);
+    setLastServerContactAt(null);
   }, [selectedStoreId, storeEpoch]);
 
   useEffect(() => {
@@ -255,6 +259,7 @@ export function DashboardPage() {
     }
 
     timerPollCountRef.current += 1;
+    setLastServerContactAt(Date.now());
     setTimers(result.timers);
     setTimerEventVersion(
       Number.isSafeInteger(result.eventVersion) ? result.eventVersion : 0,
@@ -286,6 +291,7 @@ export function DashboardPage() {
     token,
     snapshotVersion: timerEventVersion,
     onSnapshotRequired: handleRealtimeSnapshotRequired,
+    onServerContact: setLastServerContactAt,
   });
   const refreshTimers = usePolling(
     fetchTimers,
@@ -312,6 +318,10 @@ export function DashboardPage() {
     [timers],
   );
   const correctedNow = now + clockOffsetRef.current;
+  const serverContactHealth = deriveServerContactHealth(lastServerContactAt, now);
+  const serverSilenceLabel = serverContactHealth.silenceSeconds >= 60
+    ? `${Math.floor(serverContactHealth.silenceSeconds / 60)}分${serverContactHealth.silenceSeconds % 60}秒`
+    : `${serverContactHealth.silenceSeconds}秒`;
   const displayTables = useMemo(() => (
     (layout?.tables ?? [])
       .filter((table) => (
@@ -743,7 +753,11 @@ export function DashboardPage() {
             </h1>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
               <Radio size={12} />
-              {realtime.connected ? '实时连接' : '自动重连中'}
+              {realtime.connected
+                ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                  ? `下次保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                  : '等待保活回应'}`
+                : '自动重连中'}
             </span>
           </div>
           <p className="mt-0.5 text-xs font-medium text-stone-600">
@@ -806,6 +820,20 @@ export function DashboardPage() {
         </button>
       ) : null}
 
+      {serverContactHealth.level !== 'healthy' ? (
+        <button
+          type="button"
+          onClick={refreshTimers}
+          className={`min-h-12 rounded-2xl border px-4 text-left text-sm font-black shadow-card ${serverContactHealth.level === 'stale'
+            ? 'border-red-300 bg-red-50 text-red-900'
+            : 'border-amber-300 bg-amber-50 text-amber-950'}`}
+        >
+          {serverContactHealth.level === 'stale'
+            ? `服务器已 ${serverSilenceLabel} 未回应，可能正在唤醒。点击立即同步。`
+            : `服务器响应变慢，${serverContactHealth.staleInSeconds} 秒后将提示重新连接。点击立即检查。`}
+        </button>
+      ) : null}
+
       <TimerStatusBanner
         status="overtime"
         tables={overtimeTables}
@@ -859,11 +887,58 @@ export function DashboardPage() {
               />
             ) : (
             <div className={canvasFocused
-              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-white'
+              ? 'fixed inset-0 z-50 min-h-0 overflow-hidden bg-[#f2f0ea]'
               : frontDeskMode
                 ? 'relative min-h-80 flex-1'
                 : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
+                canvasFocused && layoutEditor.mode === 'view' ? (
+                  <div className="absolute inset-x-0 top-0 z-40 flex h-16 items-center gap-3 border-b border-stone-300/70 bg-[#f8f6f1]/95 px-4 shadow-[0_8px_28px_-22px_rgba(28,25,23,.55)] backdrop-blur-xl sm:px-6">
+                    <button
+                      type="button"
+                      onClick={toggleCanvasFocus}
+                      className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border border-stone-300 bg-white px-4 text-xs font-black text-stone-800 shadow-sm transition hover:bg-stone-50"
+                      aria-label="退出全屏运营"
+                    >
+                      <Minimize2 size={16} />退出全屏
+                    </button>
+                    <div className="min-w-0 flex-1 text-center">
+                      <p className="truncate text-sm font-black tracking-tight text-ink-950 sm:text-base">
+                        {displayStoreName}
+                      </p>
+                      <p className="hidden text-[10px] font-bold text-stone-500 sm:block">
+                        点击桌台立即开始 · 双击调整时长
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3 text-right">
+                      {serverContactHealth.level === 'healthy' ? (
+                        <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          <Radio size={11} />
+                          {realtime.connected
+                            ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                              ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                              : '等待回应'}`
+                            : '重连中'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={refreshTimers}
+                          className={`hidden rounded-full px-3 py-1 text-[10px] font-black sm:inline-flex ${serverContactHealth.level === 'stale'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-amber-100 text-amber-900'}`}
+                        >
+                          {serverContactHealth.level === 'stale'
+                            ? `已 ${serverSilenceLabel} 未同步 · 点击重连`
+                            : `${serverContactHealth.staleInSeconds}秒后检查连接`}
+                        </button>
+                      )}
+                      <span className="min-w-[4.5rem] font-mono text-sm font-black tabular-nums text-stone-800">
+                        {currentTimeLabel}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -880,12 +955,8 @@ export function DashboardPage() {
                       ? (canvasFocused ? '退出全屏' : '全屏运营')
                       : (canvasFocused ? '退出专注' : '专注画布')}
                   </button>
-                  {canvasFocused && layoutEditor.mode === 'view' ? (
-                    <span className="rounded-xl border border-emerald-200 bg-emerald-50/95 px-3 py-2 text-xs font-black text-emerald-800 shadow-lg backdrop-blur">
-                      点击桌台即可开始或调整计时
-                    </span>
-                  ) : null}
                 </div>
+                )
               ) : null}
               <FloorCanvas
                 key={selectedStoreId}
@@ -939,7 +1010,13 @@ export function DashboardPage() {
                 syncSelectedResize={layoutEditor.syncSelectedResize}
                 onResizeSelectedTables={layoutEditor.resizeSelectedTables}
                 immersive={canvasFocused}
-                viewportLocked={canvasFocused && layoutEditor.mode === 'editing'}
+                immersiveStage={canvasFocused
+                  ? (isFullscreen ? 'fullscreen' : 'focused')
+                  : 'inline'}
+                viewportLocked={shouldLockCanvasPan({
+                  immersive: canvasFocused,
+                  editing: layoutEditor.mode === 'editing',
+                })}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {
                   layoutEditor.setSelectedDecorationId(id);
