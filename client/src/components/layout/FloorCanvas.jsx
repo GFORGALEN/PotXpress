@@ -7,6 +7,7 @@ import {
 } from 'react';
 import {
   applyNodeChanges,
+  Background,
   ReactFlow,
   SelectionMode,
 } from '@xyflow/react';
@@ -830,7 +831,15 @@ export function FloorCanvas({
         deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
         className={immersive ? 'potx-react-flow immersive' : 'potx-react-flow'}
-      />
+      >
+        {immersive ? (
+          <Background
+            gap={canvas.gridSize}
+            size={1}
+            color="rgba(87, 83, 78, 0.09)"
+          />
+        ) : null}
+      </ReactFlow>
       {editing && multiSelectMode ? (
         <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-violet-300 bg-violet-100/95 px-4 py-2 text-xs font-black text-violet-950 shadow-lg backdrop-blur">
           多选模式 · 拖动空白区域框选桌台

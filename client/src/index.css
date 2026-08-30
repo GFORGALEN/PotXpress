@@ -159,7 +159,17 @@
   touch-action: none;
 }
 
+[data-potx-fullscreen-root]:fullscreen {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #f2f0ea;
+}
+
 .floor-viewport--immersive .floor-surface {
+  background: transparent;
   box-shadow: none;
 }
 
