@@ -117,12 +117,18 @@ test('server contact health counts down before showing a reconnect reminder', ()
     level: 'warning',
     silenceSeconds: 95,
     staleInSeconds: 25,
+    nextKeepaliveInSeconds: 0,
   });
   assert.deepEqual(deriveServerContactHealth(now - 125_000, now), {
     level: 'stale',
     silenceSeconds: 125,
     staleInSeconds: 0,
+    nextKeepaliveInSeconds: 0,
   });
+  assert.equal(
+    deriveServerContactHealth(now - 7_400, now).nextKeepaliveInSeconds,
+    18,
+  );
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {

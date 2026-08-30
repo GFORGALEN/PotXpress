@@ -753,7 +753,11 @@ export function DashboardPage() {
             </h1>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
               <Radio size={12} />
-              {realtime.connected ? '实时连接' : '自动重连中'}
+              {realtime.connected
+                ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                  ? `下次保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                  : '等待保活回应'}`
+                : '自动重连中'}
             </span>
           </div>
           <p className="mt-0.5 text-xs font-medium text-stone-600">
@@ -909,7 +913,12 @@ export function DashboardPage() {
                     <div className="flex shrink-0 items-center gap-3 text-right">
                       {serverContactHealth.level === 'healthy' ? (
                         <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                          <Radio size={11} />{realtime.connected ? '实时连接' : '重连中'}
+                          <Radio size={11} />
+                          {realtime.connected
+                            ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                              ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                              : '等待回应'}`
+                            : '重连中'}
                         </span>
                       ) : (
                         <button
