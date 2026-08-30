@@ -172,6 +172,7 @@ export function FloorCanvas({
   syncSelectedResize = false,
   onResizeSelectedTables,
   immersive = false,
+  immersiveStage = 'inline',
   viewportLocked = false,
   selectedDecorationId = null,
   onSelectDecoration,
@@ -186,6 +187,7 @@ export function FloorCanvas({
   const rootRef = useRef(null);
   const reactFlowRef = useRef(null);
   const previousImmersiveRef = useRef(immersive);
+  const previousImmersiveStageRef = useRef(immersiveStage);
   const immersiveFitPendingRef = useRef(false);
   const interactionRef = useRef(null);
   const dragStartRef = useRef(null);
@@ -266,8 +268,13 @@ export function FloorCanvas({
 
   useEffect(() => {
     const enteringImmersive = immersive && !previousImmersiveRef.current;
+    const immersiveStageChanged = immersive
+      && immersiveStage !== previousImmersiveStageRef.current;
     previousImmersiveRef.current = immersive;
-    if (enteringImmersive) immersiveFitPendingRef.current = true;
+    previousImmersiveStageRef.current = immersiveStage;
+    if (enteringImmersive || immersiveStageChanged) {
+      immersiveFitPendingRef.current = true;
+    }
     if (!immersive) {
       immersiveFitPendingRef.current = false;
       return;
@@ -289,6 +296,7 @@ export function FloorCanvas({
     editing,
     fitStoreOverview,
     immersive,
+    immersiveStage,
     viewportInitialized,
     viewportSize.height,
     viewportSize.width,

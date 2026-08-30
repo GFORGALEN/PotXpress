@@ -964,6 +964,9 @@ export function DashboardPage() {
                 syncSelectedResize={layoutEditor.syncSelectedResize}
                 onResizeSelectedTables={layoutEditor.resizeSelectedTables}
                 immersive={canvasFocused}
+                immersiveStage={canvasFocused
+                  ? (isFullscreen ? 'fullscreen' : 'focused')
+                  : 'inline'}
                 viewportLocked={shouldLockCanvasPan({
                   immersive: canvasFocused,
                   editing: layoutEditor.mode === 'editing',
