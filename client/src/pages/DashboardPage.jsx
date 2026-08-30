@@ -57,6 +57,7 @@ import {
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
+import { shouldLockCanvasPan } from '../utils/canvasInteraction.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
 import {
   apiDecorationToWorld,
@@ -939,7 +940,10 @@ export function DashboardPage() {
                 syncSelectedResize={layoutEditor.syncSelectedResize}
                 onResizeSelectedTables={layoutEditor.resizeSelectedTables}
                 immersive={canvasFocused}
-                viewportLocked={canvasFocused && layoutEditor.mode === 'editing'}
+                viewportLocked={shouldLockCanvasPan({
+                  immersive: canvasFocused,
+                  editing: layoutEditor.mode === 'editing',
+                })}
                 selectedDecorationId={layoutEditor.selectedDecorationId}
                 onSelectDecoration={(id) => {
                   layoutEditor.setSelectedDecorationId(id);

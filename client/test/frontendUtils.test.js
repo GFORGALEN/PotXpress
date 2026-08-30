@@ -31,6 +31,7 @@ import {
   FRONT_DESK_PATH,
   isFrontDeskMode,
 } from '../src/utils/frontDeskMode.js';
+import { shouldLockCanvasPan } from '../src/utils/canvasInteraction.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -85,6 +86,13 @@ test('store staff enters the simplified front-desk mode by default', () => {
   assert.equal(isFrontDeskMode('?mode=frontdesk'), true);
   assert.equal(isFrontDeskMode('?mode=frontdesk&source=kiosk'), true);
   assert.equal(isFrontDeskMode('?mode=admin'), false);
+});
+
+test('only full-screen operations lock one-finger canvas panning', () => {
+  assert.equal(shouldLockCanvasPan({ editing: false, immersive: true }), true);
+  assert.equal(shouldLockCanvasPan({ editing: true, immersive: true }), false);
+  assert.equal(shouldLockCanvasPan({ editing: false, immersive: false }), false);
+  assert.equal(shouldLockCanvasPan({ editing: true, immersive: false }), false);
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {

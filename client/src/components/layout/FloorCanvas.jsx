@@ -776,8 +776,8 @@ export function FloorCanvas({
         selectionKeyCode={editing ? 'Shift' : null}
         multiSelectionKeyCode={['Shift', 'Control', 'Meta']}
         // React Flow treats touch independently from mouse-button arrays.
-        // Multi-select reserves one-finger drag for the marquee; focused mode
-        // intentionally locks one-finger panning altogether.
+        // Multi-select reserves one-finger drag for the marquee. The parent
+        // locks one-finger panning while full-screen operations are active.
         panOnDrag={viewportLocked || (editing && multiSelectMode) ? false : true}
         zoomOnPinch
         zoomOnScroll
