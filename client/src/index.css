@@ -154,6 +154,11 @@
     var(--potx-canvas-background, #f2f0ea);
 }
 
+.fullscreen-canvas-shell {
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 .floor-viewport--immersive .floor-surface {
   box-shadow: none;
 }
