@@ -31,7 +31,10 @@ import {
   FRONT_DESK_PATH,
   isFrontDeskMode,
 } from '../src/utils/frontDeskMode.js';
-import { shouldLockCanvasPan } from '../src/utils/canvasInteraction.js';
+import {
+  isImmersiveViewportReady,
+  shouldLockCanvasPan,
+} from '../src/utils/canvasInteraction.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -93,6 +96,17 @@ test('only full-screen operations lock one-finger canvas panning', () => {
   assert.equal(shouldLockCanvasPan({ editing: true, immersive: true }), false);
   assert.equal(shouldLockCanvasPan({ editing: false, immersive: false }), false);
   assert.equal(shouldLockCanvasPan({ editing: true, immersive: false }), false);
+});
+
+test('immersive fit waits for the canvas to reach the browser viewport', () => {
+  assert.equal(isImmersiveViewportReady(
+    { width: 1280, height: 640 },
+    { width: 3840, height: 2160 },
+  ), false);
+  assert.equal(isImmersiveViewportReady(
+    { width: 3839, height: 2159 },
+    { width: 3840, height: 2160 },
+  ), true);
 });
 
 test('deriveTimerDisplay advances running timers from a shared clock', () => {

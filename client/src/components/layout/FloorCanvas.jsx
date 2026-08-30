@@ -23,6 +23,7 @@ import {
   ratioBoundsToWorld,
   viewportToWorldBounds,
 } from '../../utils/layoutCoordinates.js';
+import { isImmersiveViewportReady } from '../../utils/canvasInteraction.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import {
   FlowCanvasSurfaceNode,
@@ -256,11 +257,15 @@ export function FloorCanvas({
     }
     if (!immersiveFitPendingRef.current || editing || !viewportInitialized) return;
 
-    // Effects run after the focused/fullscreen class has changed layout. Read
-    // the DOM directly so the one permitted entry fit uses the new panel size
-    // instead of the previous ResizeObserver snapshot.
+    // Keep the pending fit until the fixed/fullscreen container has actually
+    // reached the browser viewport. On large displays the first effect can run
+    // while the canvas still reports its smaller dashboard size.
     const rootBounds = rootRef.current?.getBoundingClientRect();
-    if (!rootBounds?.width || !rootBounds?.height) return;
+    const documentElement = rootRef.current?.ownerDocument?.documentElement;
+    if (!isImmersiveViewportReady(rootBounds, {
+      width: documentElement?.clientWidth,
+      height: documentElement?.clientHeight,
+    })) return;
     const defaultBounds = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
     immersiveFitPendingRef.current = false;
     onViewportChange?.(fitViewportToBounds(
@@ -275,6 +280,8 @@ export function FloorCanvas({
     immersive,
     onViewportChange,
     viewportInitialized,
+    viewportSize.height,
+    viewportSize.width,
   ]);
 
   useEffect(() => {
@@ -741,7 +748,7 @@ export function FloorCanvas({
     <div
       ref={rootRef}
       className={`floor-viewport relative h-full min-h-0 w-full overflow-hidden ${immersive
-        ? 'rounded-none border-0 shadow-none'
+        ? 'floor-viewport--immersive rounded-none border-0 shadow-none'
         : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
       aria-label="门店桌台布局画布"
       onTouchEnd={resetAbortedTouchDrag}
