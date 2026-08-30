@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { TableNode } from '../tables/TableNode.jsx';
 
@@ -14,8 +14,23 @@ const RESIZE_LINE_STYLE = Object.freeze({
   borderWidth: 2,
 });
 
+function useStableResizeCallbacks(id, data) {
+  const onResizeStart = useCallback((event, params) => {
+    data.onResizeStart?.(id, params);
+  }, [data.onResizeStart, id]);
+  const onResize = useCallback((event, params) => {
+    data.onResize?.(id, params);
+  }, [data.onResize, id]);
+  const onResizeEnd = useCallback((event, params) => {
+    data.onResizeEnd?.(id, params);
+  }, [data.onResizeEnd, id]);
+
+  return { onResizeStart, onResize, onResizeEnd };
+}
+
 export const FlowTableNode = memo(function FlowTableNode({ id, data, selected }) {
   const { table } = data;
+  const resizeCallbacks = useStableResizeCallbacks(id, data);
   return (
     <div className="potx-flow-node potx-flow-table h-full w-full">
       <NodeResizer
@@ -30,9 +45,7 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         lineClassName="potx-resize-line"
         handleStyle={RESIZE_HANDLE_STYLE}
         lineStyle={RESIZE_LINE_STYLE}
-        onResizeStart={(_, params) => data.onResizeStart?.(id, params)}
-        onResize={(_, params) => data.onResize?.(id, params)}
-        onResizeEnd={(_, params) => data.onResizeEnd?.(id, params)}
+        {...resizeCallbacks}
       />
       <TableNode
         {...table}
@@ -59,6 +72,7 @@ const DECORATION_CLASSES = Object.freeze({
 
 export const FlowDecorationNode = memo(function FlowDecorationNode({ id, data, selected }) {
   const item = data.item;
+  const resizeCallbacks = useStableResizeCallbacks(id, data);
   return (
     <div
       className="potx-flow-node potx-flow-decoration h-full w-full"
@@ -75,9 +89,7 @@ export const FlowDecorationNode = memo(function FlowDecorationNode({ id, data, s
         lineClassName="potx-resize-line"
         handleStyle={RESIZE_HANDLE_STYLE}
         lineStyle={RESIZE_LINE_STYLE}
-        onResizeStart={(_, params) => data.onResizeStart?.(id, params)}
-        onResize={(_, params) => data.onResize?.(id, params)}
-        onResizeEnd={(_, params) => data.onResizeEnd?.(id, params)}
+        {...resizeCallbacks}
       />
       <button
         type="button"
