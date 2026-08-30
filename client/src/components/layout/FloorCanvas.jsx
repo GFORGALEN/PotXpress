@@ -20,7 +20,6 @@ import {
 import {
   fitViewportToBounds,
   getWorldContentBounds,
-  ratioBoundsToWorld,
   viewportToWorldBounds,
 } from '../../utils/layoutCoordinates.js';
 import { isImmersiveViewportReady } from '../../utils/canvasInteraction.js';
@@ -266,19 +265,12 @@ export function FloorCanvas({
       width: documentElement?.clientWidth,
       height: documentElement?.clientHeight,
     })) return;
-    const defaultBounds = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
     immersiveFitPendingRef.current = false;
-    onViewportChange?.(fitViewportToBounds(
-      defaultBounds ?? contentBounds,
-      { width: rootBounds.width, height: rootBounds.height },
-      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM, padding: 24 },
-    ));
+    fitStoreOverview();
   }, [
-    canvas,
-    contentBounds,
     editing,
+    fitStoreOverview,
     immersive,
-    onViewportChange,
     viewportInitialized,
     viewportSize.height,
     viewportSize.width,
