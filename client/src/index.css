@@ -159,7 +159,17 @@
   touch-action: none;
 }
 
+[data-potx-fullscreen-root]:fullscreen {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #f2f0ea;
+}
+
 .floor-viewport--immersive .floor-surface {
+  background: transparent;
   box-shadow: none;
 }
 
@@ -220,6 +230,33 @@
   background: #0284c7;
   box-shadow: 0 2px 8px rgb(15 23 42 / 0.32);
   content: '';
+}
+
+/*
+ * Decorations need independent width and height controls. Tables keep the
+ * single corner grip so handles do not cover their status and timer content.
+ */
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.right:not(.top):not(.bottom),
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.bottom:not(.left):not(.right) {
+  display: block;
+}
+
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.right:not(.top):not(.bottom)::after,
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.bottom:not(.left):not(.right)::after {
+  position: absolute;
+  border: 3px solid rgb(255 255 255 / 0.94);
+  border-radius: 999px;
+  background: #0284c7;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.32);
+  content: '';
+}
+
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.right:not(.top):not(.bottom)::after {
+  inset: 7px 10px;
+}
+
+.potx-react-flow .potx-flow-decoration .potx-resize-handle.bottom:not(.left):not(.right)::after {
+  inset: 10px 7px;
 }
 
 .potx-react-flow .potx-resize-line {

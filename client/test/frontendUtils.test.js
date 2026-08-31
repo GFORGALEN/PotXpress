@@ -34,6 +34,7 @@ import {
 import {
   isImmersiveViewportReady,
   shouldLockCanvasPan,
+  shouldUseNativeFullscreen,
 } from '../src/utils/canvasInteraction.js';
 import { deriveServerContactHealth } from '../src/utils/connectionHealth.js';
 
@@ -97,6 +98,12 @@ test('only full-screen operations lock one-finger canvas panning', () => {
   assert.equal(shouldLockCanvasPan({ editing: true, immersive: true }), false);
   assert.equal(shouldLockCanvasPan({ editing: false, immersive: false }), false);
   assert.equal(shouldLockCanvasPan({ editing: true, immersive: false }), false);
+});
+
+test('touch tablets use app fullscreen to avoid native swipe-to-exit gestures', () => {
+  assert.equal(shouldUseNativeFullscreen({ maxTouchPoints: 5 }), false);
+  assert.equal(shouldUseNativeFullscreen({ coarsePointer: true }), false);
+  assert.equal(shouldUseNativeFullscreen({ maxTouchPoints: 0, coarsePointer: false }), true);
 });
 
 test('immersive fit waits for the canvas to reach the browser viewport', () => {

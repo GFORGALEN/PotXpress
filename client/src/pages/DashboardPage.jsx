@@ -57,7 +57,10 @@ import {
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
-import { shouldLockCanvasPan } from '../utils/canvasInteraction.js';
+import {
+  shouldLockCanvasPan,
+  shouldUseNativeFullscreen,
+} from '../utils/canvasInteraction.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
 import { deriveServerContactHealth } from '../utils/connectionHealth.js';
 import {
@@ -555,11 +558,28 @@ export function DashboardPage() {
     }
 
     setCanvasFocused(true);
-    try {
-      await fullscreenRootRef.current?.requestFullscreen?.({ navigationUI: 'hide' });
-    } catch {
-      // Keep the focused canvas fallback when the browser blocks fullscreen.
+    const useNativeFullscreen = shouldUseNativeFullscreen({
+      maxTouchPoints: navigator.maxTouchPoints,
+      coarsePointer: window.matchMedia?.('(pointer: coarse)').matches,
+    });
+    if (!useNativeFullscreen) {
       setIsFullscreen(false);
+      return;
+    }
+
+    const fullscreenRoot = fullscreenRootRef.current;
+    try {
+      await fullscreenRoot?.requestFullscreen?.({ navigationUI: 'hide' });
+    } catch {
+      try {
+        // Some tablet browsers implement the Fullscreen API but reject the
+        // optional navigationUI argument. Retry the standard request before
+        // falling back to the fixed viewport canvas.
+        await fullscreenRoot?.requestFullscreen?.();
+      } catch {
+        // Keep the focused canvas fallback when the browser blocks fullscreen.
+        setIsFullscreen(false);
+      }
     }
   }, [canvasFocused, layoutEditor.mode]);
   const nextTableNumber = useMemo(() => {
@@ -760,9 +780,12 @@ export function DashboardPage() {
   return (
     <div
       ref={fullscreenRootRef}
-      className={frontDeskMode
-        ? 'flex h-full min-h-0 w-full flex-col gap-2 bg-canvas'
-        : 'mx-auto flex max-w-[110rem] flex-col gap-4 bg-canvas'}
+      data-potx-fullscreen-root
+      className={canvasFocused
+        ? 'flex h-full min-h-0 w-full max-w-none flex-col bg-canvas'
+        : frontDeskMode
+          ? 'flex h-full min-h-0 w-full flex-col gap-2 bg-canvas'
+          : 'mx-auto flex max-w-[110rem] flex-col gap-4 bg-canvas'}
     >
       <section className={`relative flex shrink-0 flex-col justify-between gap-3 overflow-hidden border border-[#eadb62]/70 bg-[#fff8c7] text-ink-950 shadow-[0_20px_44px_-30px_rgba(80,70,20,.35)] sm:flex-row sm:items-center ${frontDeskMode ? 'rounded-2xl px-4 py-3 sm:px-5' : 'rounded-[1.75rem] px-5 py-4 sm:px-6'}`}>
         <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/55 blur-3xl" />
