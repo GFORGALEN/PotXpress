@@ -180,11 +180,9 @@ export async function checkDataConsistency() {
     const epsilon = 0.01;
     if (
       width < canvas.minTableWidth - epsilon
-      || width > canvas.maxTableWidth + epsilon
       || height < canvas.minTableHeight - epsilon
-      || height > canvas.maxTableHeight + epsilon
     ) {
-      throw new Error(`桌台 ${table.id} 布局尺寸超出允许范围`);
+      throw new Error(`桌台 ${table.id} 布局尺寸小于允许的最小值`);
     }
   }
 

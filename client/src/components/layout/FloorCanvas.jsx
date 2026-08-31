@@ -507,8 +507,14 @@ export function FloorCanvas({
       return {
         minWidth: canvas.minTableWidth,
         minHeight: canvas.minTableHeight,
-        maxWidth: canvas.maxTableWidth,
-        maxHeight: canvas.maxTableHeight,
+        maxWidth: Math.max(
+          canvas.minTableWidth,
+          canvas.virtualWidth - table.layout.x,
+        ),
+        maxHeight: Math.max(
+          canvas.minTableHeight,
+          canvas.virtualHeight - table.layout.y,
+        ),
       };
     }
     return {
@@ -519,10 +525,12 @@ export function FloorCanvas({
         canvas.minTableHeight * table.layout.height / entry.layout.height
       ))),
       maxWidth: Math.min(...entries.map((entry) => (
-        canvas.maxTableWidth * table.layout.width / entry.layout.width
+        (canvas.virtualWidth - entry.layout.x)
+          * table.layout.width / entry.layout.width
       ))),
       maxHeight: Math.min(...entries.map((entry) => (
-        canvas.maxTableHeight * table.layout.height / entry.layout.height
+        (canvas.virtualHeight - entry.layout.y)
+          * table.layout.height / entry.layout.height
       ))),
     };
   }, [canvas, selectedTableIdSet, syncSelectedResize, tables]);
