@@ -238,21 +238,27 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
   );
   assert.equal(layoutRead.status, 200);
   const originalLayout = layoutRead.body.data;
+  const expandedLayoutBody = completeLayoutBody(originalLayout, {
+    backgroundColor: '#fff8e7',
+    defaultViewBounds: {
+      xRatio: 0.1,
+      yRatio: 0.15,
+      widthRatio: 0.7,
+      heightRatio: 0.65,
+    },
+  });
+  expandedLayoutBody.tables[0].layout = {
+    ...expandedLayoutBody.tables[0].layout,
+    xRatio: 0.05,
+    widthRatio: 0.25,
+  };
   const layoutSave = await request(
     baseUrl,
     '/api/stores/store_demo/layout',
     {
       method: 'PUT',
       token: storeAdmin.token,
-      body: completeLayoutBody(originalLayout, {
-        backgroundColor: '#fff8e7',
-        defaultViewBounds: {
-          xRatio: 0.1,
-          yRatio: 0.15,
-          widthRatio: 0.7,
-          heightRatio: 0.65,
-        },
-      }),
+      body: expandedLayoutBody,
     },
   );
   assert.equal(layoutSave.status, 200);

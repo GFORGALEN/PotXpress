@@ -60,14 +60,12 @@ function validateSubmittedTables(submittedTables, currentTables, canvas) {
 
     if (
       width < canvas.minTableWidth - epsilon
-      || width > canvas.maxTableWidth + epsilon
       || height < canvas.minTableHeight - epsilon
-      || height > canvas.maxTableHeight + epsilon
     ) {
       throw new AppError(
         400,
         'VALIDATION_ERROR',
-        '桌台尺寸超出允许范围',
+        '桌台尺寸小于允许的最小值',
         { tableId: item.tableId },
       );
     }
