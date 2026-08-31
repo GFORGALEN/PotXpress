@@ -57,7 +57,10 @@ import {
   deriveTimerDisplay,
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
-import { shouldLockCanvasPan } from '../utils/canvasInteraction.js';
+import {
+  shouldLockCanvasPan,
+  shouldUseNativeFullscreen,
+} from '../utils/canvasInteraction.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
 import { deriveServerContactHealth } from '../utils/connectionHealth.js';
 import {
@@ -555,6 +558,15 @@ export function DashboardPage() {
     }
 
     setCanvasFocused(true);
+    const useNativeFullscreen = shouldUseNativeFullscreen({
+      maxTouchPoints: navigator.maxTouchPoints,
+      coarsePointer: window.matchMedia?.('(pointer: coarse)').matches,
+    });
+    if (!useNativeFullscreen) {
+      setIsFullscreen(false);
+      return;
+    }
+
     const fullscreenRoot = fullscreenRootRef.current;
     try {
       await fullscreenRoot?.requestFullscreen?.({ navigationUI: 'hide' });
