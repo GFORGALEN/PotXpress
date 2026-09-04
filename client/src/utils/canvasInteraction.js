@@ -6,6 +6,17 @@ export function shouldUseNativeFullscreen({ requestFullscreen } = {}) {
   return typeof requestFullscreen === 'function';
 }
 
+export function shouldExitCanvasFocusAfterFullscreenChange({
+  wasNativeFullscreenActive,
+  fullscreenElement,
+  fullscreenRoot,
+} = {}) {
+  return Boolean(
+    wasNativeFullscreenActive
+      && fullscreenElement !== fullscreenRoot,
+  );
+}
+
 export function isImmersiveViewportReady(containerSize, viewportSize, tolerance = 2) {
   if (!containerSize?.width || !containerSize?.height
     || !viewportSize?.width || !viewportSize?.height) return false;

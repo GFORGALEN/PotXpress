@@ -33,6 +33,7 @@ import {
 } from '../src/utils/frontDeskMode.js';
 import {
   isImmersiveViewportReady,
+  shouldExitCanvasFocusAfterFullscreenChange,
   shouldLockCanvasPan,
   shouldUseNativeFullscreen,
 } from '../src/utils/canvasInteraction.js';
@@ -104,6 +105,25 @@ test('native fullscreen is attempted whenever the browser exposes the API', () =
   assert.equal(shouldUseNativeFullscreen({ requestFullscreen() {} }), true);
   assert.equal(shouldUseNativeFullscreen({ requestFullscreen: undefined }), false);
   assert.equal(shouldUseNativeFullscreen(), false);
+});
+
+test('native fullscreen exit also clears the focused canvas fallback', () => {
+  const fullscreenRoot = {};
+  assert.equal(shouldExitCanvasFocusAfterFullscreenChange({
+    wasNativeFullscreenActive: true,
+    fullscreenElement: null,
+    fullscreenRoot,
+  }), true);
+  assert.equal(shouldExitCanvasFocusAfterFullscreenChange({
+    wasNativeFullscreenActive: true,
+    fullscreenElement: fullscreenRoot,
+    fullscreenRoot,
+  }), false);
+  assert.equal(shouldExitCanvasFocusAfterFullscreenChange({
+    wasNativeFullscreenActive: false,
+    fullscreenElement: null,
+    fullscreenRoot,
+  }), false);
 });
 
 test('immersive fit waits for the canvas to reach the browser viewport', () => {

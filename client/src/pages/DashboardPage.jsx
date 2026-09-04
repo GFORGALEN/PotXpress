@@ -58,6 +58,7 @@ import {
 } from '../utils/timerDisplay.js';
 import { isFrontDeskMode } from '../utils/frontDeskMode.js';
 import {
+  shouldExitCanvasFocusAfterFullscreenChange,
   shouldLockCanvasPan,
   shouldUseNativeFullscreen,
 } from '../utils/canvasInteraction.js';
@@ -122,6 +123,7 @@ export function DashboardPage() {
   const pollingFailedRef = useRef(false);
   const realtimeRefreshRef = useRef(() => {});
   const fullscreenRootRef = useRef(null);
+  const nativeFullscreenActiveRef = useRef(false);
   const pendingTableClickRef = useRef(null);
   const quickStartTableIdsRef = useRef(new Set());
   const now = useSecondTick(Boolean(selectedStoreId));
@@ -178,7 +180,20 @@ export function DashboardPage() {
   useEffect(() => {
     const handleFullscreenChange = () => {
       const active = document.fullscreenElement === fullscreenRootRef.current;
+      const exitedNativeFullscreen = shouldExitCanvasFocusAfterFullscreenChange({
+        wasNativeFullscreenActive: nativeFullscreenActiveRef.current,
+        fullscreenElement: document.fullscreenElement,
+        fullscreenRoot: fullscreenRootRef.current,
+      });
+
+      nativeFullscreenActiveRef.current = active;
       setIsFullscreen(active);
+      if (exitedNativeFullscreen) {
+        // Safari's own close control exits the Fullscreen API without invoking
+        // our button handler. Clear the focused fallback too so both exit paths
+        // return to the regular dashboard in one step.
+        setCanvasFocused(false);
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
