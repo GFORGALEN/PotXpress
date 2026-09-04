@@ -100,10 +100,10 @@ test('only full-screen operations lock one-finger canvas panning', () => {
   assert.equal(shouldLockCanvasPan({ editing: true, immersive: false }), false);
 });
 
-test('touch tablets use app fullscreen to avoid native swipe-to-exit gestures', () => {
-  assert.equal(shouldUseNativeFullscreen({ maxTouchPoints: 5 }), false);
-  assert.equal(shouldUseNativeFullscreen({ coarsePointer: true }), false);
-  assert.equal(shouldUseNativeFullscreen({ maxTouchPoints: 0, coarsePointer: false }), true);
+test('native fullscreen is attempted whenever the browser exposes the API', () => {
+  assert.equal(shouldUseNativeFullscreen({ requestFullscreen() {} }), true);
+  assert.equal(shouldUseNativeFullscreen({ requestFullscreen: undefined }), false);
+  assert.equal(shouldUseNativeFullscreen(), false);
 });
 
 test('immersive fit waits for the canvas to reach the browser viewport', () => {

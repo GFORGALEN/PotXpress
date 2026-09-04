@@ -342,6 +342,7 @@ export function DashboardPage() {
   );
   const correctedNow = now + clockOffsetRef.current;
   const serverContactHealth = deriveServerContactHealth(lastServerContactAt, now);
+  const serverDisconnected = !realtime.connected || serverContactHealth.level === 'stale';
   const serverSilenceLabel = serverContactHealth.silenceSeconds >= 60
     ? `${Math.floor(serverContactHealth.silenceSeconds / 60)}分${serverContactHealth.silenceSeconds % 60}秒`
     : `${serverContactHealth.silenceSeconds}秒`;
@@ -558,16 +559,15 @@ export function DashboardPage() {
     }
 
     setCanvasFocused(true);
+    const fullscreenRoot = fullscreenRootRef.current;
     const useNativeFullscreen = shouldUseNativeFullscreen({
-      maxTouchPoints: navigator.maxTouchPoints,
-      coarsePointer: window.matchMedia?.('(pointer: coarse)').matches,
+      requestFullscreen: fullscreenRoot?.requestFullscreen,
     });
     if (!useNativeFullscreen) {
       setIsFullscreen(false);
       return;
     }
 
-    const fullscreenRoot = fullscreenRootRef.current;
     try {
       await fullscreenRoot?.requestFullscreen?.({ navigationUI: 'hide' });
     } catch {
@@ -937,51 +937,43 @@ export function DashboardPage() {
                 : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
                 canvasFocused && layoutEditor.mode === 'view' ? (
-                  <div className="absolute inset-x-0 top-0 z-40 flex h-16 items-center gap-3 border-b border-stone-300/70 bg-[#f8f6f1]/95 px-4 shadow-[0_8px_28px_-22px_rgba(28,25,23,.55)] backdrop-blur-xl sm:px-6">
+                  <>
                     <button
                       type="button"
                       onClick={toggleCanvasFocus}
-                      className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border border-stone-300 bg-white px-4 text-xs font-black text-stone-800 shadow-sm transition hover:bg-stone-50"
+                      className="absolute left-4 top-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-4 text-xs font-black text-stone-800 shadow-sm backdrop-blur transition hover:bg-stone-50"
                       aria-label="退出全屏运营"
                     >
                       <Minimize2 size={16} />退出全屏
                     </button>
-                    <div className="min-w-0 flex-1 text-center">
-                      <p className="truncate text-sm font-black tracking-tight text-ink-950 sm:text-base">
-                        {displayStoreName}
-                      </p>
-                      <p className="hidden text-[10px] font-bold text-stone-500 sm:block">
-                        点击桌台立即开始 · 双击调整时长
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3 text-right">
-                      {serverContactHealth.level === 'healthy' ? (
-                        <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black sm:inline-flex ${realtime.connected ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                          <Radio size={11} />
-                          {realtime.connected
-                            ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
-                              ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
-                              : '等待回应'}`
-                            : '重连中'}
-                        </span>
-                      ) : (
+                    <div className="absolute right-4 top-4 z-40 flex flex-col items-end gap-2">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black shadow-sm ${serverDisconnected
+                        ? 'bg-red-100 text-red-800'
+                        : serverContactHealth.level === 'warning'
+                          ? 'bg-amber-100 text-amber-900'
+                          : 'bg-emerald-100 text-emerald-800'}`}>
+                        <Radio size={11} />
+                        {serverDisconnected
+                          ? '服务器连接已断开'
+                          : serverContactHealth.level === 'warning'
+                            ? '等待服务器回应'
+                            : realtime.connected
+                          ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                            ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                            : '等待回应'}`
+                          : '重连中'}
+                      </span>
+                      {serverDisconnected ? (
                         <button
                           type="button"
                           onClick={refreshTimers}
-                          className={`hidden rounded-full px-3 py-1 text-[10px] font-black sm:inline-flex ${serverContactHealth.level === 'stale'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-amber-100 text-amber-900'}`}
+                          className="inline-flex min-h-10 items-center rounded-full border border-red-300 bg-white/95 px-4 text-xs font-black text-red-800 shadow-sm backdrop-blur transition hover:bg-red-50"
                         >
-                          {serverContactHealth.level === 'stale'
-                            ? `已 ${serverSilenceLabel} 未同步 · 点击重连`
-                            : `${serverContactHealth.staleInSeconds}秒后检查连接`}
+                          刷新连接
                         </button>
-                      )}
-                      <span className="min-w-[4.5rem] font-mono text-sm font-black tabular-nums text-stone-800">
-                        {currentTimeLabel}
-                      </span>
+                      ) : null}
                     </div>
-                  </div>
+                  </>
                 ) : (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
                   <button
