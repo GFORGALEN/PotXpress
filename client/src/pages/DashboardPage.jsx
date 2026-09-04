@@ -1080,6 +1080,7 @@ export function DashboardPage() {
                 onViewportChange={layoutEditor.setViewport}
                 onInitializeViewport={layoutEditor.initializeViewport}
                 onVisibleWorldBoundsChange={layoutEditor.setVisibleWorldBounds}
+                deviceViewId={selectedStoreId}
               />
             </div>
             )

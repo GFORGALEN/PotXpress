@@ -32,7 +32,13 @@ import {
   isFrontDeskMode,
 } from '../src/utils/frontDeskMode.js';
 import {
+  createImmersiveDeviceViewSnapshot,
+  immersiveDeviceOrientation,
+  immersiveDeviceViewStorageKey,
+  immersiveFontSizeStorageKey,
   isImmersiveViewportReady,
+  restoreImmersiveDeviceViewport,
+  shouldDecorationAffectImmersiveFit,
   shouldExitCanvasFocusAfterFullscreenChange,
   shouldLockCanvasPan,
   shouldUseNativeFullscreen,
@@ -124,6 +130,44 @@ test('native fullscreen exit also clears the focused canvas fallback', () => {
     fullscreenElement: null,
     fullscreenRoot,
   }), false);
+});
+
+test('immersive device views are stored separately by orientation', () => {
+  assert.equal(immersiveDeviceOrientation({ width: 1366, height: 768 }), 'landscape');
+  assert.equal(immersiveDeviceOrientation({ width: 768, height: 1366 }), 'portrait');
+  assert.equal(
+    immersiveDeviceViewStorageKey('store/queen', { width: 1366, height: 768 }),
+    'potxpress:immersive-view:v1:store%2Fqueen:landscape',
+  );
+  assert.equal(
+    immersiveFontSizeStorageKey('store/queen', { width: 768, height: 1366 }),
+    'potxpress:immersive-view:v1:store%2Fqueen:portrait:font-size',
+  );
+});
+
+test('immersive device view snapshots preserve camera center and zoom', () => {
+  const canvas = { virtualWidth: 4000, virtualHeight: 2550 };
+  const viewportSize = { width: 1600, height: 900 };
+  const viewport = { x: -600, y: -330, zoom: 0.8 };
+  const snapshot = createImmersiveDeviceViewSnapshot(
+    viewport,
+    viewportSize,
+    canvas,
+  );
+  assert.deepEqual(
+    restoreImmersiveDeviceViewport(snapshot, viewportSize, canvas),
+    viewport,
+  );
+  assert.equal(
+    restoreImmersiveDeviceViewport({ version: 1 }, viewportSize, canvas),
+    null,
+  );
+});
+
+test('large area backgrounds do not expand the immersive content fit', () => {
+  assert.equal(shouldDecorationAffectImmersiveFit({ type: 'area' }), false);
+  assert.equal(shouldDecorationAffectImmersiveFit({ type: 'wall' }), true);
+  assert.equal(shouldDecorationAffectImmersiveFit({ type: 'entrance' }), true);
 });
 
 test('immersive fit waits for the canvas to reach the browser viewport', () => {

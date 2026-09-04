@@ -399,6 +399,48 @@
   height: clamp(10px, min(14cqh, 12cqw), 20px);
 }
 
+/* Operational screens are viewed from farther away than the layout editor. */
+.floor-viewport--immersive:not([data-immersive-font-size="1"]) .table-node-status {
+  gap: clamp(2px, 2cqw, 6px);
+  padding: clamp(2px, 2cqh, 5px) clamp(3px, 5cqw, 10px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="2"] .table-node-status {
+  font-size: clamp(14px, min(19cqh, 15cqw), 30px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="2"] .table-node-status-icon {
+  width: clamp(14px, min(19cqh, 16cqw), 26px);
+  height: clamp(14px, min(19cqh, 16cqw), 26px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="3"] .table-node-status {
+  font-size: clamp(16px, min(24cqh, 19cqw), 38px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="3"] .table-node-status-icon {
+  width: clamp(16px, min(23cqh, 20cqw), 32px);
+  height: clamp(16px, min(23cqh, 20cqw), 32px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-status {
+  font-size: clamp(18px, min(29cqh, 23cqw), 46px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-status-icon {
+  width: clamp(18px, min(27cqh, 24cqw), 38px);
+  height: clamp(18px, min(27cqh, 24cqw), 38px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-status {
+  font-size: clamp(20px, min(34cqh, 27cqw), 54px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-status-icon {
+  width: clamp(20px, min(31cqh, 28cqw), 44px);
+  height: clamp(20px, min(31cqh, 28cqw), 44px);
+}
+
 @keyframes detail-panel-in {
   from { transform: translateY(100%); opacity: 0.7; }
   to { transform: translateY(0); opacity: 1; }

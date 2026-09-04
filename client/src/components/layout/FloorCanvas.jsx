@@ -7,23 +7,34 @@ import {
 } from 'react';
 import {
   applyNodeChanges,
-  Background,
   ReactFlow,
   SelectionMode,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  Check,
   Maximize2,
   Minus,
   Plus,
+  RotateCcw,
   ScanLine,
+  SlidersHorizontal,
+  X,
 } from 'lucide-react';
 import {
   fitViewportToBounds,
   getWorldContentBounds,
+  ratioBoundsToWorld,
   viewportToWorldBounds,
 } from '../../utils/layoutCoordinates.js';
-import { isImmersiveViewportReady } from '../../utils/canvasInteraction.js';
+import {
+  createImmersiveDeviceViewSnapshot,
+  immersiveDeviceViewStorageKey,
+  immersiveFontSizeStorageKey,
+  isImmersiveViewportReady,
+  restoreImmersiveDeviceViewport,
+  shouldDecorationAffectImmersiveFit,
+} from '../../utils/canvasInteraction.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import {
   FlowCanvasSurfaceNode,
@@ -36,6 +47,7 @@ const EMPTY_EDGES = Object.freeze([]);
 const INITIAL_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 1 });
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 4;
+const DEFAULT_IMMERSIVE_FONT_SIZE = 3;
 const CANVAS_NODE_ID = '__potx_canvas__';
 const DECORATION_PREFIX = 'decoration:';
 
@@ -79,6 +91,24 @@ function getDecorationMinimums(type) {
   return { minWidth: 70, minHeight: 35 };
 }
 
+function ImmersiveFontSizeControl({ value, onChange }) {
+  return (
+    <label className="canvas-control flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-stone-700">
+      <span className="whitespace-nowrap">字体 {value}/5</span>
+      <input
+        type="range"
+        min="1"
+        max="5"
+        step="1"
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-8 w-24 accent-ember-500"
+        aria-label="全屏桌台状态字体大小"
+      />
+    </label>
+  );
+}
+
 function ZoomControls({
   viewport,
   editing,
@@ -86,20 +116,99 @@ function ZoomControls({
   onZoom,
   onFit,
   onActualSize,
+  calibratingDeviceView,
+  hasSavedDeviceView,
+  onStartDeviceCalibration,
+  onCancelDeviceCalibration,
+  onSaveDeviceView,
+  onResetDeviceView,
+  immersiveFontSize,
+  onImmersiveFontSizeChange,
 }) {
   if (immersive && !editing) {
+    if (calibratingDeviceView) {
+      return (
+        <div
+          className="canvas-control absolute bottom-5 right-5 z-30 flex flex-wrap items-center justify-end gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-lg backdrop-blur"
+          data-canvas-control
+        >
+          <button
+            type="button"
+            onClick={() => onZoom(viewport.zoom / 1.2)}
+            className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
+            aria-label="缩小本机视图"
+          >
+            <Minus size={17} />
+          </button>
+          <span className="min-w-14 text-center font-mono text-xs font-bold tabular-nums text-ink-900">
+            {Math.round(viewport.zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => onZoom(viewport.zoom * 1.2)}
+            className="canvas-control rounded-xl p-2 text-stone-600 transition hover:bg-stone-100"
+            aria-label="放大本机视图"
+          >
+            <Plus size={17} />
+          </button>
+          <span className="mx-0.5 h-6 w-px bg-stone-200" />
+          <ImmersiveFontSizeControl
+            value={immersiveFontSize}
+            onChange={onImmersiveFontSizeChange}
+          />
+          <button
+            type="button"
+            onClick={onResetDeviceView}
+            className="canvas-control inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-black text-stone-700 transition hover:bg-stone-100"
+          >
+            <RotateCcw size={15} />自动适配
+          </button>
+          <button
+            type="button"
+            onClick={onCancelDeviceCalibration}
+            className="canvas-control inline-flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-black text-stone-700 transition hover:bg-stone-100"
+          >
+            <X size={15} />取消
+          </button>
+          <button
+            type="button"
+            onClick={onSaveDeviceView}
+            className="canvas-control inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-ink-900 px-3 text-xs font-black text-white transition hover:bg-ink-800"
+          >
+            <Check size={15} />保存本机视图
+          </button>
+        </div>
+      );
+    }
     return (
-      <button
-        type="button"
-        onClick={onFit}
-        className="canvas-control absolute bottom-5 right-5 z-30 inline-flex min-h-11 items-center gap-2 rounded-full border border-stone-200/80 bg-white/90 px-4 text-xs font-black text-stone-700 shadow-lg backdrop-blur transition hover:bg-white"
-        title="重置门店全景"
-        aria-label="重置门店全景"
+      <div
+        className="canvas-control absolute bottom-5 right-5 z-30 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/90 p-1.5 shadow-lg backdrop-blur"
         data-canvas-control
       >
-        <Maximize2 size={16} />
-        重置全景
-      </button>
+        <ImmersiveFontSizeControl
+          value={immersiveFontSize}
+          onChange={onImmersiveFontSizeChange}
+        />
+        <span className="mx-0.5 h-6 w-px bg-stone-200" />
+        <button
+          type="button"
+          onClick={onFit}
+          className="canvas-control inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-stone-700 transition hover:bg-white"
+          title="重新应用当前设备视图"
+          aria-label="重新应用当前设备视图"
+        >
+          <Maximize2 size={16} />重置全景
+        </button>
+        <button
+          type="button"
+          onClick={onStartDeviceCalibration}
+          className="canvas-control inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-stone-700 transition hover:bg-white"
+          aria-label="调整并记住本机视图"
+        >
+          <SlidersHorizontal size={16} />
+          {hasSavedDeviceView ? '调整本机视图' : '设置本机视图'}
+        </button>
+      </div>
     );
   }
 
@@ -184,11 +293,13 @@ export function FloorCanvas({
   onViewportChange,
   onInitializeViewport,
   onVisibleWorldBoundsChange,
+  deviceViewId,
 }) {
   const rootRef = useRef(null);
   const reactFlowRef = useRef(null);
   const previousImmersiveRef = useRef(immersive);
   const previousImmersiveStageRef = useRef(immersiveStage);
+  const previousDeviceViewStorageKeyRef = useRef(null);
   const immersiveFitPendingRef = useRef(false);
   const interactionRef = useRef(null);
   const dragStartRef = useRef(null);
@@ -197,6 +308,11 @@ export function FloorCanvas({
   const [flowReady, setFlowReady] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [flowNodes, setFlowNodes] = useState([]);
+  const [deviceCalibrationStart, setDeviceCalibrationStart] = useState(null);
+  const [hasSavedDeviceView, setHasSavedDeviceView] = useState(false);
+  const [immersiveFontSize, setImmersiveFontSize] = useState(
+    DEFAULT_IMMERSIVE_FONT_SIZE,
+  );
   const selectedTableIdSet = useMemo(
     () => new Set(selectedTableIds.length
       ? selectedTableIds
@@ -231,8 +347,57 @@ export function FloorCanvas({
 
   const contentBounds = useMemo(() => getWorldContentBounds([
     ...fitTables.map((table) => table.layout),
-    ...decorations,
+    // Area decorations are presentation backgrounds and can be as large as
+    // the virtual canvas. They should not make operational tables look tiny.
+    ...decorations.filter(shouldDecorationAffectImmersiveFit),
   ], canvas), [canvas, decorations, fitTables]);
+  const immersiveBounds = useMemo(() => (
+    canvas.defaultViewBounds
+      ? ratioBoundsToWorld(canvas.defaultViewBounds, canvas)
+      : contentBounds
+  ), [canvas, contentBounds]);
+  const deviceViewStorageKey = useMemo(() => (
+    immersiveDeviceViewStorageKey(deviceViewId, viewportSize)
+  ), [deviceViewId, viewportSize]);
+  const fontSizeStorageKey = useMemo(() => (
+    immersiveFontSizeStorageKey(deviceViewId, viewportSize)
+  ), [deviceViewId, viewportSize]);
+
+  const readStoredDeviceView = useCallback(() => {
+    if (!deviceViewStorageKey || typeof window === 'undefined') return null;
+    try {
+      return JSON.parse(window.localStorage.getItem(deviceViewStorageKey));
+    } catch {
+      return null;
+    }
+  }, [deviceViewStorageKey]);
+
+  useEffect(() => {
+    if (!fontSizeStorageKey || typeof window === 'undefined') {
+      setImmersiveFontSize(DEFAULT_IMMERSIVE_FONT_SIZE);
+      return;
+    }
+    try {
+      const storedValue = Number(window.localStorage.getItem(fontSizeStorageKey));
+      setImmersiveFontSize(Number.isInteger(storedValue)
+        && storedValue >= 1 && storedValue <= 5
+        ? storedValue
+        : DEFAULT_IMMERSIVE_FONT_SIZE);
+    } catch {
+      setImmersiveFontSize(DEFAULT_IMMERSIVE_FONT_SIZE);
+    }
+  }, [fontSizeStorageKey]);
+
+  const changeImmersiveFontSize = useCallback((value) => {
+    const nextValue = Math.max(1, Math.min(5, Math.round(value)));
+    setImmersiveFontSize(nextValue);
+    if (!fontSizeStorageKey || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(fontSizeStorageKey, String(nextValue));
+    } catch {
+      // The live setting still applies when persistence is unavailable.
+    }
+  }, [fontSizeStorageKey]);
 
   const applyBoundsViewport = useCallback((bounds, initialize = false) => {
     if (!viewportSize.width || !viewportSize.height) return;
@@ -254,6 +419,36 @@ export function FloorCanvas({
     applyBoundsViewport(contentBounds);
   }, [applyBoundsViewport, contentBounds]);
 
+  const fitImmersiveOverview = useCallback(() => {
+    const storedViewport = restoreImmersiveDeviceViewport(
+      readStoredDeviceView(),
+      viewportSize,
+      canvas,
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM },
+    );
+    if (storedViewport) {
+      onViewportChange?.(storedViewport);
+      return;
+    }
+    applyBoundsViewport(immersiveBounds);
+  }, [
+    applyBoundsViewport,
+    canvas,
+    immersiveBounds,
+    onViewportChange,
+    readStoredDeviceView,
+    viewportSize,
+  ]);
+
+  useEffect(() => {
+    setHasSavedDeviceView(Boolean(restoreImmersiveDeviceViewport(
+      readStoredDeviceView(),
+      viewportSize,
+      canvas,
+      { minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM },
+    )));
+  }, [canvas, readStoredDeviceView, viewportSize]);
+
   useEffect(() => {
     if (!flowReady || viewportInitialized
       || !viewportSize.width || !viewportSize.height) return;
@@ -271,13 +466,19 @@ export function FloorCanvas({
     const enteringImmersive = immersive && !previousImmersiveRef.current;
     const immersiveStageChanged = immersive
       && immersiveStage !== previousImmersiveStageRef.current;
+    const deviceOrientationChanged = immersive
+      && previousDeviceViewStorageKeyRef.current
+      && deviceViewStorageKey !== previousDeviceViewStorageKeyRef.current;
     previousImmersiveRef.current = immersive;
     previousImmersiveStageRef.current = immersiveStage;
-    if (enteringImmersive || immersiveStageChanged) {
+    previousDeviceViewStorageKeyRef.current = deviceViewStorageKey;
+    if (enteringImmersive || immersiveStageChanged || deviceOrientationChanged) {
       immersiveFitPendingRef.current = true;
+      if (deviceOrientationChanged) setDeviceCalibrationStart(null);
     }
     if (!immersive) {
       immersiveFitPendingRef.current = false;
+      setDeviceCalibrationStart(null);
       return;
     }
     if (!immersiveFitPendingRef.current || editing || !viewportInitialized) return;
@@ -292,16 +493,60 @@ export function FloorCanvas({
       height: documentElement?.clientHeight,
     })) return;
     immersiveFitPendingRef.current = false;
-    fitStoreOverview();
+    fitImmersiveOverview();
   }, [
     editing,
-    fitStoreOverview,
+    fitImmersiveOverview,
     immersive,
     immersiveStage,
+    deviceViewStorageKey,
     viewportInitialized,
     viewportSize.height,
     viewportSize.width,
   ]);
+
+  const startDeviceCalibration = useCallback(() => {
+    setDeviceCalibrationStart({ ...viewport });
+  }, [viewport]);
+
+  const cancelDeviceCalibration = useCallback(() => {
+    if (deviceCalibrationStart) {
+      onViewportChange?.(deviceCalibrationStart);
+    }
+    setDeviceCalibrationStart(null);
+  }, [deviceCalibrationStart, onViewportChange]);
+
+  const saveDeviceView = useCallback(() => {
+    if (!deviceViewStorageKey || typeof window === 'undefined') return;
+    const snapshot = createImmersiveDeviceViewSnapshot(
+      viewport,
+      viewportSize,
+      canvas,
+    );
+    if (!snapshot) return;
+    try {
+      window.localStorage.setItem(deviceViewStorageKey, JSON.stringify(snapshot));
+      setHasSavedDeviceView(true);
+      setDeviceCalibrationStart(null);
+    } catch {
+      // A private or managed browser may block local storage. Keep the current
+      // camera for this session even when it cannot be persisted.
+      setDeviceCalibrationStart(null);
+    }
+  }, [canvas, deviceViewStorageKey, viewport, viewportSize]);
+
+  const resetDeviceView = useCallback(() => {
+    if (deviceViewStorageKey && typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(deviceViewStorageKey);
+      } catch {
+        // The automatic fit still works when storage access is blocked.
+      }
+    }
+    setHasSavedDeviceView(false);
+    setDeviceCalibrationStart(null);
+    applyBoundsViewport(immersiveBounds);
+  }, [applyBoundsViewport, deviceViewStorageKey, immersiveBounds]);
 
   useEffect(() => {
     if (!viewportSize.width || !viewportSize.height) return;
@@ -778,6 +1023,7 @@ export function FloorCanvas({
         ? 'floor-viewport--immersive rounded-none border-0 shadow-none'
         : 'rounded-[1.5rem] border border-stone-200 shadow-inner'}`}
       aria-label="门店桌台布局画布"
+      data-immersive-font-size={immersive ? immersiveFontSize : undefined}
       style={{ '--potx-canvas-background': canvas.backgroundColor }}
       onTouchEnd={resetAbortedTouchDrag}
       onTouchCancel={resetAbortedTouchDrag}
@@ -813,7 +1059,8 @@ export function FloorCanvas({
         // React Flow treats touch independently from mouse-button arrays.
         // Multi-select reserves one-finger drag for the marquee. The parent
         // locks one-finger panning while full-screen operations are active.
-        panOnDrag={viewportLocked || (editing && multiSelectMode) ? false : true}
+        panOnDrag={(viewportLocked && !deviceCalibrationStart)
+          || (editing && multiSelectMode) ? false : true}
         zoomOnPinch
         zoomOnScroll
         zoomOnDoubleClick={false}
@@ -840,17 +1087,15 @@ export function FloorCanvas({
         proOptions={{ hideAttribution: true }}
         className={immersive ? 'potx-react-flow immersive' : 'potx-react-flow'}
       >
-        {immersive ? (
-          <Background
-            gap={canvas.gridSize}
-            size={1}
-            color="rgba(87, 83, 78, 0.09)"
-          />
-        ) : null}
       </ReactFlow>
       {editing && multiSelectMode ? (
         <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-violet-300 bg-violet-100/95 px-4 py-2 text-xs font-black text-violet-950 shadow-lg backdrop-blur">
           多选模式 · 拖动空白区域框选桌台
+        </div>
+      ) : null}
+      {immersive && !editing && deviceCalibrationStart ? (
+        <div className="pointer-events-none absolute left-1/2 top-5 z-30 -translate-x-1/2 rounded-full border border-sky-200 bg-white/95 px-4 py-2 text-xs font-black text-sky-900 shadow-lg backdrop-blur">
+          调整本机视图 · 拖动画布定位，双指或按钮缩放
         </div>
       ) : null}
       <ZoomControls
@@ -858,8 +1103,16 @@ export function FloorCanvas({
         editing={editing}
         immersive={immersive}
         onZoom={zoomAroundCenter}
-        onFit={fitStoreOverview}
+        onFit={immersive ? fitImmersiveOverview : fitStoreOverview}
         onActualSize={() => zoomAroundCenter(1)}
+        calibratingDeviceView={Boolean(deviceCalibrationStart)}
+        hasSavedDeviceView={hasSavedDeviceView}
+        onStartDeviceCalibration={startDeviceCalibration}
+        onCancelDeviceCalibration={cancelDeviceCalibration}
+        onSaveDeviceView={saveDeviceView}
+        onResetDeviceView={resetDeviceView}
+        immersiveFontSize={immersiveFontSize}
+        onImmersiveFontSizeChange={changeImmersiveFontSize}
       />
     </div>
   );
