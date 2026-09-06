@@ -101,7 +101,11 @@ export function EditorToolbar({ onAddTable }) {
           <div className="flex max-w-full flex-nowrap items-center gap-2 overflow-x-auto pb-1 [&>*]:shrink-0 xl:flex-wrap xl:overflow-visible xl:pb-0">
             <button
               type="button"
-              onClick={() => setMultiSelectMode((current) => !current)}
+              onClick={() => setMultiSelectMode((current) => {
+                const next = !current;
+                if (next) setSyncSelectedResize(true);
+                return next;
+              })}
               disabled={saving}
               className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 text-sm font-black transition disabled:opacity-50 ${
                 multiSelectMode
@@ -250,7 +254,7 @@ export function EditorToolbar({ onAddTable }) {
               } ${selectedTableIds.length < 2 ? 'opacity-50' : ''}`}
               title={selectedTableIds.length < 2
                 ? '请先选择至少两张桌台'
-                : '拖动任一选中桌台的缩放手柄时，整体同步缩放'}
+                : '拖动任一选中桌台的蓝色缩放手柄时，整体同步缩放'}
             >
               <Scaling size={16} />
               同步缩放

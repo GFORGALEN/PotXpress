@@ -3,8 +3,9 @@ import { NodeResizer } from '@xyflow/react';
 import { TableNode } from '../tables/TableNode.jsx';
 
 const RESIZE_HANDLE_STYLE = Object.freeze({
-  width: 32,
-  height: 32,
+  // Large enough to acquire reliably with a finger at overview zoom.
+  width: 44,
+  height: 44,
   border: 0,
   background: 'transparent',
 });

@@ -47,7 +47,7 @@ const EMPTY_EDGES = Object.freeze([]);
 const INITIAL_VIEWPORT = Object.freeze({ x: 0, y: 0, zoom: 1 });
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 4;
-const DEFAULT_IMMERSIVE_FONT_SIZE = 3;
+const DEFAULT_IMMERSIVE_FONT_SIZE = 4;
 const CANVAS_NODE_ID = '__potx_canvas__';
 const DECORATION_PREFIX = 'decoration:';
 
@@ -304,6 +304,7 @@ export function FloorCanvas({
   const interactionRef = useRef(null);
   const dragStartRef = useRef(null);
   const resizeRef = useRef(null);
+  const flowNodesRef = useRef([]);
   const marqueeSelectionRef = useRef([]);
   const [flowReady, setFlowReady] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -616,7 +617,7 @@ export function FloorCanvas({
     }
     const table = tableById.get(nodeId);
     if (!table) return;
-    const entries = syncSelectedResize
+    const entries = (syncSelectedResize || multiSelectMode)
       && selectedTableIdSet.size > 1
       && selectedTableIdSet.has(nodeId)
       ? tables
@@ -633,6 +634,7 @@ export function FloorCanvas({
     if (!selectedTableIdSet.has(nodeId)) onSelectTables?.([nodeId]);
   }, [
     decorationById,
+    multiSelectMode,
     onSelectTables,
     selectedTableIdSet,
     syncSelectedResize,
@@ -645,12 +647,18 @@ export function FloorCanvas({
     if (!resize || resize.kind !== 'table' || resize.id !== nodeId
       || resize.entries.length < 2) return;
     resize.direction = resizeDirectionLabel(params.direction);
+    resize.lastScaleX = Number.isFinite(params.width)
+      ? params.width / resize.start.width
+      : resize.lastScaleX;
+    resize.lastScaleY = Number.isFinite(params.height)
+      ? params.height / resize.start.height
+      : resize.lastScaleY;
     const preview = scaleTableSelection(
       resize.entries,
       resize.id,
       resize.direction,
-      params.width / resize.start.width,
-      params.height / resize.start.height,
+      resize.lastScaleX,
+      resize.lastScaleY,
     );
     const previewById = new Map(preview.map((entry) => [entry.tableId, entry.layout]));
     setFlowNodes((current) => current.map((node) => {
@@ -682,12 +690,20 @@ export function FloorCanvas({
       return;
     }
     if (resize.entries.length > 1) {
+      // A few touch browsers omit final dimensions on pointer release. Reuse
+      // the last valid preview so the selected tables do not snap back.
+      const scaleX = Number.isFinite(params.width)
+        ? params.width / resize.start.width
+        : resize.lastScaleX ?? 1;
+      const scaleY = Number.isFinite(params.height)
+        ? params.height / resize.start.height
+        : resize.lastScaleY ?? 1;
       const nextLayouts = scaleTableSelection(
         resize.entries,
         resize.id,
         resize.direction,
-        params.width / resize.start.width,
-        params.height / resize.start.height,
+        scaleX,
+        scaleY,
       );
       onResizeSelectedTables?.(resize.id, nextLayouts);
       return;
@@ -743,7 +759,7 @@ export function FloorCanvas({
   }, [canvas.virtualHeight, canvas.virtualWidth, tables]);
 
   const getTableResizeLimits = useCallback((table) => {
-    const entries = syncSelectedResize
+    const entries = (syncSelectedResize || multiSelectMode)
       && selectedTableIdSet.size > 1
       && selectedTableIdSet.has(table.tableId)
       ? tables.filter((item) => selectedTableIdSet.has(item.tableId))
@@ -778,7 +794,7 @@ export function FloorCanvas({
           * table.layout.height / entry.layout.height
       ))),
     };
-  }, [canvas, selectedTableIdSet, syncSelectedResize, tables]);
+  }, [canvas, multiSelectMode, selectedTableIdSet, syncSelectedResize, tables]);
 
   const sourceNodes = useMemo(() => [
     {
@@ -887,6 +903,10 @@ export function FloorCanvas({
     });
   }, [sourceNodes]);
 
+  useEffect(() => {
+    flowNodesRef.current = flowNodes;
+  }, [flowNodes]);
+
   const handleNodesChange = useCallback((changes) => {
     setFlowNodes((current) => applyNodeChanges(
       changes.filter((change) => (
@@ -975,10 +995,13 @@ export function FloorCanvas({
 
   const handlePaneClick = useCallback(() => {
     if (!editing) return;
+    // Preserve an in-progress tablet selection when a finger lands just
+    // outside a table. Marquee selection can still deliberately replace it.
+    if (multiSelectMode) return;
     onSelectTables?.([]);
     onSelectTable?.(null);
     onSelectDecoration?.(null);
-  }, [editing, onSelectDecoration, onSelectTable, onSelectTables]);
+  }, [editing, multiSelectMode, onSelectDecoration, onSelectTable, onSelectTables]);
 
   const handlePaneContextMenu = useCallback((event) => {
     if (!onCanvasContextMenu || !reactFlowRef.current) return;
@@ -1010,11 +1033,28 @@ export function FloorCanvas({
   const resetAbortedTouchDrag = useCallback(() => {
     requestAnimationFrame(() => {
       if (interactionRef.current !== 'drag') return;
+      const start = dragStartRef.current;
+      const node = start && flowNodesRef.current.find((item) => (
+        item.id === (start.kind === 'decoration'
+          ? decorationNodeId(start.id)
+          : start.id)
+      ));
       interactionRef.current = null;
       dragStartRef.current = null;
-      setFlowNodes(sourceNodes);
+      if (!start || !node) {
+        setFlowNodes(sourceNodes);
+        return;
+      }
+      const deltaX = node.position.x - start.x;
+      const deltaY = node.position.y - start.y;
+      if (Math.hypot(deltaX, deltaY) <= 0.000001) return;
+      if (start.kind === 'decoration') {
+        onUpdateDecoration?.(start.id, node.position);
+      } else {
+        onMoveSelectedTables?.(start.id, deltaX, deltaY);
+      }
     });
-  }, [sourceNodes]);
+  }, [onMoveSelectedTables, onUpdateDecoration, sourceNodes]);
 
   return (
     <div
@@ -1089,8 +1129,8 @@ export function FloorCanvas({
       >
       </ReactFlow>
       {editing && multiSelectMode ? (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-violet-300 bg-violet-100/95 px-4 py-2 text-xs font-black text-violet-950 shadow-lg backdrop-blur">
-          多选模式 · 拖动空白区域框选桌台
+        <div className="pointer-events-none absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full border border-violet-300 bg-violet-100/95 px-4 py-2 text-sm font-black text-violet-950 shadow-lg backdrop-blur">
+          已选 {selectedTableIdSet.size} 张 · 点击桌台增减选择 · 拖动空白处框选 · 拖动蓝点整体缩放
         </div>
       ) : null}
       {immersive && !editing && deviceCalibrationStart ? (

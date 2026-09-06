@@ -215,7 +215,7 @@
 
 /*
  * A single, predictable corner grip avoids four tablet-sized controls
- * overlapping small nodes at an overview zoom. The transparent 32px box is
+ * overlapping small nodes at an overview zoom. The transparent 44px box is
  * the touch target; the smaller inner dot is the visual affordance.
  */
 .potx-react-flow .potx-resize-handle:not(.bottom.right) {
@@ -230,6 +230,18 @@
   background: #0284c7;
   box-shadow: 0 2px 8px rgb(15 23 42 / 0.32);
   content: '';
+}
+
+@media (pointer: coarse) {
+  .potx-react-flow .potx-resize-handle.bottom.right::after {
+    inset: 9px;
+    border-width: 4px;
+  }
+
+  .potx-react-flow .react-flow__selection,
+  .potx-react-flow .react-flow__nodesselection-rect {
+    border-width: 4px;
+  }
 }
 
 /*
@@ -441,6 +453,21 @@
   height: clamp(20px, min(31cqh, 28cqw), 44px);
 }
 
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-name,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-name {
+  font-size: clamp(20px, min(34cqh, 25cqw), 48px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-duration,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-duration {
+  font-size: clamp(18px, min(28cqh, 20cqw), 44px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-time,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-time {
+  font-size: clamp(10px, min(11cqh, 8cqw), 18px);
+}
+
 @keyframes detail-panel-in {
   from { transform: translateY(100%); opacity: 0.7; }
   to { transform: translateY(0); opacity: 1; }
@@ -462,7 +489,7 @@
   margin-top: 2px;
   font-size: 8px;
   margin-top: clamp(1px, 2cqh, 4px);
-  font-size: clamp(6px, min(7cqh, 5cqw), 10px);
+  font-size: clamp(8px, min(9cqh, 7cqw), 14px);
 }
 
 @container (min-width: 120px) and (min-height: 74px) {

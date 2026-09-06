@@ -800,7 +800,7 @@ export function DashboardPage() {
         ? 'flex h-full min-h-0 w-full max-w-none flex-col bg-canvas'
         : frontDeskMode
           ? 'flex h-full min-h-0 w-full flex-col gap-2 bg-canvas'
-          : 'mx-auto flex max-w-[110rem] flex-col gap-4 bg-canvas'}
+          : 'flex w-full max-w-none flex-col gap-4 bg-canvas'}
     >
       <section className={`relative flex shrink-0 flex-col justify-between gap-3 overflow-hidden border border-[#eadb62]/70 bg-[#fff8c7] text-ink-950 shadow-[0_20px_44px_-30px_rgba(80,70,20,.35)] sm:flex-row sm:items-center ${frontDeskMode ? 'rounded-2xl px-4 py-3 sm:px-5' : 'rounded-[1.75rem] px-5 py-4 sm:px-6'}`}>
         <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/55 blur-3xl" />
@@ -949,7 +949,7 @@ export function DashboardPage() {
               ? 'fullscreen-canvas-shell fixed inset-0 z-50 min-h-0 overflow-hidden bg-[#f2f0ea]'
               : frontDeskMode
                 ? 'relative min-h-80 flex-1'
-                : 'relative h-[clamp(38rem,calc(100vh-16rem),68rem)] min-h-0'}>
+                : 'relative h-[clamp(38rem,calc(100dvh-12rem),80rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
                 canvasFocused && layoutEditor.mode === 'view' ? (
                   <>

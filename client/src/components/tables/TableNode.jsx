@@ -165,8 +165,11 @@ export const TableNode = memo(function TableNode({
               <StatusIcon className="table-node-status-icon shrink-0" size={11} />
               <span className="truncate">{TIMER_STATUS_LABELS[status]}</span>
             </span>
-            <span className="table-node-time max-w-full truncate font-semibold opacity-60">
-              {formatStoreTime(startTime, timezone)} → {formatStoreTime(effectiveEndTime, timezone)}
+            <span
+              className="table-node-time max-w-full truncate font-bold opacity-70"
+              title={`开始 ${formatStoreTime(startTime, timezone)} · 预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}
+            >
+              预计 {formatStoreTime(effectiveEndTime, timezone)}
             </span>
           </>
         )}
