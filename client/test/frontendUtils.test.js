@@ -603,6 +603,23 @@ test('viewport fit supports a reserved immersive header inset', () => {
   assert.equal(fitted.y, 150);
 });
 
+test('immersive viewport can top-align wide content without cropping it', () => {
+  const bounds = { x: 100, y: 200, width: 2000, height: 900 };
+  const fitted = fitViewportToBounds(bounds, { width: 1280, height: 960 }, {
+    padding: { top: 112, right: 24, bottom: 104, left: 24 },
+    alignY: 'start',
+  });
+
+  assert.equal(fitted.zoom, 0.616);
+  assert.equal(fitted.x, -37.6);
+  assert.ok(Math.abs(fitted.y - (-11.2)) < 0.000001);
+  assert.ok(Math.abs(bounds.y * fitted.zoom + fitted.y - 112) < 0.000001);
+  assert.ok(bounds.x * fitted.zoom + fitted.x >= 24);
+  assert.ok(
+    (bounds.x + bounds.width) * fitted.zoom + fitted.x <= 1280 - 24,
+  );
+});
+
 test('default display range reports tables outside it', () => {
   const bounds = { x: 100, y: 100, width: 800, height: 500 };
   assert.equal(isLayoutInsideBounds({

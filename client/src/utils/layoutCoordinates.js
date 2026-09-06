@@ -149,7 +149,13 @@ export function getWorldContentBounds(items, canvas, paddingRatio = 0.025) {
 export function fitViewportToBounds(
   bounds,
   viewportSize,
-  { padding = 24, minZoom = 0.05, maxZoom = 4 } = {},
+  {
+    padding = 24,
+    minZoom = 0.05,
+    maxZoom = 4,
+    alignX = 'center',
+    alignY = 'center',
+  } = {},
 ) {
   const insets = typeof padding === 'number'
     ? { top: padding, right: padding, bottom: padding, left: padding }
@@ -172,11 +178,19 @@ export function fitViewportToBounds(
     availableHeight / Math.max(1, bounds.height),
   ), minZoom, maxZoom);
 
+  const horizontalSlack = availableWidth - bounds.width * zoom;
+  const verticalSlack = availableHeight - bounds.height * zoom;
+  const alignmentOffset = (alignment, slack) => {
+    if (alignment === 'start') return 0;
+    if (alignment === 'end') return slack;
+    return slack / 2;
+  };
+
   return {
-    x: insets.left + availableWidth / 2
-      - (bounds.x + bounds.width / 2) * zoom,
-    y: insets.top + availableHeight / 2
-      - (bounds.y + bounds.height / 2) * zoom,
+    x: insets.left + alignmentOffset(alignX, horizontalSlack)
+      - bounds.x * zoom,
+    y: insets.top + alignmentOffset(alignY, verticalSlack)
+      - bounds.y * zoom,
     zoom,
   };
 }

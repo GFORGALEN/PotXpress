@@ -299,6 +299,7 @@ export function FloorCanvas({
   const reactFlowRef = useRef(null);
   const previousImmersiveRef = useRef(immersive);
   const previousImmersiveStageRef = useRef(immersiveStage);
+  const previousImmersiveViewportSizeRef = useRef({ width: 0, height: 0 });
   const previousDeviceViewStorageKeyRef = useRef(null);
   const immersiveFitPendingRef = useRef(false);
   const interactionRef = useRef(null);
@@ -406,8 +407,12 @@ export function FloorCanvas({
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
       padding: immersive && !editing
-        ? { top: 88, right: 40, bottom: 40, left: 40 }
+        ? { top: 112, right: 24, bottom: 104, left: 24 }
         : 32,
+      // A wide restaurant floor fitted into a 4:3 tablet leaves vertical
+      // slack. Keep it beneath the fullscreen controls instead of centering
+      // it into a large, visually empty band at the top.
+      alignY: immersive && !editing ? 'start' : 'center',
     });
     if (initialize) {
       onInitializeViewport?.(nextViewport);
@@ -470,10 +475,18 @@ export function FloorCanvas({
     const deviceOrientationChanged = immersive
       && previousDeviceViewStorageKeyRef.current
       && deviceViewStorageKey !== previousDeviceViewStorageKeyRef.current;
+    const previousSize = previousImmersiveViewportSizeRef.current;
+    const immersiveViewportResized = immersive
+      && previousSize.width > 0
+      && previousSize.height > 0
+      && (Math.abs(viewportSize.width - previousSize.width) > 2
+        || Math.abs(viewportSize.height - previousSize.height) > 2);
     previousImmersiveRef.current = immersive;
     previousImmersiveStageRef.current = immersiveStage;
     previousDeviceViewStorageKeyRef.current = deviceViewStorageKey;
-    if (enteringImmersive || immersiveStageChanged || deviceOrientationChanged) {
+    previousImmersiveViewportSizeRef.current = viewportSize;
+    if (enteringImmersive || immersiveStageChanged
+      || deviceOrientationChanged || immersiveViewportResized) {
       immersiveFitPendingRef.current = true;
       if (deviceOrientationChanged) setDeviceCalibrationStart(null);
     }
