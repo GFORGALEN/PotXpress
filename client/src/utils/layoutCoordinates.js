@@ -151,6 +151,91 @@ export function getWorldContentBounds(items, canvas, paddingRatio = 0.025) {
   };
 }
 
+/**
+ * Build a display-only Y-axis projection that spreads a wide floor plan over
+ * a taller fullscreen viewport. Only positions move; table dimensions stay
+ * unchanged, so round tables remain round and saved layouts are untouched.
+ */
+export function createVerticalFillProjection(
+  items,
+  viewportSize,
+  {
+    padding = 8,
+    maxPositionScale = 2.5,
+    maxBottom = Infinity,
+  } = {},
+) {
+  if (!items?.length || !viewportSize?.width || !viewportSize?.height) {
+    return { originY: 0, positionScale: 1 };
+  }
+  const bounds = items.reduce((result, item) => ({
+    left: Math.min(result.left, item.x),
+    top: Math.min(result.top, item.y),
+    right: Math.max(result.right, item.x + item.width),
+    bottom: Math.max(result.bottom, item.y + item.height),
+  }), {
+    left: Infinity,
+    top: Infinity,
+    right: -Infinity,
+    bottom: -Infinity,
+  });
+  const insets = typeof padding === 'number'
+    ? { top: padding, right: padding, bottom: padding, left: padding }
+    : {
+      top: padding.top ?? padding.y ?? 0,
+      right: padding.right ?? padding.x ?? 0,
+      bottom: padding.bottom ?? padding.y ?? 0,
+      left: padding.left ?? padding.x ?? 0,
+    };
+  const availableWidth = Math.max(
+    1,
+    viewportSize.width - insets.left - insets.right,
+  );
+  const availableHeight = Math.max(
+    1,
+    viewportSize.height - insets.top - insets.bottom,
+  );
+  const width = Math.max(1, bounds.right - bounds.left);
+  const currentHeight = Math.max(1, bounds.bottom - bounds.top);
+  const widthFitZoom = availableWidth / width;
+  const requestedHeight = Math.min(
+    availableHeight / widthFitZoom,
+    Math.max(currentHeight, maxBottom - bounds.top),
+  );
+  if (requestedHeight <= currentHeight + 0.000001) {
+    return { originY: bounds.top, positionScale: 1 };
+  }
+
+  const bottomAtScale = (positionScale) => Math.max(...items.map((item) => (
+    bounds.top + (item.y - bounds.top) * positionScale + item.height
+  )));
+  const cappedScale = Math.max(1, maxPositionScale);
+  const targetBottom = Math.min(
+    bounds.top + requestedHeight,
+    bottomAtScale(cappedScale),
+  );
+  let low = 1;
+  let high = cappedScale;
+  for (let iteration = 0; iteration < 40; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (bottomAtScale(middle) < targetBottom) low = middle;
+    else high = middle;
+  }
+  return {
+    originY: bounds.top,
+    positionScale: (low + high) / 2,
+  };
+}
+
+export function projectLayoutVertically(layout, projection) {
+  if (!projection || projection.positionScale === 1) return layout;
+  return {
+    ...layout,
+    y: projection.originY
+      + (layout.y - projection.originY) * projection.positionScale,
+  };
+}
+
 export function fitViewportToBounds(
   bounds,
   viewportSize,

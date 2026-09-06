@@ -19,9 +19,11 @@ import {
 } from '../src/utils/layoutEditor.js';
 import {
   apiLayoutToWorld,
+  createVerticalFillProjection,
   fitViewportToBounds,
   getWorldContentBounds,
   isLayoutInsideBounds,
+  projectLayoutVertically,
   ratioBoundsToWorld,
   viewportToWorldBounds,
   worldBoundsToRatios,
@@ -141,7 +143,7 @@ test('immersive device views are stored separately by orientation', () => {
   assert.equal(immersiveDeviceOrientation({ width: 768, height: 1366 }), 'portrait');
   assert.equal(
     immersiveDeviceViewStorageKey('store/queen', { width: 1366, height: 768 }),
-    'potxpress:immersive-view:v2:store%2Fqueen:landscape',
+    'potxpress:immersive-view:v3:store%2Fqueen:landscape',
   );
   assert.equal(
     immersiveFontSizeStorageKey('store/queen', { width: 768, height: 1366 }),
@@ -678,6 +680,51 @@ test('tablet fullscreen fit keeps only aspect-ratio slack below the tables', () 
   assert.ok(Math.abs(right - (viewportSize.width - 8)) < 0.000001);
   assert.ok(Math.abs(top - 8) < 0.000001);
   assert.ok(bottom < viewportSize.height - 8);
+});
+
+test('tablet vertical projection fills height without resizing table shapes', () => {
+  const layouts = [
+    { x: 100, y: 200, width: 300, height: 100 },
+    { x: 900, y: 700, width: 200, height: 100 },
+  ];
+  const viewportSize = { width: 1280, height: 960 };
+  const projection = createVerticalFillProjection(layouts, viewportSize, {
+    padding: 8,
+  });
+  const projected = layouts.map((layout) => (
+    projectLayoutVertically(layout, projection)
+  ));
+  const bounds = {
+    x: 100,
+    y: 200,
+    width: 1000,
+    height: projected[1].y + projected[1].height - 200,
+  };
+  const fitted = fitViewportToBounds(bounds, viewportSize, { padding: 8 });
+
+  assert.ok(projection.positionScale > 1);
+  assert.equal(projected[0].y, layouts[0].y);
+  assert.equal(projected[0].width, layouts[0].width);
+  assert.equal(projected[0].height, layouts[0].height);
+  assert.equal(projected[1].width, layouts[1].width);
+  assert.equal(projected[1].height, layouts[1].height);
+  assert.ok(Math.abs(bounds.y * fitted.zoom + fitted.y - 8) < 0.000001);
+  assert.ok(Math.abs(
+    (bounds.y + bounds.height) * fitted.zoom + fitted.y
+      - (viewportSize.height - 8),
+  ) < 0.000001);
+});
+
+test('vertical fill projection leaves layouts unchanged when height already fits', () => {
+  const layout = { x: 100, y: 200, width: 800, height: 700 };
+  const projection = createVerticalFillProjection(
+    [layout],
+    { width: 1600, height: 900 },
+    { padding: 8 },
+  );
+
+  assert.equal(projection.positionScale, 1);
+  assert.equal(projectLayoutVertically(layout, projection), layout);
 });
 
 test('immersive viewport can top-align wide content without cropping it', () => {

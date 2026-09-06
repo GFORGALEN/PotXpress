@@ -30,10 +30,9 @@ export function immersiveDeviceViewStorageKey(storeId, viewportSize) {
   return [
     'potxpress',
     'immersive-view',
-    // v2 invalidates cameras saved before the tablet tight-fit behaviour.
-    // Those absolute zoom values can otherwise keep restoring the old blank
-    // bands even after the automatic fit has been corrected.
-    'v2',
+    // v3 invalidates cameras saved before responsive vertical distribution.
+    // Restoring an old absolute camera would bring back the empty lower band.
+    'v3',
     encodeURIComponent(storeId),
     immersiveDeviceOrientation(viewportSize),
   ].join(':');

@@ -22,8 +22,10 @@ import {
   X,
 } from 'lucide-react';
 import {
+  createVerticalFillProjection,
   fitViewportToBounds,
   getWorldContentBounds,
+  projectLayoutVertically,
   ratioBoundsToWorld,
   viewportToWorldBounds,
 } from '../../utils/layoutCoordinates.js';
@@ -393,14 +395,37 @@ export function FloorCanvas({
       ? ratioBoundsToWorld(canvas.defaultViewBounds, canvas)
       : contentBounds
   ), [canvas, contentBounds]);
-  // Fullscreen operations prioritise every real table and nothing else. A
-  // desktop-saved viewport or a remote decoration must not shrink the tables
-  // on a 4:3 tablet. Decorations inside this tight table box still render.
+  const verticalFillProjection = useMemo(() => (
+    immersive && !editing
+      ? createVerticalFillProjection(
+        fitTables.map((table) => table.layout),
+        viewportSize,
+        { padding: 8, maxBottom: canvas.virtualHeight },
+      )
+      : { originY: 0, positionScale: 1 }
+  ), [
+    canvas.virtualHeight,
+    editing,
+    fitTables,
+    immersive,
+    viewportSize,
+  ]);
+  const displayLayoutByTableId = useMemo(() => new Map(
+    fitTables.map((table) => [
+      table.tableId,
+      projectLayoutVertically(table.layout, verticalFillProjection),
+    ]),
+  ), [fitTables, verticalFillProjection]);
+  const tableDisplayLayout = useCallback((table) => (
+    displayLayoutByTableId.get(table.tableId) ?? table.layout
+  ), [displayLayoutByTableId]);
+  // Fullscreen operations fit against display-projected tables. This keeps
+  // persisted coordinates intact while distributing rows over a 4:3 tablet.
   const immersiveBounds = useMemo(() => getWorldContentBounds(
-    fitTables.map((table) => table.layout),
+    fitTables.map((table) => tableDisplayLayout(table)),
     canvas,
     0,
-  ), [canvas, fitTables]);
+  ), [canvas, fitTables, tableDisplayLayout]);
   const deviceViewStorageKey = useMemo(() => (
     immersiveDeviceViewStorageKey(deviceViewId, viewportSize)
   ), [deviceViewId, viewportSize]);
@@ -450,9 +475,6 @@ export function FloorCanvas({
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
       padding: immersive && !editing ? 8 : 32,
-      // A wide restaurant floor fitted into a 4:3 tablet leaves vertical
-      // slack. Keep it beneath the fullscreen controls instead of centering
-      // it into a large, visually empty band at the top.
       alignY: immersive && !editing ? 'start' : 'center',
     });
     if (initialize) {
@@ -794,6 +816,7 @@ export function FloorCanvas({
   const groupNodes = useMemo(() => {
     const groups = new Map();
     for (const table of tables) {
+      const displayLayout = tableDisplayLayout(table);
       if (!table.groupId) continue;
       const current = groups.get(table.groupId) ?? {
         id: table.groupId,
@@ -803,10 +826,10 @@ export function FloorCanvas({
         right: -Infinity,
         bottom: -Infinity,
       };
-      current.left = Math.min(current.left, table.layout.x);
-      current.top = Math.min(current.top, table.layout.y);
-      current.right = Math.max(current.right, table.layout.x + table.layout.width);
-      current.bottom = Math.max(current.bottom, table.layout.y + table.layout.height);
+      current.left = Math.min(current.left, displayLayout.x);
+      current.top = Math.min(current.top, displayLayout.y);
+      current.right = Math.max(current.right, displayLayout.x + displayLayout.width);
+      current.bottom = Math.max(current.bottom, displayLayout.y + displayLayout.height);
       groups.set(table.groupId, current);
     }
     return [...groups.values()].map((group) => {
@@ -828,7 +851,7 @@ export function FloorCanvas({
         data: { name: group.name },
       };
     });
-  }, [canvas.virtualHeight, canvas.virtualWidth, tables]);
+  }, [canvas.virtualHeight, canvas.virtualWidth, tableDisplayLayout, tables]);
 
   const getTableResizeLimits = useCallback((table) => {
     const entries = (syncSelectedResize || multiSelectMode)
@@ -884,10 +907,11 @@ export function FloorCanvas({
     ...groupNodes,
     ...decorations.map((item) => {
       const minimums = getDecorationMinimums(item.type);
+      const displayItem = projectLayoutVertically(item, verticalFillProjection);
       return {
         id: decorationNodeId(item.id),
         type: item.type,
-        position: { x: item.x, y: item.y },
+        position: { x: displayItem.x, y: displayItem.y },
         width: item.width,
         height: item.height,
         zIndex: item.zIndex,
@@ -912,35 +936,38 @@ export function FloorCanvas({
         },
       };
     }),
-    ...tables.map((table) => ({
-      id: table.tableId,
-      type: 'table',
-      position: { x: table.layout.x, y: table.layout.y },
-      width: table.layout.width,
-      height: table.layout.height,
-      // Keep resize handles above neighbouring nodes without changing the
-      // persisted floor-plan layer order.
-      zIndex: editing && selectedTableIdSet.has(table.tableId)
-        ? selectedZBase + Math.max(0, Number(table.layout.zIndex) || 0)
-        : table.layout.zIndex,
-      draggable: editing,
-      selectable: editing,
-      focusable: true,
-      selected: editing && selectedTableIdSet.has(table.tableId),
-      data: {
-        table,
-        editing,
-        uiSelected: selectedTableIdSet.has(table.tableId),
-        timezone,
-        ...getTableResizeLimits(table),
-        onActivate: handleTableActivate,
-        onDoubleActivate: handleTableDoubleActivate,
-        onTableContextMenu,
-        onResizeStart: handleResizeStart,
-        onResize: handleResize,
-        onResizeEnd: handleResizeEnd,
-      },
-    })),
+    ...tables.map((table) => {
+      const displayLayout = tableDisplayLayout(table);
+      return {
+        id: table.tableId,
+        type: 'table',
+        position: { x: displayLayout.x, y: displayLayout.y },
+        width: displayLayout.width,
+        height: displayLayout.height,
+        // Keep resize handles above neighbouring nodes without changing the
+        // persisted floor-plan layer order.
+        zIndex: editing && selectedTableIdSet.has(table.tableId)
+          ? selectedZBase + Math.max(0, Number(table.layout.zIndex) || 0)
+          : table.layout.zIndex,
+        draggable: editing,
+        selectable: editing,
+        focusable: true,
+        selected: editing && selectedTableIdSet.has(table.tableId),
+        data: {
+          table,
+          editing,
+          uiSelected: selectedTableIdSet.has(table.tableId),
+          timezone,
+          ...getTableResizeLimits(table),
+          onActivate: handleTableActivate,
+          onDoubleActivate: handleTableDoubleActivate,
+          onTableContextMenu,
+          onResizeStart: handleResizeStart,
+          onResize: handleResize,
+          onResizeEnd: handleResizeEnd,
+        },
+      };
+    }),
   ], [
     canvas,
     decorations,
@@ -958,8 +985,10 @@ export function FloorCanvas({
     selectedDecorationId,
     selectedTableIdSet,
     selectedZBase,
+    tableDisplayLayout,
     tables,
     timezone,
+    verticalFillProjection,
   ]);
 
   useEffect(() => {
