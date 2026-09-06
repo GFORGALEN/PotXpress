@@ -20,6 +20,7 @@ import {
 import {
   apiLayoutToWorld,
   fitViewportToBounds,
+  getWorldContentBounds,
   isLayoutInsideBounds,
   ratioBoundsToWorld,
   viewportToWorldBounds,
@@ -36,12 +37,15 @@ import {
   immersiveDeviceOrientation,
   immersiveDeviceViewStorageKey,
   immersiveFontSizeStorageKey,
+  interactionPointerId,
   isImmersiveViewportReady,
   restoreImmersiveDeviceViewport,
   shouldDecorationAffectImmersiveFit,
   shouldExitCanvasFocusAfterFullscreenChange,
   shouldLockCanvasPan,
+  shouldRecoverAbortedInteraction,
   shouldUseNativeFullscreen,
+  updateMarqueeSelectionIds,
 } from '../src/utils/canvasInteraction.js';
 import { deriveServerContactHealth } from '../src/utils/connectionHealth.js';
 
@@ -137,12 +141,54 @@ test('immersive device views are stored separately by orientation', () => {
   assert.equal(immersiveDeviceOrientation({ width: 768, height: 1366 }), 'portrait');
   assert.equal(
     immersiveDeviceViewStorageKey('store/queen', { width: 1366, height: 768 }),
-    'potxpress:immersive-view:v1:store%2Fqueen:landscape',
+    'potxpress:immersive-view:v2:store%2Fqueen:landscape',
   );
   assert.equal(
     immersiveFontSizeStorageKey('store/queen', { width: 768, height: 1366 }),
     'potxpress:immersive-view:v1:store%2Fqueen:portrait:font-size',
   );
+});
+
+test('marquee selection changes are captured synchronously for table ids', () => {
+  const tableIds = new Set(['table-1', 'table-2']);
+  assert.deepEqual(updateMarqueeSelectionIds(
+    ['table-1'],
+    [{ type: 'select', id: 'table-2', selected: true }],
+    tableIds,
+  ), ['table-1', 'table-2']);
+  assert.deepEqual(updateMarqueeSelectionIds(
+    ['table-1'],
+    [
+      { type: 'select', id: 'table-1', selected: false },
+      { type: 'select', id: 'decoration:wall', selected: true },
+      { type: 'select', id: 'table-2', selected: true },
+      { type: 'position', id: 'table-2', position: { x: 1, y: 1 } },
+    ],
+    tableIds,
+  ), ['table-2']);
+});
+
+test('touch recovery only responds to the active gesture ending', () => {
+  assert.equal(interactionPointerId({ pointerId: 7 }), 7);
+  assert.equal(interactionPointerId({
+    sourceEvent: { changedTouches: [{ identifier: 9 }] },
+  }), 9);
+  assert.equal(shouldRecoverAbortedInteraction({
+    type: 'pointercancel', pointerId: 8, isPrimary: false,
+  }, 7), false);
+  assert.equal(shouldRecoverAbortedInteraction({
+    type: 'pointercancel', pointerId: 7, isPrimary: true,
+  }, 7), true);
+  assert.equal(shouldRecoverAbortedInteraction({
+    type: 'touchend',
+    changedTouches: [{ identifier: 8 }],
+    touches: [{ identifier: 7 }],
+  }, 7), false);
+  assert.equal(shouldRecoverAbortedInteraction({
+    type: 'touchend',
+    changedTouches: [{ identifier: 8 }],
+    touches: [],
+  }, 7), true);
 });
 
 test('immersive device view snapshots preserve camera center and zoom', () => {
@@ -601,6 +647,37 @@ test('viewport fit supports a reserved immersive header inset', () => {
   assert.equal(fitted.zoom, 1.1);
   assert.equal(fitted.x, 50);
   assert.equal(fitted.y, 150);
+});
+
+test('tablet fullscreen bounds can be exactly tight around every table', () => {
+  const canvas = { virtualWidth: 4000, virtualHeight: 2550 };
+  assert.deepEqual(getWorldContentBounds([
+    { x: 100, y: 200, width: 300, height: 150 },
+    { x: 900, y: 600, width: 200, height: 100 },
+  ], canvas, 0), {
+    x: 100,
+    y: 200,
+    width: 1000,
+    height: 500,
+  });
+});
+
+test('tablet fullscreen fit keeps only aspect-ratio slack below the tables', () => {
+  const bounds = { x: 100, y: 200, width: 2000, height: 900 };
+  const viewportSize = { width: 1280, height: 960 };
+  const fitted = fitViewportToBounds(bounds, viewportSize, {
+    padding: 8,
+    alignY: 'start',
+  });
+  const left = bounds.x * fitted.zoom + fitted.x;
+  const right = (bounds.x + bounds.width) * fitted.zoom + fitted.x;
+  const top = bounds.y * fitted.zoom + fitted.y;
+  const bottom = (bounds.y + bounds.height) * fitted.zoom + fitted.y;
+
+  assert.ok(Math.abs(left - 8) < 0.000001);
+  assert.ok(Math.abs(right - (viewportSize.width - 8)) < 0.000001);
+  assert.ok(Math.abs(top - 8) < 0.000001);
+  assert.ok(bottom < viewportSize.height - 8);
 });
 
 test('immersive viewport can top-align wide content without cropping it', () => {

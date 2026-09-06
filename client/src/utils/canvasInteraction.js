@@ -30,15 +30,63 @@ export function immersiveDeviceViewStorageKey(storeId, viewportSize) {
   return [
     'potxpress',
     'immersive-view',
-    'v1',
+    // v2 invalidates cameras saved before the tablet tight-fit behaviour.
+    // Those absolute zoom values can otherwise keep restoring the old blank
+    // bands even after the automatic fit has been corrected.
+    'v2',
     encodeURIComponent(storeId),
     immersiveDeviceOrientation(viewportSize),
   ].join(':');
 }
 
+export function updateMarqueeSelectionIds(
+  currentIds = [],
+  changes = [],
+  selectableIds,
+) {
+  const nextIds = new Set(currentIds);
+  for (const change of changes) {
+    if (change.type !== 'select'
+      || (selectableIds && !selectableIds.has(change.id))) continue;
+    if (change.selected) nextIds.add(change.id);
+    else nextIds.delete(change.id);
+  }
+  return [...nextIds];
+}
+
+export function interactionPointerId(event) {
+  const sourceEvent = event?.sourceEvent ?? event?.nativeEvent ?? event;
+  if (Number.isFinite(sourceEvent?.pointerId)) return sourceEvent.pointerId;
+  const touch = sourceEvent?.changedTouches?.[0] ?? sourceEvent?.touches?.[0];
+  return Number.isFinite(touch?.identifier) ? touch.identifier : null;
+}
+
+export function shouldRecoverAbortedInteraction(event, activePointerId) {
+  const sourceEvent = event?.nativeEvent ?? event;
+  if (sourceEvent?.type === 'touchend') {
+    // A second finger ending must not terminate the first finger's drag.
+    return (sourceEvent.touches?.length ?? 0) === 0;
+  }
+  const eventPointerId = interactionPointerId(sourceEvent);
+  if (activePointerId !== null && activePointerId !== undefined
+    && eventPointerId !== null) {
+    return eventPointerId === activePointerId;
+  }
+  return sourceEvent?.isPrimary !== false;
+}
+
 export function immersiveFontSizeStorageKey(storeId, viewportSize) {
-  const deviceViewKey = immersiveDeviceViewStorageKey(storeId, viewportSize);
-  return deviceViewKey ? `${deviceViewKey}:font-size` : null;
+  if (!storeId) return null;
+  // Font size is independent of camera geometry. Keep the existing key so a
+  // camera migration does not discard the operator's readability setting.
+  return [
+    'potxpress',
+    'immersive-view',
+    'v1',
+    encodeURIComponent(storeId),
+    immersiveDeviceOrientation(viewportSize),
+    'font-size',
+  ].join(':');
 }
 
 export function createImmersiveDeviceViewSnapshot(

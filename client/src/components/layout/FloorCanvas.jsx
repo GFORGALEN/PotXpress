@@ -31,9 +31,12 @@ import {
   createImmersiveDeviceViewSnapshot,
   immersiveDeviceViewStorageKey,
   immersiveFontSizeStorageKey,
+  interactionPointerId,
   isImmersiveViewportReady,
   restoreImmersiveDeviceViewport,
+  shouldRecoverAbortedInteraction,
   shouldDecorationAffectImmersiveFit,
+  updateMarqueeSelectionIds,
 } from '../../utils/canvasInteraction.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import {
@@ -125,6 +128,8 @@ function ZoomControls({
   immersiveFontSize,
   onImmersiveFontSizeChange,
 }) {
+  const [immersiveControlsOpen, setImmersiveControlsOpen] = useState(false);
+
   if (immersive && !editing) {
     if (calibratingDeviceView) {
       return (
@@ -180,6 +185,19 @@ function ZoomControls({
         </div>
       );
     }
+    if (!immersiveControlsOpen) {
+      return (
+        <button
+          type="button"
+          onClick={() => setImmersiveControlsOpen(true)}
+          className="canvas-control absolute bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full border border-stone-200/80 bg-white/90 px-4 text-xs font-black text-stone-700 shadow-lg backdrop-blur transition hover:bg-white"
+          data-canvas-control
+          aria-label="打开全屏显示设置"
+        >
+          <SlidersHorizontal size={17} />显示设置
+        </button>
+      );
+    }
     return (
       <div
         className="canvas-control absolute bottom-5 right-5 z-30 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/90 p-1.5 shadow-lg backdrop-blur"
@@ -194,10 +212,10 @@ function ZoomControls({
           type="button"
           onClick={onFit}
           className="canvas-control inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-stone-700 transition hover:bg-white"
-          title="重新应用当前设备视图"
-          aria-label="重新应用当前设备视图"
+          title="清除本机调整并自动适配"
+          aria-label="清除本机调整并自动适配"
         >
-          <Maximize2 size={16} />重置全景
+          <Maximize2 size={16} />自动适配
         </button>
         <button
           type="button"
@@ -207,6 +225,14 @@ function ZoomControls({
         >
           <SlidersHorizontal size={16} />
           {hasSavedDeviceView ? '调整本机视图' : '设置本机视图'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setImmersiveControlsOpen(false)}
+          className="canvas-control inline-flex min-h-10 min-w-10 items-center justify-center rounded-full text-stone-500 transition hover:bg-white"
+          aria-label="收起全屏显示设置"
+        >
+          <X size={16} />
         </button>
       </div>
     );
@@ -303,13 +329,16 @@ export function FloorCanvas({
   const previousDeviceViewStorageKeyRef = useRef(null);
   const immersiveFitPendingRef = useRef(false);
   const interactionRef = useRef(null);
+  const activeInteractionPointerRef = useRef(null);
   const dragStartRef = useRef(null);
   const resizeRef = useRef(null);
   const flowNodesRef = useRef([]);
   const marqueeSelectionRef = useRef([]);
+  const tableIdsRef = useRef(new Set());
   const [flowReady, setFlowReady] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [flowNodes, setFlowNodes] = useState([]);
+  const [flowResetVersion, setFlowResetVersion] = useState(0);
   const [deviceCalibrationStart, setDeviceCalibrationStart] = useState(null);
   const [hasSavedDeviceView, setHasSavedDeviceView] = useState(false);
   const [immersiveFontSize, setImmersiveFontSize] = useState(
@@ -325,10 +354,16 @@ export function FloorCanvas({
     () => new Map(tables.map((table) => [table.tableId, table])),
     [tables],
   );
+  tableIdsRef.current = new Set(tableById.keys());
   const decorationById = useMemo(
     () => new Map(decorations.map((item) => [item.id, item])),
     [decorations],
   );
+  const selectedZBase = useMemo(() => Math.max(
+    0,
+    ...tables.map((table) => Number(table.layout.zIndex) || 0),
+    ...decorations.map((item) => Number(item.zIndex) || 0),
+  ) + 1, [decorations, tables]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -353,11 +388,19 @@ export function FloorCanvas({
     // the virtual canvas. They should not make operational tables look tiny.
     ...decorations.filter(shouldDecorationAffectImmersiveFit),
   ], canvas), [canvas, decorations, fitTables]);
-  const immersiveBounds = useMemo(() => (
+  const storeOverviewBounds = useMemo(() => (
     canvas.defaultViewBounds
       ? ratioBoundsToWorld(canvas.defaultViewBounds, canvas)
       : contentBounds
   ), [canvas, contentBounds]);
+  // Fullscreen operations prioritise every real table and nothing else. A
+  // desktop-saved viewport or a remote decoration must not shrink the tables
+  // on a 4:3 tablet. Decorations inside this tight table box still render.
+  const immersiveBounds = useMemo(() => getWorldContentBounds(
+    fitTables.map((table) => table.layout),
+    canvas,
+    0,
+  ), [canvas, fitTables]);
   const deviceViewStorageKey = useMemo(() => (
     immersiveDeviceViewStorageKey(deviceViewId, viewportSize)
   ), [deviceViewId, viewportSize]);
@@ -406,9 +449,7 @@ export function FloorCanvas({
     const nextViewport = fitViewportToBounds(bounds, viewportSize, {
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      padding: immersive && !editing
-        ? { top: 112, right: 24, bottom: 104, left: 24 }
-        : 32,
+      padding: immersive && !editing ? 8 : 32,
       // A wide restaurant floor fitted into a 4:3 tablet leaves vertical
       // slack. Keep it beneath the fullscreen controls instead of centering
       // it into a large, visually empty band at the top.
@@ -419,11 +460,17 @@ export function FloorCanvas({
     } else {
       onViewportChange?.(nextViewport);
     }
-  }, [immersive, onInitializeViewport, onViewportChange, viewportSize]);
+  }, [
+    editing,
+    immersive,
+    onInitializeViewport,
+    onViewportChange,
+    viewportSize,
+  ]);
 
   const fitStoreOverview = useCallback(() => {
-    applyBoundsViewport(contentBounds);
-  }, [applyBoundsViewport, contentBounds]);
+    applyBoundsViewport(storeOverviewBounds);
+  }, [applyBoundsViewport, storeOverviewBounds]);
 
   const fitImmersiveOverview = useCallback(() => {
     const storedViewport = restoreImmersiveDeviceViewport(
@@ -458,11 +505,11 @@ export function FloorCanvas({
   useEffect(() => {
     if (!flowReady || viewportInitialized
       || !viewportSize.width || !viewportSize.height) return;
-    applyBoundsViewport(contentBounds, true);
+    applyBoundsViewport(storeOverviewBounds, true);
   }, [
     applyBoundsViewport,
-    contentBounds,
     flowReady,
+    storeOverviewBounds,
     viewportInitialized,
     viewportSize.height,
     viewportSize.width,
@@ -506,6 +553,11 @@ export function FloorCanvas({
       width: documentElement?.clientWidth,
       height: documentElement?.clientHeight,
     })) return;
+    // The DOM can reach fullscreen one frame before ResizeObserver updates
+    // viewportSize. Wait for the measured size so the camera is never fitted
+    // using the smaller embedded canvas dimensions.
+    if (Math.abs((rootBounds?.width ?? 0) - viewportSize.width) > 2
+      || Math.abs((rootBounds?.height ?? 0) - viewportSize.height) > 2) return;
     immersiveFitPendingRef.current = false;
     fitImmersiveOverview();
   }, [
@@ -616,8 +668,9 @@ export function FloorCanvas({
     onSelectTables,
   ]);
 
-  const handleResizeStart = useCallback((nodeId) => {
+  const handleResizeStart = useCallback((nodeId, _params, event) => {
     interactionRef.current = 'resize';
+    activeInteractionPointerRef.current = interactionPointerId(event);
     const decorationId = decorationIdFromNode(nodeId);
     if (decorationId) {
       const item = decorationById.get(decorationId);
@@ -657,8 +710,14 @@ export function FloorCanvas({
 
   const handleResize = useCallback((nodeId, params) => {
     const resize = resizeRef.current;
-    if (!resize || resize.kind !== 'table' || resize.id !== nodeId
-      || resize.entries.length < 2) return;
+    if (!resize || resize.id !== nodeId) return;
+    resize.lastParams = {
+      x: params.x,
+      y: params.y,
+      width: params.width,
+      height: params.height,
+    };
+    if (resize.kind !== 'table' || resize.entries.length < 2) return;
     resize.direction = resizeDirectionLabel(params.direction);
     resize.lastScaleX = Number.isFinite(params.width)
       ? params.width / resize.start.width
@@ -689,14 +748,18 @@ export function FloorCanvas({
     const resize = resizeRef.current;
     resizeRef.current = null;
     interactionRef.current = null;
+    activeInteractionPointerRef.current = null;
     if (!resize || resize.id !== nodeId) return;
+    const lastParams = resize.lastParams ?? {};
+    const finalParams = {
+      x: Number.isFinite(params?.x) ? params.x : lastParams.x,
+      y: Number.isFinite(params?.y) ? params.y : lastParams.y,
+      width: Number.isFinite(params?.width) ? params.width : lastParams.width,
+      height: Number.isFinite(params?.height) ? params.height : lastParams.height,
+    };
     if (resize.kind === 'decoration') {
-      const next = {
-        x: params.x,
-        y: params.y,
-        width: params.width,
-        height: params.height,
-      };
+      if (!Object.values(finalParams).every(Number.isFinite)) return;
+      const next = finalParams;
       if (hasGeometryChanged(resize.start, next)) {
         onUpdateDecoration?.(resize.id, next);
       }
@@ -705,11 +768,11 @@ export function FloorCanvas({
     if (resize.entries.length > 1) {
       // A few touch browsers omit final dimensions on pointer release. Reuse
       // the last valid preview so the selected tables do not snap back.
-      const scaleX = Number.isFinite(params.width)
-        ? params.width / resize.start.width
+      const scaleX = Number.isFinite(finalParams.width)
+        ? finalParams.width / resize.start.width
         : resize.lastScaleX ?? 1;
-      const scaleY = Number.isFinite(params.height)
-        ? params.height / resize.start.height
+      const scaleY = Number.isFinite(finalParams.height)
+        ? finalParams.height / resize.start.height
         : resize.lastScaleY ?? 1;
       const nextLayouts = scaleTableSelection(
         resize.entries,
@@ -721,12 +784,8 @@ export function FloorCanvas({
       onResizeSelectedTables?.(resize.id, nextLayouts);
       return;
     }
-    const next = {
-      x: params.x,
-      y: params.y,
-      width: params.width,
-      height: params.height,
-    };
+    if (!Object.values(finalParams).every(Number.isFinite)) return;
+    const next = finalParams;
     if (hasGeometryChanged(resize.start, next)) {
       onUpdateTableLayout?.(resize.id, next);
     }
@@ -832,9 +891,12 @@ export function FloorCanvas({
         width: item.width,
         height: item.height,
         zIndex: item.zIndex,
-        draggable: editing,
+        draggable: editing && !multiSelectMode,
         selectable: editing && !multiSelectMode,
         focusable: editing && !multiSelectMode,
+        // A decoration button otherwise intercepts the pane pointerdown, so a
+        // finger cannot begin a marquee over a wall, entrance or area label.
+        style: multiSelectMode ? { pointerEvents: 'none' } : undefined,
         selected: editing && !multiSelectMode && selectedDecorationId === item.id,
         data: {
           item,
@@ -856,7 +918,11 @@ export function FloorCanvas({
       position: { x: table.layout.x, y: table.layout.y },
       width: table.layout.width,
       height: table.layout.height,
-      zIndex: table.layout.zIndex,
+      // Keep resize handles above neighbouring nodes without changing the
+      // persisted floor-plan layer order.
+      zIndex: editing && selectedTableIdSet.has(table.tableId)
+        ? selectedZBase + Math.max(0, Number(table.layout.zIndex) || 0)
+        : table.layout.zIndex,
       draggable: editing,
       selectable: editing,
       focusable: true,
@@ -891,6 +957,7 @@ export function FloorCanvas({
     onTableContextMenu,
     selectedDecorationId,
     selectedTableIdSet,
+    selectedZBase,
     tables,
     timezone,
   ]);
@@ -899,7 +966,8 @@ export function FloorCanvas({
     setFlowNodes((current) => {
       if (!current.length) return sourceNodes;
       const currentById = new Map(current.map((node) => [node.id, node]));
-      const preservePreview = Boolean(interactionRef.current);
+      const interaction = interactionRef.current;
+      const preservePreview = Boolean(interaction);
       return sourceNodes.map((source) => {
         const existing = currentById.get(source.id);
         if (!existing || !preservePreview) return source;
@@ -911,6 +979,12 @@ export function FloorCanvas({
           measured: existing.measured,
           dragging: existing.dragging,
           resizing: existing.resizing,
+          // Timer/status data refreshes every second. During a marquee, keep
+          // React Flow's live selection instead of restoring the older
+          // externally committed selection from sourceNodes.
+          selected: interaction === 'selection' && source.type === 'table'
+            ? (existing.selected ?? source.selected)
+            : source.selected,
         };
       });
     });
@@ -921,6 +995,16 @@ export function FloorCanvas({
   }, [flowNodes]);
 
   const handleNodesChange = useCallback((changes) => {
+    if (interactionRef.current === 'selection') {
+      // React Flow publishes onSelectionChange from an effect, which can run
+      // after pointerup on a quick tablet gesture. Capture select changes here
+      // synchronously so onSelectionEnd always commits the visible marquee.
+      marqueeSelectionRef.current = updateMarqueeSelectionIds(
+        marqueeSelectionRef.current,
+        changes,
+        tableIdsRef.current,
+      );
+    }
     setFlowNodes((current) => applyNodeChanges(
       changes.filter((change) => (
         change.type !== 'select'
@@ -936,9 +1020,10 @@ export function FloorCanvas({
   // table buttons clickable without making their nodes editable.
   const enableNodePointerEvents = useCallback(() => {}, []);
 
-  const handleNodeDragStart = useCallback((_, node) => {
+  const handleNodeDragStart = useCallback((event, node) => {
     if (!editing) return;
     interactionRef.current = 'drag';
+    activeInteractionPointerRef.current = interactionPointerId(event);
     const decorationId = decorationIdFromNode(node.id);
     if (decorationId) {
       const item = decorationById.get(decorationId);
@@ -972,6 +1057,7 @@ export function FloorCanvas({
     const start = dragStartRef.current;
     dragStartRef.current = null;
     interactionRef.current = null;
+    activeInteractionPointerRef.current = null;
     if (!start || start.id !== (decorationIdFromNode(node.id) ?? node.id)) return;
     const deltaX = node.position.x - start.x;
     const deltaY = node.position.y - start.y;
@@ -986,22 +1072,22 @@ export function FloorCanvas({
     }
   }, [onMoveSelectedTables, onUpdateDecoration]);
 
-  const handleSelectionChange = useCallback(({ nodes }) => {
-    if (!editing || interactionRef.current !== 'selection') return;
-    marqueeSelectionRef.current = nodes
-      .filter((node) => node.type === 'table')
-      .map((node) => node.id);
-  }, [editing]);
-
-  const handleSelectionStart = useCallback(() => {
+  const handleSelectionStart = useCallback((event) => {
     if (!editing || !multiSelectMode) return;
     interactionRef.current = 'selection';
-    marqueeSelectionRef.current = [];
-  }, [editing, multiSelectMode]);
+    activeInteractionPointerRef.current = interactionPointerId(event);
+    // React Flow clears its internal selection immediately before this
+    // callback. Controlled nodes have not received those changes yet, so seed
+    // the ref with the committed selection; subsequent select changes remove
+    // outside nodes and add newly enclosed ones.
+    marqueeSelectionRef.current = [...selectedTableIdSet]
+      .filter((id) => tableIdsRef.current.has(id));
+  }, [editing, multiSelectMode, selectedTableIdSet]);
 
   const handleSelectionEnd = useCallback(() => {
     if (interactionRef.current !== 'selection') return;
     interactionRef.current = null;
+    activeInteractionPointerRef.current = null;
     onSelectTables?.(marqueeSelectionRef.current);
     onSelectDecoration?.(null);
   }, [onSelectDecoration, onSelectTables]);
@@ -1043,8 +1129,29 @@ export function FloorCanvas({
     });
   }, [onViewportChange, viewport, viewportSize]);
 
-  const resetAbortedTouchDrag = useCallback(() => {
+  const resetAbortedTouchInteraction = useCallback((event) => {
+    if (!shouldRecoverAbortedInteraction(
+      event,
+      activeInteractionPointerRef.current,
+    )) return;
     requestAnimationFrame(() => {
+      if (interactionRef.current === 'selection') {
+        interactionRef.current = null;
+        activeInteractionPointerRef.current = null;
+        marqueeSelectionRef.current = [];
+        setFlowNodes(sourceNodes);
+        // React Flow does not clear its internal marquee on pointercancel.
+        // Remounting only the controlled flow surface clears that stale box
+        // while preserving the viewport and all committed layout state.
+        setFlowResetVersion((version) => version + 1);
+        return;
+      }
+      if (interactionRef.current === 'resize') {
+        const resize = resizeRef.current;
+        if (resize) handleResizeEnd(resize.id, resize.lastParams ?? {});
+        setFlowResetVersion((version) => version + 1);
+        return;
+      }
       if (interactionRef.current !== 'drag') return;
       const start = dragStartRef.current;
       const node = start && flowNodesRef.current.find((item) => (
@@ -1053,6 +1160,7 @@ export function FloorCanvas({
           : start.id)
       ));
       interactionRef.current = null;
+      activeInteractionPointerRef.current = null;
       dragStartRef.current = null;
       if (!start || !node) {
         setFlowNodes(sourceNodes);
@@ -1067,7 +1175,7 @@ export function FloorCanvas({
         onMoveSelectedTables?.(start.id, deltaX, deltaY);
       }
     });
-  }, [onMoveSelectedTables, onUpdateDecoration, sourceNodes]);
+  }, [handleResizeEnd, onMoveSelectedTables, onUpdateDecoration, sourceNodes]);
 
   return (
     <div
@@ -1078,10 +1186,13 @@ export function FloorCanvas({
       aria-label="门店桌台布局画布"
       data-immersive-font-size={immersive ? immersiveFontSize : undefined}
       style={{ '--potx-canvas-background': canvas.backgroundColor }}
-      onTouchEnd={resetAbortedTouchDrag}
-      onTouchCancel={resetAbortedTouchDrag}
+      onTouchEnd={resetAbortedTouchInteraction}
+      onTouchCancel={resetAbortedTouchInteraction}
+      onPointerCancel={resetAbortedTouchInteraction}
+      onLostPointerCapture={resetAbortedTouchInteraction}
     >
       <ReactFlow
+        key={flowResetVersion}
         nodes={flowNodes}
         edges={EMPTY_EDGES}
         nodeTypes={NODE_TYPES}
@@ -1096,7 +1207,6 @@ export function FloorCanvas({
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onSelectionStart={handleSelectionStart}
-        onSelectionChange={handleSelectionChange}
         onSelectionEnd={handleSelectionEnd}
         onPaneClick={handlePaneClick}
         onPaneContextMenu={handlePaneContextMenu}
@@ -1114,7 +1224,7 @@ export function FloorCanvas({
         // locks one-finger panning while full-screen operations are active.
         panOnDrag={(viewportLocked && !deviceCalibrationStart)
           || (editing && multiSelectMode) ? false : true}
-        zoomOnPinch
+        zoomOnPinch={!editing || !multiSelectMode}
         zoomOnScroll
         zoomOnDoubleClick={false}
         panOnScroll={false}
@@ -1156,7 +1266,7 @@ export function FloorCanvas({
         editing={editing}
         immersive={immersive}
         onZoom={zoomAroundCenter}
-        onFit={immersive ? fitImmersiveOverview : fitStoreOverview}
+        onFit={immersive ? resetDeviceView : fitStoreOverview}
         onActualSize={() => zoomAroundCenter(1)}
         calibratingDeviceView={Boolean(deviceCalibrationStart)}
         hasSavedDeviceView={hasSavedDeviceView}

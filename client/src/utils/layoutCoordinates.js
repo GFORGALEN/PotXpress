@@ -129,10 +129,15 @@ export function getWorldContentBounds(items, canvas, paddingRatio = 0.025) {
     right: -Infinity,
     bottom: -Infinity,
   });
-  const padding = Math.max(
-    24,
-    Math.max(raw.right - raw.left, raw.bottom - raw.top) * paddingRatio,
-  );
+  // An explicit zero is used by the tablet fullscreen camera: the screen
+  // inset already supplies its visual margin, so world-space padding would
+  // needlessly make every table smaller.
+  const padding = paddingRatio <= 0
+    ? 0
+    : Math.max(
+      24,
+      Math.max(raw.right - raw.left, raw.bottom - raw.top) * paddingRatio,
+    );
   const left = clamp(raw.left - padding, 0, canvas.virtualWidth);
   const top = clamp(raw.top - padding, 0, canvas.virtualHeight);
   const right = clamp(raw.right + padding, left + 1, canvas.virtualWidth);

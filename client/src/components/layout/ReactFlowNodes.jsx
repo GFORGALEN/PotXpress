@@ -1,4 +1,4 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useRef } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { TableNode } from '../tables/TableNode.jsx';
 
@@ -16,15 +16,18 @@ const RESIZE_LINE_STYLE = Object.freeze({
 });
 
 function useStableResizeCallbacks(id, data) {
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
   const onResizeStart = useCallback((event, params) => {
-    data.onResizeStart?.(id, params);
-  }, [data.onResizeStart, id]);
+    dataRef.current.onResizeStart?.(id, params, event);
+  }, [id]);
   const onResize = useCallback((event, params) => {
-    data.onResize?.(id, params);
-  }, [data.onResize, id]);
+    dataRef.current.onResize?.(id, params);
+  }, [id]);
   const onResizeEnd = useCallback((event, params) => {
-    data.onResizeEnd?.(id, params);
-  }, [data.onResizeEnd, id]);
+    dataRef.current.onResizeEnd?.(id, params);
+  }, [id]);
 
   return { onResizeStart, onResize, onResizeEnd };
 }
@@ -53,7 +56,7 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         layout={undefined}
         embedded
         editing={data.editing}
-        selected={data.uiSelected}
+        selected={selected}
         timezone={data.timezone}
         onTableClick={data.onActivate}
         onTableDoubleClick={data.onDoubleActivate}

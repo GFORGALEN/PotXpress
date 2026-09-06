@@ -953,14 +953,16 @@ export function DashboardPage() {
               {layoutEditor.mode === 'view' || canManageTables ? (
                 canvasFocused && layoutEditor.mode === 'view' ? (
                   <>
-                    <button
-                      type="button"
-                      onClick={toggleCanvasFocus}
-                      className="absolute left-4 top-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-4 text-xs font-black text-stone-800 shadow-sm backdrop-blur transition hover:bg-stone-50"
-                      aria-label="退出全屏运营"
-                    >
-                      <Minimize2 size={16} />退出全屏
-                    </button>
+                    {!isFullscreen ? (
+                      <button
+                        type="button"
+                        onClick={toggleCanvasFocus}
+                        className="absolute bottom-4 left-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-4 text-xs font-black text-stone-800 shadow-sm backdrop-blur transition hover:bg-stone-50"
+                        aria-label="退出全屏运营"
+                      >
+                        <Minimize2 size={16} />退出全屏
+                      </button>
+                    ) : null}
                     <div className="absolute right-4 top-4 z-40 flex flex-col items-end gap-2">
                       <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black shadow-sm ${serverDisconnected
                         ? 'bg-red-100 text-red-800'
@@ -1015,7 +1017,7 @@ export function DashboardPage() {
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
                 tables={layoutEditor.mode === 'view'
-                  ? canvasVisibleTables
+                  ? (canvasFocused ? canvasAllTables : canvasVisibleTables)
                   : canvasAllTables}
                 fitTables={canvasAllTables}
                 decorations={canvasDecorations}
