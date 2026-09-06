@@ -30,9 +30,9 @@ export function immersiveDeviceViewStorageKey(storeId, viewportSize) {
   return [
     'potxpress',
     'immersive-view',
-    // v3 invalidates cameras saved before responsive vertical distribution.
-    // Restoring an old absolute camera would bring back the empty lower band.
-    'v3',
+    // v4 invalidates cameras saved while vertical spacing still had a cap.
+    // Restoring that camera would preserve the previous empty lower band.
+    'v4',
     encodeURIComponent(storeId),
     immersiveDeviceOrientation(viewportSize),
   ].join(':');

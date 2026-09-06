@@ -108,7 +108,12 @@ export function clampWorldLayout(layout, canvas) {
   };
 }
 
-export function getWorldContentBounds(items, canvas, paddingRatio = 0.025) {
+export function getWorldContentBounds(
+  items,
+  canvas,
+  paddingRatio = 0.025,
+  clampToCanvas = true,
+) {
   if (!items.length) {
     return {
       x: 0,
@@ -138,10 +143,18 @@ export function getWorldContentBounds(items, canvas, paddingRatio = 0.025) {
       24,
       Math.max(raw.right - raw.left, raw.bottom - raw.top) * paddingRatio,
     );
-  const left = clamp(raw.left - padding, 0, canvas.virtualWidth);
-  const top = clamp(raw.top - padding, 0, canvas.virtualHeight);
-  const right = clamp(raw.right + padding, left + 1, canvas.virtualWidth);
-  const bottom = clamp(raw.bottom + padding, top + 1, canvas.virtualHeight);
+  const left = clampToCanvas
+    ? clamp(raw.left - padding, 0, canvas.virtualWidth)
+    : raw.left - padding;
+  const top = clampToCanvas
+    ? clamp(raw.top - padding, 0, canvas.virtualHeight)
+    : raw.top - padding;
+  const right = clampToCanvas
+    ? clamp(raw.right + padding, left + 1, canvas.virtualWidth)
+    : raw.right + padding;
+  const bottom = clampToCanvas
+    ? clamp(raw.bottom + padding, top + 1, canvas.virtualHeight)
+    : raw.bottom + padding;
 
   return {
     x: left,
@@ -161,8 +174,6 @@ export function createVerticalFillProjection(
   viewportSize,
   {
     padding = 8,
-    maxPositionScale = 2.5,
-    maxBottom = Infinity,
   } = {},
 ) {
   if (!items?.length || !viewportSize?.width || !viewportSize?.height) {
@@ -198,10 +209,7 @@ export function createVerticalFillProjection(
   const width = Math.max(1, bounds.right - bounds.left);
   const currentHeight = Math.max(1, bounds.bottom - bounds.top);
   const widthFitZoom = availableWidth / width;
-  const requestedHeight = Math.min(
-    availableHeight / widthFitZoom,
-    Math.max(currentHeight, maxBottom - bounds.top),
-  );
+  const requestedHeight = availableHeight / widthFitZoom;
   if (requestedHeight <= currentHeight + 0.000001) {
     return { originY: bounds.top, positionScale: 1 };
   }
@@ -209,13 +217,13 @@ export function createVerticalFillProjection(
   const bottomAtScale = (positionScale) => Math.max(...items.map((item) => (
     bounds.top + (item.y - bounds.top) * positionScale + item.height
   )));
-  const cappedScale = Math.max(1, maxPositionScale);
-  const targetBottom = Math.min(
-    bounds.top + requestedHeight,
-    bottomAtScale(cappedScale),
-  );
+  const targetBottom = bounds.top + requestedHeight;
   let low = 1;
-  let high = cappedScale;
+  let high = 1;
+  while (bottomAtScale(high) < targetBottom && high < 1024) high *= 2;
+  if (high >= 1024 && bottomAtScale(high) < targetBottom) {
+    return { originY: bounds.top, positionScale: 1 };
+  }
   for (let iteration = 0; iteration < 40; iteration += 1) {
     const middle = (low + high) / 2;
     if (bottomAtScale(middle) < targetBottom) low = middle;

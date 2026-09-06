@@ -400,11 +400,10 @@ export function FloorCanvas({
       ? createVerticalFillProjection(
         fitTables.map((table) => table.layout),
         viewportSize,
-        { padding: 8, maxBottom: canvas.virtualHeight },
+        { padding: 8 },
       )
       : { originY: 0, positionScale: 1 }
   ), [
-    canvas.virtualHeight,
     editing,
     fitTables,
     immersive,
@@ -420,12 +419,16 @@ export function FloorCanvas({
     displayLayoutByTableId.get(table.tableId) ?? table.layout
   ), [displayLayoutByTableId]);
   // Fullscreen operations fit against display-projected tables. This keeps
-  // persisted coordinates intact while distributing rows over a 4:3 tablet.
+  // persisted coordinates intact while distributing rows over a tablet.
   const immersiveBounds = useMemo(() => getWorldContentBounds(
     fitTables.map((table) => tableDisplayLayout(table)),
     canvas,
     0,
+    false,
   ), [canvas, fitTables, tableDisplayLayout]);
+  const displayWorldHeight = immersive && !editing
+    ? Math.max(canvas.virtualHeight, immersiveBounds.y + immersiveBounds.height)
+    : canvas.virtualHeight;
   const deviceViewStorageKey = useMemo(() => (
     immersiveDeviceViewStorageKey(deviceViewId, viewportSize)
   ), [deviceViewId, viewportSize]);
@@ -897,7 +900,7 @@ export function FloorCanvas({
       type: 'canvas',
       position: { x: 0, y: 0 },
       width: canvas.virtualWidth,
-      height: canvas.virtualHeight,
+      height: displayWorldHeight,
       zIndex: -1000,
       draggable: false,
       selectable: false,
@@ -971,6 +974,7 @@ export function FloorCanvas({
   ], [
     canvas,
     decorations,
+    displayWorldHeight,
     editing,
     getTableResizeLimits,
     groupNodes,
@@ -1263,10 +1267,10 @@ export function FloorCanvas({
         paneClickDistance={6}
         snapToGrid={editing && canvas.snapToGrid}
         snapGrid={[canvas.gridSize, canvas.gridSize]}
-        nodeExtent={[[0, 0], [canvas.virtualWidth, canvas.virtualHeight]]}
+        nodeExtent={[[0, 0], [canvas.virtualWidth, displayWorldHeight]]}
         translateExtent={[
-          [-canvas.virtualWidth, -canvas.virtualHeight],
-          [canvas.virtualWidth * 2, canvas.virtualHeight * 2],
+          [-canvas.virtualWidth, -displayWorldHeight],
+          [canvas.virtualWidth * 2, displayWorldHeight * 2],
         ]}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}

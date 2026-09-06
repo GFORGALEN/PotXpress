@@ -143,7 +143,7 @@ test('immersive device views are stored separately by orientation', () => {
   assert.equal(immersiveDeviceOrientation({ width: 768, height: 1366 }), 'portrait');
   assert.equal(
     immersiveDeviceViewStorageKey('store/queen', { width: 1366, height: 768 }),
-    'potxpress:immersive-view:v3:store%2Fqueen:landscape',
+    'potxpress:immersive-view:v4:store%2Fqueen:landscape',
   );
   assert.equal(
     immersiveFontSizeStorageKey('store/queen', { width: 768, height: 1366 }),
@@ -664,6 +664,18 @@ test('tablet fullscreen bounds can be exactly tight around every table', () => {
   });
 });
 
+test('display bounds may extend beyond persisted canvas height', () => {
+  const canvas = { virtualWidth: 4000, virtualHeight: 2550 };
+  assert.deepEqual(getWorldContentBounds([
+    { x: 100, y: 2400, width: 300, height: 400 },
+  ], canvas, 0, false), {
+    x: 100,
+    y: 2400,
+    width: 300,
+    height: 400,
+  });
+});
+
 test('tablet fullscreen fit keeps only aspect-ratio slack below the tables', () => {
   const bounds = { x: 100, y: 200, width: 2000, height: 900 };
   const viewportSize = { width: 1280, height: 960 };
@@ -713,6 +725,26 @@ test('tablet vertical projection fills height without resizing table shapes', ()
     (bounds.y + bounds.height) * fitted.zoom + fitted.y
       - (viewportSize.height - 8),
   ) < 0.000001);
+});
+
+test('very flat layouts are not stopped by an arbitrary vertical scale cap', () => {
+  const layouts = [
+    { x: 0, y: 0, width: 500, height: 100 },
+    { x: 500, y: 100, width: 500, height: 100 },
+  ];
+  const viewportSize = { width: 1600, height: 1000 };
+  const projection = createVerticalFillProjection(layouts, viewportSize, {
+    padding: 8,
+  });
+  const projectedBottom = projectLayoutVertically(
+    layouts[1],
+    projection,
+  ).y + layouts[1].height;
+  const expectedHeight = (viewportSize.height - 16)
+    / ((viewportSize.width - 16) / 1000);
+
+  assert.ok(projection.positionScale > 2.5);
+  assert.ok(Math.abs(projectedBottom - expectedHeight) < 0.000001);
 });
 
 test('vertical fill projection leaves layouts unchanged when height already fits', () => {
