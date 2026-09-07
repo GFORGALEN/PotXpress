@@ -42,6 +42,11 @@ import {
 } from '../../utils/canvasInteraction.js';
 import { scaleTableSelection } from '../../utils/layoutEditor.js';
 import {
+  decorationIdFromNode,
+  decorationNodeId,
+  layoutItemIdFromNode,
+} from '../../utils/layoutNodeIds.js';
+import {
   FlowCanvasSurfaceNode,
   FlowDecorationNode,
   FlowGroupNode,
@@ -54,7 +59,6 @@ const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 4;
 const DEFAULT_IMMERSIVE_FONT_SIZE = 4;
 const CANVAS_NODE_ID = '__potx_canvas__';
-const DECORATION_PREFIX = 'decoration:';
 
 const NODE_TYPES = Object.freeze({
   table: FlowTableNode,
@@ -66,16 +70,6 @@ const NODE_TYPES = Object.freeze({
   canvas: FlowCanvasSurfaceNode,
   group: FlowGroupNode,
 });
-
-function decorationNodeId(id) {
-  return `${DECORATION_PREFIX}${id}`;
-}
-
-function decorationIdFromNode(id) {
-  return id.startsWith(DECORATION_PREFIX)
-    ? id.slice(DECORATION_PREFIX.length)
-    : null;
-}
 
 function resizeDirectionLabel(direction = []) {
   return [
@@ -729,7 +723,7 @@ export function FloorCanvas({
 
   const handleResize = useCallback((nodeId, params) => {
     const resize = resizeRef.current;
-    if (!resize || resize.id !== nodeId) return;
+    if (!resize || resize.id !== layoutItemIdFromNode(nodeId)) return;
     resize.lastParams = {
       x: params.x,
       y: params.y,
@@ -768,7 +762,7 @@ export function FloorCanvas({
     resizeRef.current = null;
     interactionRef.current = null;
     activeInteractionPointerRef.current = null;
-    if (!resize || resize.id !== nodeId) return;
+    if (!resize || resize.id !== layoutItemIdFromNode(nodeId)) return;
     const lastParams = resize.lastParams ?? {};
     const finalParams = {
       x: Number.isFinite(params?.x) ? params.x : lastParams.x,

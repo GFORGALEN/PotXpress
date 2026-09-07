@@ -18,6 +18,11 @@ import {
   serializeLayout,
 } from '../src/utils/layoutEditor.js';
 import {
+  decorationIdFromNode,
+  decorationNodeId,
+  layoutItemIdFromNode,
+} from '../src/utils/layoutNodeIds.js';
+import {
   apiLayoutToWorld,
   createVerticalFillProjection,
   fitViewportToBounds,
@@ -56,6 +61,16 @@ const stores = [
   { id: 'first', name: '皇后街店', enabled: true },
   { id: 'saved', name: '海港店', enabled: true },
 ];
+
+test('decoration resize callbacks resolve the persisted decoration id', () => {
+  const decorationId = 'wall-main';
+  const nodeId = decorationNodeId(decorationId);
+
+  assert.equal(nodeId, 'decoration:wall-main');
+  assert.equal(decorationIdFromNode(nodeId), decorationId);
+  assert.equal(layoutItemIdFromNode(nodeId), decorationId);
+  assert.equal(layoutItemIdFromNode('table-main'), 'table-main');
+});
 
 test('resolveEnabledStore restores an enabled saved store', () => {
   assert.equal(resolveEnabledStore(stores, 'saved')?.id, 'saved');
