@@ -129,14 +129,14 @@ function ZoomControls({
   onResetDeviceView,
   immersiveFontSize,
   onImmersiveFontSizeChange,
+  immersiveControlsOpen,
+  onImmersiveControlsOpenChange,
 }) {
-  const [immersiveControlsOpen, setImmersiveControlsOpen] = useState(false);
-
   if (immersive && !editing) {
     if (calibratingDeviceView) {
       return (
         <div
-          className="canvas-control absolute bottom-5 right-5 z-30 flex flex-wrap items-center justify-end gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-lg backdrop-blur"
+          className="canvas-control absolute right-4 top-[4.75rem] z-40 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-2xl border border-stone-200 bg-white/95 p-1.5 shadow-lg backdrop-blur"
           data-canvas-control
         >
           <button
@@ -188,21 +188,11 @@ function ZoomControls({
       );
     }
     if (!immersiveControlsOpen) {
-      return (
-        <button
-          type="button"
-          onClick={() => setImmersiveControlsOpen(true)}
-          className="canvas-control absolute bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full border border-stone-200/80 bg-white/90 px-4 text-xs font-black text-stone-700 shadow-lg backdrop-blur transition hover:bg-white"
-          data-canvas-control
-          aria-label="打开全屏显示设置"
-        >
-          <SlidersHorizontal size={17} />显示设置
-        </button>
-      );
+      return null;
     }
     return (
       <div
-        className="canvas-control absolute bottom-5 right-5 z-30 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/90 p-1.5 shadow-lg backdrop-blur"
+        className="canvas-control absolute right-4 top-[4.75rem] z-40 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-2xl border border-stone-200/80 bg-white/95 p-1.5 shadow-lg backdrop-blur"
         data-canvas-control
       >
         <ImmersiveFontSizeControl
@@ -230,7 +220,7 @@ function ZoomControls({
         </button>
         <button
           type="button"
-          onClick={() => setImmersiveControlsOpen(false)}
+          onClick={() => onImmersiveControlsOpenChange?.(false)}
           className="canvas-control inline-flex min-h-10 min-w-10 items-center justify-center rounded-full text-stone-500 transition hover:bg-white"
           aria-label="收起全屏显示设置"
         >
@@ -322,6 +312,8 @@ export function FloorCanvas({
   onInitializeViewport,
   onVisibleWorldBoundsChange,
   deviceViewId,
+  immersiveControlsOpen = false,
+  onImmersiveControlsOpenChange,
 }) {
   const rootRef = useRef(null);
   const reactFlowRef = useRef(null);
@@ -1309,6 +1301,8 @@ export function FloorCanvas({
         onResetDeviceView={resetDeviceView}
         immersiveFontSize={immersiveFontSize}
         onImmersiveFontSizeChange={changeImmersiveFontSize}
+        immersiveControlsOpen={immersiveControlsOpen}
+        onImmersiveControlsOpenChange={onImmersiveControlsOpenChange}
       />
     </div>
   );

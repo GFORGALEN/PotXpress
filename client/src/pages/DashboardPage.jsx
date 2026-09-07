@@ -15,6 +15,7 @@ import {
   Minimize2,
   Radio,
   RotateCw,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   createTable,
@@ -106,6 +107,7 @@ export function DashboardPage() {
   const [customDurationTableId, setCustomDurationTableId] = useState(null);
   const [canvasFocused, setCanvasFocused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [immersiveControlsOpen, setImmersiveControlsOpen] = useState(false);
   const [canvasMenu, setCanvasMenu] = useState(null);
   const [tableDialog, setTableDialog] = useState(null);
   const [tableMutation, setTableMutation] = useState(null);
@@ -564,15 +566,18 @@ export function DashboardPage() {
 
     if (document.fullscreenElement) {
       await document.exitFullscreen?.();
+      setImmersiveControlsOpen(false);
       setCanvasFocused(false);
       return;
     }
 
     if (canvasFocused) {
+      setImmersiveControlsOpen(false);
       setCanvasFocused(false);
       return;
     }
 
+    setImmersiveControlsOpen(false);
     setCanvasFocused(true);
     const fullscreenRoot = fullscreenRootRef.current;
     const useNativeFullscreen = shouldUseNativeFullscreen({
@@ -952,45 +957,50 @@ export function DashboardPage() {
                 : 'relative h-[clamp(38rem,calc(100dvh-12rem),80rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
                 canvasFocused && layoutEditor.mode === 'view' ? (
-                  <>
-                    {!isFullscreen ? (
-                      <button
-                        type="button"
-                        onClick={toggleCanvasFocus}
-                        className="absolute bottom-4 left-4 z-40 inline-flex min-h-10 items-center gap-2 rounded-full border border-stone-300 bg-white/95 px-4 text-xs font-black text-stone-800 shadow-sm backdrop-blur transition hover:bg-stone-50"
-                        aria-label="退出全屏运营"
-                      >
-                        <Minimize2 size={16} />退出全屏
-                      </button>
-                    ) : null}
-                    <div className="absolute right-4 top-4 z-40 flex flex-col items-end gap-2">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black shadow-sm ${serverDisconnected
-                        ? 'bg-red-100 text-red-800'
+                  <div className="absolute right-4 top-4 z-50 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/95 p-1.5 shadow-lg backdrop-blur">
+                    <span
+                      className="inline-flex min-h-10 items-center gap-2 px-3 font-mono text-sm font-black tabular-nums text-ink-950"
+                      aria-label={`当前门店时间 ${currentTimeLabel}`}
+                    >
+                      <Clock3 size={16} className="text-emerald-700" />
+                      {currentTimeLabel}
+                    </span>
+                    <span className="h-6 w-px bg-stone-200" />
+                    <span className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-[11px] font-black ${serverDisconnected
+                      ? 'bg-red-100 text-red-800'
+                      : serverContactHealth.level === 'warning'
+                        ? 'bg-amber-100 text-amber-900'
+                        : 'bg-emerald-100 text-emerald-800'}`}>
+                      <Radio size={13} />
+                      {serverDisconnected
+                        ? '连接已断开'
                         : serverContactHealth.level === 'warning'
-                          ? 'bg-amber-100 text-amber-900'
-                          : 'bg-emerald-100 text-emerald-800'}`}>
-                        <Radio size={11} />
-                        {serverDisconnected
-                          ? '服务器连接已断开'
-                          : serverContactHealth.level === 'warning'
-                            ? '等待服务器回应'
-                            : realtime.connected
-                          ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
-                            ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
-                            : '等待回应'}`
-                          : '重连中'}
-                      </span>
-                      {serverDisconnected ? (
-                        <button
-                          type="button"
-                          onClick={refreshTimers}
-                          className="inline-flex min-h-10 items-center rounded-full border border-red-300 bg-white/95 px-4 text-xs font-black text-red-800 shadow-sm backdrop-blur transition hover:bg-red-50"
-                        >
-                          刷新连接
-                        </button>
-                      ) : null}
-                    </div>
-                  </>
+                          ? '等待服务器'
+                          : realtime.connected
+                            ? `实时连接 · ${serverContactHealth.nextKeepaliveInSeconds > 0
+                              ? `保活 ${serverContactHealth.nextKeepaliveInSeconds}秒`
+                              : '等待回应'}`
+                            : '重连中'}
+                    </span>
+                    <span className="h-6 w-px bg-stone-200" />
+                    <button
+                      type="button"
+                      onClick={() => setImmersiveControlsOpen((open) => !open)}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black text-stone-700 transition hover:bg-stone-100"
+                      aria-label={immersiveControlsOpen ? '收起全屏显示设置' : '打开全屏显示设置'}
+                      aria-expanded={immersiveControlsOpen}
+                    >
+                      <SlidersHorizontal size={16} />显示设置
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleCanvasFocus}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-full bg-stone-800 px-3 text-xs font-black text-white transition hover:bg-stone-700"
+                      aria-label="退出全屏运营"
+                    >
+                      <Minimize2 size={16} />退出
+                    </button>
+                  </div>
                 ) : (
                 <div className="absolute left-4 top-4 z-40 flex flex-wrap items-center gap-2">
                   <button
@@ -1083,6 +1093,8 @@ export function DashboardPage() {
                 onInitializeViewport={layoutEditor.initializeViewport}
                 onVisibleWorldBoundsChange={layoutEditor.setVisibleWorldBounds}
                 deviceViewId={selectedStoreId}
+                immersiveControlsOpen={immersiveControlsOpen}
+                onImmersiveControlsOpenChange={setImmersiveControlsOpen}
               />
             </div>
             )
