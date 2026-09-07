@@ -23,6 +23,7 @@ import {
   layoutItemIdFromNode,
 } from '../src/utils/layoutNodeIds.js';
 import {
+  apiDecorationToWorld,
   apiLayoutToWorld,
   createVerticalFillProjection,
   fitViewportToBounds,
@@ -30,6 +31,7 @@ import {
   isLayoutInsideBounds,
   projectLayoutVertically,
   ratioBoundsToWorld,
+  rotateDecorationClockwise,
   viewportToWorldBounds,
   worldBoundsToRatios,
   worldLayoutToApi,
@@ -547,6 +549,50 @@ test('ratio adapter survives ten save and reload cycles without drift', () => {
   }
 
   assert.deepEqual(persisted, initial);
+});
+
+test('vertical walls use real vertical node geometry for selection and resizing', () => {
+  const canvas = { virtualWidth: 4000, virtualHeight: 2550 };
+  const wall = apiDecorationToWorld({
+    id: 'wall-vertical',
+    type: 'wall',
+    label: '墙体',
+    xRatio: 0.2,
+    yRatio: 0.3,
+    widthRatio: 0.4,
+    heightRatio: 0.02,
+    rotation: 90,
+    zIndex: 2,
+  }, canvas);
+
+  assert.equal(wall.width, 51);
+  assert.equal(wall.height, 1600);
+  assert.equal(wall.rotation, 0);
+  assert.equal(wall.x, 1574.5);
+  assert.equal(wall.y, 0);
+});
+
+test('rotating a wall swaps its real node dimensions around the same center', () => {
+  const wall = {
+    id: 'wall-main',
+    type: 'wall',
+    x: 300,
+    y: 400,
+    width: 1000,
+    height: 40,
+    rotation: 0,
+  };
+  const rotated = { ...wall, ...rotateDecorationClockwise(wall) };
+
+  assert.deepEqual(rotated, {
+    ...wall,
+    x: 780,
+    y: -80,
+    width: 40,
+    height: 1000,
+  });
+  assert.equal(rotated.x + rotated.width / 2, wall.x + wall.width / 2);
+  assert.equal(rotated.y + rotated.height / 2, wall.y + wall.height / 2);
 });
 
 test('viewport pan and zoom calculations never mutate world layout', () => {

@@ -62,7 +62,7 @@ export function apiDecorationToWorld(item, canvas) {
     heightRatio,
     ...metadata
   } = item;
-  return {
+  const worldItem = {
     ...metadata,
     ...apiLayoutToWorld({
       xRatio,
@@ -73,16 +73,20 @@ export function apiDecorationToWorld(item, canvas) {
       zIndex: item.zIndex,
     }, canvas),
   };
+  return item.type === 'wall'
+    ? clampWorldLayout(normalizeWallGeometry(worldItem), canvas)
+    : worldItem;
 }
 
 export function worldDecorationToApi(item, canvas) {
+  const normalizedItem = normalizeWallGeometry(item);
   const {
     x,
     y,
     width,
     height,
     ...metadata
-  } = item;
+  } = normalizedItem;
   return {
     ...metadata,
     ...worldLayoutToApi({
@@ -93,6 +97,45 @@ export function worldDecorationToApi(item, canvas) {
       rotation: item.rotation,
       zIndex: item.zIndex,
     }, canvas),
+  };
+}
+
+function normalizedRotation(rotation = 0) {
+  return ((Number(rotation) % 360) + 360) % 360;
+}
+
+/**
+ * Walls are visually identical after a half turn. Store quarter turns as
+ * real axis-aligned geometry so the React Flow node, selection outline and
+ * resize handles occupy the same rectangle as the visible wall.
+ */
+export function normalizeWallGeometry(item) {
+  if (item?.type !== 'wall') return item;
+  const rotation = normalizedRotation(item.rotation);
+  if (Math.abs(rotation % 90) > 0.000001) return item;
+  if (rotation === 90 || rotation === 270) {
+    return {
+      ...item,
+      x: item.x + (item.width - item.height) / 2,
+      y: item.y + (item.height - item.width) / 2,
+      width: item.height,
+      height: item.width,
+      rotation: 0,
+    };
+  }
+  return rotation === 0 ? item : { ...item, rotation: 0 };
+}
+
+export function rotateDecorationClockwise(item) {
+  if (item?.type !== 'wall') {
+    return { rotation: (normalizedRotation(item?.rotation) + 90) % 360 };
+  }
+  return {
+    x: item.x + (item.width - item.height) / 2,
+    y: item.y + (item.height - item.width) / 2,
+    width: item.height,
+    height: item.width,
+    rotation: 0,
   };
 }
 

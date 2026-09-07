@@ -25,6 +25,7 @@ import { useToast } from '../../contexts/ToastContext.jsx';
 import {
   findSignificantOverlaps,
 } from '../../utils/layoutEditor.js';
+import { rotateDecorationClockwise } from '../../utils/layoutCoordinates.js';
 
 export function EditorToolbar({ onAddTable }) {
   const { showToast } = useToast();
@@ -169,9 +170,7 @@ export function EditorToolbar({ onAddTable }) {
                       (entry) => entry.id === selectedDecorationId,
                     );
                     if (item) {
-                      updateDecoration(item.id, {
-                        rotation: ((item.rotation ?? 0) + 90) % 360,
-                      });
+                      updateDecoration(item.id, rotateDecorationClockwise(item));
                     }
                   }}
                   disabled={saving}
