@@ -465,7 +465,71 @@
 
 .floor-viewport--immersive[data-immersive-font-size="4"] .table-node-time,
 .floor-viewport--immersive[data-immersive-font-size="5"] .table-node-time {
-  font-size: clamp(10px, min(11cqh, 8cqw), 18px);
+  font-size: clamp(12px, min(14cqh, 10cqw), 22px);
+}
+
+/* Timed tables use a dashboard hierarchy instead of four centered lines. */
+.table-node-content--timed {
+  justify-content: flex-start;
+  padding: clamp(5px, 6cqh, 12px) clamp(6px, 6cqw, 14px) 0;
+}
+
+.table-node-timed-header {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(3px, 3cqw, 8px);
+}
+
+.table-node-content--timed .table-node-name {
+  flex: 0 1 auto;
+  font-size: clamp(13px, min(20cqh, 15cqw), 30px);
+}
+
+.table-node-content--timed .table-node-status,
+.floor-viewport--immersive .table-node-content--timed .table-node-status {
+  flex: 0 1 auto;
+  gap: clamp(1px, 1.2cqw, 3px);
+  margin-top: 0;
+  padding: clamp(1px, 1.5cqh, 3px) clamp(3px, 3cqw, 7px);
+  font-size: clamp(9px, min(12cqh, 8cqw), 16px);
+}
+
+.table-node-content--timed .table-node-status-icon,
+.floor-viewport--immersive .table-node-content--timed .table-node-status-icon {
+  width: clamp(9px, min(12cqh, 8cqw), 15px);
+  height: clamp(9px, min(12cqh, 8cqw), 15px);
+}
+
+.table-node-timer-block {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.table-node-timer-label {
+  font-size: clamp(9px, min(11cqh, 7cqw), 15px);
+  opacity: 0.72;
+}
+
+.table-node-content--timed .table-node-duration,
+.floor-viewport--immersive .table-node-content--timed .table-node-duration {
+  margin-top: clamp(2px, 2cqh, 5px);
+  font-size: clamp(18px, min(31cqh, 23cqw), 48px);
+}
+
+.table-node-content--timed-round .table-node-timed-header {
+  width: 76%;
+}
+
+.table-node-content--timed-round .table-node-status {
+  max-width: 58%;
 }
 
 @keyframes detail-panel-in {
@@ -486,16 +550,34 @@
 
 .table-node-time {
   display: none;
-  margin-top: 2px;
-  font-size: 8px;
-  margin-top: clamp(1px, 2cqh, 4px);
-  font-size: clamp(8px, min(9cqh, 7cqw), 14px);
+  width: calc(100% + clamp(12px, 12cqw, 28px));
+  min-height: clamp(18px, 22cqh, 34px);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(2px, 2cqw, 5px);
+  margin-top: 0;
+  padding: clamp(2px, 3cqh, 6px) clamp(4px, 5cqw, 10px);
+  background: rgb(5 150 105 / 0.1);
+  color: rgb(6 95 70);
+  font-size: clamp(9px, min(12cqh, 9cqw), 18px);
+  line-height: 1;
 }
 
 @container (min-width: 120px) and (min-height: 74px) {
   .table-node-time {
-    display: block;
+    display: flex;
   }
+}
+
+.table-node-time-icon {
+  width: clamp(10px, min(13cqh, 9cqw), 18px);
+  height: clamp(10px, min(13cqh, 9cqw), 18px);
+}
+
+.table-node-content--timed-round .table-node-time {
+  width: 76%;
+  border-radius: 999px;
 }
 
 @container (max-width: 64px) {

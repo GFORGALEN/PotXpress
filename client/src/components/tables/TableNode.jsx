@@ -138,38 +138,58 @@ export const TableNode = memo(function TableNode({
         event.stopPropagation();
         onTableDoubleClick?.(tableId, event);
       }}
-      aria-label={`${name}，${editing ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '超时' : '剩余'} ${duration}`}`}
+      aria-label={`${name}，${editing ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '已超时' : '剩余'} ${duration}，预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}`}
     >
       <span aria-hidden="true" className="table-seat table-seat-top" />
       <span aria-hidden="true" className="table-seat table-seat-right" />
       <span aria-hidden="true" className="table-seat table-seat-bottom" />
       <span aria-hidden="true" className="table-seat table-seat-left" />
 
-      <span className="table-node-content">
+      <span className={clsx(
+        'table-node-content',
+        !isIdle && 'table-node-content--timed',
+        !isIdle && shape === 'round' && 'table-node-content--timed-round',
+      )}>
         <span className={clsx('table-node-accent absolute rounded-full ring-1 ring-white/80', config.accent)} />
-        <strong className="table-node-name max-w-full truncate font-black leading-none tracking-tight">
-          {name}
-        </strong>
 
         {isIdle ? (
-          <span className={clsx('table-node-status inline-flex max-w-full min-w-0 items-center whitespace-nowrap rounded-full font-black', config.badge)}>
-            <StatusIcon className="table-node-status-icon shrink-0" size={12} />
-            <span className="truncate">空闲</span>
-          </span>
+          <>
+            <strong className="table-node-name max-w-full truncate font-black leading-none tracking-tight">
+              {name}
+            </strong>
+            <span className={clsx('table-node-status inline-flex max-w-full min-w-0 items-center whitespace-nowrap rounded-full font-black', config.badge)}>
+              <StatusIcon className="table-node-status-icon shrink-0" size={12} />
+              <span className="truncate">空闲</span>
+            </span>
+          </>
         ) : (
           <>
-            <span className="table-node-duration max-w-full truncate whitespace-nowrap font-mono font-black leading-none tabular-nums">
-              {status === 'overtime' ? `超时 ${duration}` : duration}
+            <span className="table-node-timed-header">
+              <strong className="table-node-name max-w-full truncate font-black leading-none tracking-tight">
+                {name}
+              </strong>
+              <span className={clsx('table-node-status inline-flex min-w-0 items-center truncate whitespace-nowrap rounded-full font-black', config.badge)}>
+                <StatusIcon className="table-node-status-icon shrink-0" size={11} />
+                <span className="truncate">{TIMER_STATUS_LABELS[status]}</span>
+              </span>
             </span>
-            <span className={clsx('table-node-status inline-flex max-w-full min-w-0 items-center truncate whitespace-nowrap rounded-full font-black', config.badge)}>
-              <StatusIcon className="table-node-status-icon shrink-0" size={11} />
-              <span className="truncate">{TIMER_STATUS_LABELS[status]}</span>
+            <span className="table-node-timer-block">
+              <span className="table-node-timer-label font-black">
+                {status === 'overtime' ? '已超时' : '剩余'}
+              </span>
+              <span className="table-node-duration max-w-full truncate whitespace-nowrap font-mono font-black leading-none tabular-nums">
+                {duration}
+              </span>
             </span>
             <span
-              className="table-node-time max-w-full truncate font-bold opacity-70"
+              className="table-node-time max-w-full truncate font-bold"
               title={`开始 ${formatStoreTime(startTime, timezone)} · 预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}
             >
-              预计 {formatStoreTime(effectiveEndTime, timezone)}
+              <Clock3 className="table-node-time-icon shrink-0" aria-hidden="true" />
+              <span>预计结束</span>
+              <strong className="font-black tabular-nums">
+                {formatStoreTime(effectiveEndTime, timezone)}
+              </strong>
             </span>
           </>
         )}
