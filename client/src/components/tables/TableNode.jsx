@@ -177,7 +177,7 @@ export const TableNode = memo(function TableNode({
               <span className="table-node-timer-label font-black">
                 {status === 'overtime' ? '已超时' : '剩余'}
               </span>
-              <span className="table-node-duration max-w-full truncate whitespace-nowrap font-mono font-black leading-none tabular-nums">
+              <span className="table-node-duration max-w-full truncate whitespace-nowrap font-black leading-none tabular-nums">
                 {duration}
               </span>
             </span>
@@ -186,7 +186,7 @@ export const TableNode = memo(function TableNode({
               title={`开始 ${formatStoreTime(startTime, timezone)} · 预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}
             >
               <Clock3 className="table-node-time-icon shrink-0" aria-hidden="true" />
-              <span>预计结束</span>
+              <span>{shape === 'round' ? '预计' : '预计结束'}</span>
               <strong className="font-black tabular-nums">
                 {formatStoreTime(effectiveEndTime, timezone)}
               </strong>

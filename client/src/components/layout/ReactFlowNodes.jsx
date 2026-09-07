@@ -10,6 +10,15 @@ const RESIZE_HANDLE_STYLE = Object.freeze({
   background: 'transparent',
 });
 
+const ROUND_RESIZE_HANDLE_STYLE = Object.freeze({
+  // A 44px handle at every corner covers nearly the whole round table at
+  // overview zoom, leaving no reliable center area for dragging on tablets.
+  width: 28,
+  height: 28,
+  border: 0,
+  background: 'transparent',
+});
+
 const RESIZE_LINE_STYLE = Object.freeze({
   borderColor: '#0284c7',
   borderWidth: 2,
@@ -47,7 +56,9 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         autoScale
         handleClassName="potx-resize-handle"
         lineClassName="potx-resize-line"
-        handleStyle={RESIZE_HANDLE_STYLE}
+        handleStyle={table.shape === 'round'
+          ? ROUND_RESIZE_HANDLE_STYLE
+          : RESIZE_HANDLE_STYLE}
         lineStyle={RESIZE_LINE_STYLE}
         {...resizeCallbacks}
       />

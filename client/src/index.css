@@ -485,7 +485,8 @@
 
 .table-node-content--timed .table-node-name {
   flex: 0 1 auto;
-  font-size: clamp(13px, min(20cqh, 15cqw), 30px);
+  font-size: clamp(8px, min(17cqh, 14cqw), 256px);
+  font-weight: 900;
 }
 
 .table-node-content--timed .table-node-status,
@@ -494,13 +495,33 @@
   gap: clamp(1px, 1.2cqw, 3px);
   margin-top: 0;
   padding: clamp(1px, 1.5cqh, 3px) clamp(3px, 3cqw, 7px);
-  font-size: clamp(9px, min(12cqh, 8cqw), 16px);
+  font-size: clamp(6px, min(10cqh, 8cqw), 128px);
+}
+
+.table-node[data-table-status="running"] .table-node-content--timed .table-node-status {
+  background: rgb(6 78 59);
+  color: white;
+}
+
+.table-node[data-table-status="warning"] .table-node-content--timed .table-node-status {
+  background: rgb(180 83 9);
+  color: white;
+}
+
+.table-node[data-table-status="overtime"] .table-node-content--timed .table-node-status {
+  background: rgb(185 28 28);
+  color: white;
+}
+
+.table-node[data-table-status="paused"] .table-node-content--timed .table-node-status {
+  background: rgb(71 85 105);
+  color: white;
 }
 
 .table-node-content--timed .table-node-status-icon,
 .floor-viewport--immersive .table-node-content--timed .table-node-status-icon {
-  width: clamp(9px, min(12cqh, 8cqw), 15px);
-  height: clamp(9px, min(12cqh, 8cqw), 15px);
+  width: clamp(9px, min(12cqh, 8cqw), 128px);
+  height: clamp(9px, min(12cqh, 8cqw), 128px);
 }
 
 .table-node-timer-block {
@@ -514,22 +535,44 @@
 }
 
 .table-node-timer-label {
-  font-size: clamp(9px, min(11cqh, 7cqw), 15px);
+  font-size: clamp(6px, min(9cqh, 7cqw), 128px);
   opacity: 0.72;
 }
 
-.table-node-content--timed .table-node-duration,
+.table-node[data-table-status] .table-node-content--timed .table-node-duration,
 .floor-viewport--immersive .table-node-content--timed .table-node-duration {
   margin-top: clamp(2px, 2cqh, 5px);
-  font-size: clamp(18px, min(31cqh, 23cqw), 48px);
+  font-size: clamp(10px, min(46cqh, 30cqw), 512px);
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.06em;
 }
 
 .table-node-content--timed-round .table-node-timed-header {
-  width: 76%;
+  width: 72%;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(2px, 2.5cqh, 5px);
 }
 
 .table-node-content--timed-round .table-node-status {
-  max-width: 58%;
+  order: -1;
+  max-width: 100%;
+}
+
+.table-node-content--timed-round .table-node-name,
+.floor-viewport--immersive .table-node-content--timed-round .table-node-name {
+  font-size: clamp(8px, min(17cqh, 17cqw), 256px);
+}
+
+.table-node-content--timed-round .table-node-timer-label {
+  display: none;
+}
+
+.table-node[data-table-status] .table-node-content--timed-round .table-node-duration,
+.floor-viewport--immersive .table-node-content--timed-round .table-node-duration {
+  margin-top: 0;
+  font-size: clamp(10px, min(36cqh, 31cqw), 512px);
 }
 
 @keyframes detail-panel-in {
@@ -560,7 +603,7 @@
   padding: clamp(2px, 3cqh, 6px) clamp(4px, 5cqw, 10px);
   background: rgb(5 150 105 / 0.1);
   color: rgb(6 95 70);
-  font-size: clamp(9px, min(12cqh, 9cqw), 18px);
+  font-size: clamp(6px, min(11cqh, 9cqw), 128px);
   line-height: 1;
 }
 
@@ -571,13 +614,68 @@
 }
 
 .table-node-time-icon {
-  width: clamp(10px, min(13cqh, 9cqw), 18px);
-  height: clamp(10px, min(13cqh, 9cqw), 18px);
+  width: clamp(10px, min(13cqh, 9cqw), 128px);
+  height: clamp(10px, min(13cqh, 9cqw), 128px);
 }
 
 .table-node-content--timed-round .table-node-time {
-  width: 76%;
+  width: 72%;
+  margin-bottom: clamp(5px, 6cqh, 18px);
   border-radius: 999px;
+}
+
+.table-node-content--timed-round .table-node-time-icon {
+  display: none;
+}
+
+/* The large-display setting must also scale the dedicated timed layout. */
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-name,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-name {
+  font-size: clamp(16px, min(17cqh, 18cqw), 256px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-status,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-status {
+  font-size: clamp(11px, min(10cqh, 10cqw), 128px);
+  font-weight: 900;
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-status-icon,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-status-icon {
+  width: clamp(13px, min(12cqh, 11cqw), 128px);
+  height: clamp(13px, min(12cqh, 11cqw), 128px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-timer-label,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-timer-label {
+  font-size: clamp(10px, min(9cqh, 9cqw), 128px);
+  font-weight: 900;
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-duration,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-duration {
+  font-size: clamp(20px, min(46cqh, 30cqw), 512px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed .table-node-time,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed .table-node-time {
+  font-size: clamp(10px, min(11cqh, 10cqw), 128px);
+  font-weight: 900;
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed-round .table-node-duration,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed-round .table-node-duration {
+  font-size: clamp(20px, min(36cqh, 31cqw), 512px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed-round .table-node-name,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed-round .table-node-name {
+  font-size: clamp(16px, min(17cqh, 17cqw), 256px);
+}
+
+.floor-viewport--immersive[data-immersive-font-size="4"] .table-node-content--timed-round .table-node-status,
+.floor-viewport--immersive[data-immersive-font-size="5"] .table-node-content--timed-round .table-node-status {
+  font-size: clamp(12px, min(11cqh, 10cqw), 128px);
 }
 
 @container (max-width: 64px) {
