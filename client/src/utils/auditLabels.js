@@ -6,6 +6,7 @@ export const AUDIT_ACTION_LABELS = Object.freeze({
   'timer.pause': '暂停计时',
   'timer.resume': '继续计时',
   'timer.adjust': '调整计时',
+  'timer.transfer': '更换桌台',
   'timer.reset': '重置清台',
   'timer.acknowledge': '确认超时',
   'table.create': '创建桌台',

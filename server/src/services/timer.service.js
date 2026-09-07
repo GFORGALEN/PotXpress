@@ -16,6 +16,7 @@ const TIMER_EVENT_TYPES = Object.freeze({
   'timer.pause': 'timer.paused',
   'timer.resume': 'timer.resumed',
   'timer.adjust': 'timer.adjusted',
+  'timer.transfer': 'timer.transferred',
   'timer.acknowledge_alert': 'timer.alert_acknowledged',
 });
 
@@ -434,6 +435,128 @@ export class TimerService {
         };
       },
     });
+  }
+
+  async transfer({
+    storeId,
+    tableId,
+    targetTableId,
+    idempotencyKey,
+    user,
+  }) {
+    const now = this.nowProvider();
+    const timestamp = new Date(now).toISOString();
+    let committedEvent = null;
+
+    const outcome = await unitOfWorkRepository.run(
+      {
+        resources: [
+          'stores',
+          'tables',
+          'settings',
+          'activeTimers',
+          'tableGroups',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+        writeOrder: [
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+      },
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: 'timer.transfer',
+        request: { tableId, targetTableId },
+        now,
+        execute: () => {
+          if (tableId === targetTableId) {
+            timerConflict('目标桌台不能与当前桌台相同');
+          }
+
+          const sourceContext = assertTimerContext(
+            repositories,
+            { storeId, tableId, user },
+          );
+          const timer = findTimer(
+            repositories.activeTimers,
+            storeId,
+            tableId,
+          );
+
+          if (!timer) {
+            timerConflict('当前桌台没有活动计时');
+          }
+          if (timer.targetType !== 'table' || sourceContext.group) {
+            timerConflict('拼桌计时不能直接更换桌台');
+          }
+
+          const targetContext = assertTimerContext(
+            repositories,
+            { storeId, tableId: targetTableId, user },
+          );
+          if (targetContext.group) {
+            timerConflict('目标桌台属于拼桌组，不能用于普通换桌');
+          }
+          if (findTimer(repositories.activeTimers, storeId, targetTableId)) {
+            timerConflict('目标桌台已被占用，请重新选择');
+          }
+
+          const before = structuredClone(timer);
+          const updated = repositories.activeTimers.update(timer.id, {
+            ...timer,
+            tableId: targetContext.table.id,
+            memberTableIds: [targetContext.table.id],
+            tableNameSnapshot: targetContext.table.name,
+            tableNumberSnapshot: targetContext.table.number,
+            updatedAt: timestamp,
+          });
+          appendAuditLog(repositories.auditLogs, {
+            userId: user.userId,
+            userNameSnapshot: user.displayName,
+            storeId,
+            action: 'timer.transfer',
+            targetType: 'timer',
+            targetId: updated.id,
+            dataBefore: timerAuditSnapshot(before),
+            dataAfter: timerAuditSnapshot(updated),
+          }, { timestamp });
+          committedEvent = appendRealtimeEvent(
+            repositories.realtimeEvents,
+            {
+              storeId,
+              type: 'timer.transferred',
+              entityType: 'timer',
+              entityId: updated.id,
+              payload: {
+                sourceTableId: tableId,
+                targetTableId,
+                tableId: updated.tableId,
+                memberTableIds: updated.memberTableIds,
+              },
+              timestamp,
+            },
+          );
+
+          return timerResponse(
+            updated,
+            now,
+            getSettings(repositories.settings, storeId).warningThresholdMinutes,
+          );
+        },
+      }),
+    );
+
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
+    }
+    return outcome;
   }
 
   async reset({ storeId, tableId, idempotencyKey, user }) {

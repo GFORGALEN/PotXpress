@@ -8,6 +8,7 @@ export const realtimeEventTypeSchema = z.enum([
   'timer.paused',
   'timer.resumed',
   'timer.adjusted',
+  'timer.transferred',
   'timer.reset',
   'timer.alert_acknowledged',
   'table_group.created',

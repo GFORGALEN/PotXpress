@@ -26,6 +26,7 @@ type TimerAction =
   | 'pause'
   | 'resume'
   | 'adjust'
+  | 'transfer'
   | 'acknowledge-alert';
 
 export async function listTimers(
@@ -96,6 +97,14 @@ export function adjustTimer(
     deltaSeconds,
     ...(reason ? { reason } : {}),
   });
+}
+
+export function transferTimer(
+  storeId: string,
+  tableId: string,
+  targetTableId: string,
+): Promise<TimerActionResult> {
+  return timerAction(storeId, tableId, 'transfer', { targetTableId });
 }
 
 export async function resetTimer(

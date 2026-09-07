@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  CircleMinus,
+  ArrowRightLeft,
   Clock3,
   Pause,
   Play,
@@ -15,6 +15,7 @@ import {
   resetTimer,
   resumeTimer,
   startTimer,
+  transferTimer,
 } from '../../api/timers.ts';
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';
@@ -38,6 +39,10 @@ export function TableActionDialog({
   timezone,
   defaultDurationMinutes = 90,
   initialCustomOpen = false,
+  transferTarget = null,
+  onChooseTransferTarget,
+  onCancelTransfer,
+  onTransferComplete,
   onRefresh,
   onClose,
 }) {
@@ -49,7 +54,11 @@ export function TableActionDialog({
   const [durationMinutes, setDurationMinutes] = useState(
     defaultDurationMinutes,
   );
-  const [subtractReason, setSubtractReason] = useState('');
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [adjustDirection, setAdjustDirection] = useState('add');
+  const [adjustMinutes, setAdjustMinutes] = useState(15);
+  const [adjustReason, setAdjustReason] = useState('');
+  const [confirmAdjustment, setConfirmAdjustment] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
@@ -58,6 +67,8 @@ export function TableActionDialog({
     }
 
     setCustomOpen(initialCustomOpen && table.status === 'idle');
+    setAdjustOpen(false);
+    setConfirmAdjustment(false);
     closeRef.current?.focus();
   }, [initialCustomOpen, table?.tableId, table?.status]);
 
@@ -67,13 +78,13 @@ export function TableActionDialog({
     }
 
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && !confirmReset) {
+      if (event.key === 'Escape' && !confirmReset && !confirmAdjustment) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [confirmReset, onClose, table?.tableId]);
+  }, [confirmAdjustment, confirmReset, onClose, table?.tableId]);
 
   useEffect(() => {
     if (table?.status === 'idle') {
@@ -85,13 +96,14 @@ export function TableActionDialog({
     return null;
   }
 
-  const runAction = async (name, request, successMessage) => {
+  const runAction = async (name, request, successMessage, onSuccess) => {
     setBusyAction(name);
 
     try {
       await request();
       await onRefresh();
       showToast(successMessage, 'success');
+      onSuccess?.();
 
       if (name === 'reset') {
         onClose();
@@ -113,6 +125,30 @@ export function TableActionDialog({
   const duration = isOvertime
     ? formatTimerDuration(table.overtimeSeconds)
     : formatTimerDuration(table.remainingSeconds);
+  const plannedMinutes = Math.round(
+    (table.timer?.plannedDurationSeconds ?? 0) / 60,
+  );
+  const signedAdjustmentMinutes = adjustDirection === 'subtract'
+    ? -adjustMinutes
+    : adjustMinutes;
+  const adjustedPlannedMinutes = Math.min(
+    480,
+    Math.max(1, plannedMinutes + signedAdjustmentMinutes),
+  );
+  const runCustomAdjustment = () => runAction(
+    `custom-${adjustDirection}`,
+    () => adjustTimer(
+      selectedStoreId,
+      table.tableId,
+      signedAdjustmentMinutes * 60,
+      adjustReason.trim() || undefined,
+    ),
+    `已${adjustDirection === 'subtract' ? '减时' : '加时'} ${adjustMinutes} 分钟`,
+    () => {
+      setAdjustOpen(false);
+      setAdjustReason('');
+    },
+  );
 
   return (
     <>
@@ -203,30 +239,92 @@ export function TableActionDialog({
             ) : null}
           </div>
 
-          {table.timer?.adjustments?.length > 0 ? (
-            <div className="mt-4">
-              <p className="text-xs font-black uppercase tracking-wider text-stone-400">
-                调整记录
-              </p>
-              <div className="mt-2 max-h-28 space-y-2 overflow-y-auto">
-                {table.timer.adjustments.map((adjustment, index) => (
-                  <div
-                    key={`${adjustment.at}-${index}`}
-                    className="rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-600"
-                  >
-                    <strong>
-                      {adjustment.type === 'add' ? '+' : '-'}
-                      {Math.round(adjustment.seconds / 60)} 分
-                    </strong>
-                    {' · '}
-                    {adjustment.reason || '无备注'}
-                    {' · '}
-                    {adjustment.byNameSnapshot}
-                    {' '}
-                    {formatStoreTime(adjustment.at, timezone)}
-                  </div>
-                ))}
+          {table.status !== 'idle' ? (
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50/70 p-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+                  <ArrowRightLeft size={19} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-black text-ink-950">更换桌台</p>
+                  <p className="mt-1 text-xs leading-5 text-stone-500">
+                    计时状态、开始时间和调整记录会完整转移。
+                  </p>
+                </div>
               </div>
+
+              {table.groupName ? (
+                <p className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs font-bold text-violet-700">
+                  当前为拼桌统一计时，请先解除或处理拼桌后再换桌。
+                </p>
+              ) : transferTarget ? (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-white px-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-stone-400">换到</p>
+                      <p className="truncate font-black text-sky-800">
+                        {transferTarget.name}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-xs font-bold text-stone-500">
+                      {transferTarget.area || '未分区'} · {transferTarget.capacity || 4}人
+                    </span>
+                  </div>
+                  {transferTarget.status !== 'idle' || transferTarget.groupName ? (
+                    <p className="text-xs font-bold text-red-700">
+                      目标桌状态已变化，请重新选择空闲桌台。
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={disabled || transferTarget.status !== 'idle' || Boolean(transferTarget.groupName)}
+                    onClick={() => runAction(
+                      'transfer',
+                      () => transferTimer(
+                        selectedStoreId,
+                        table.tableId,
+                        transferTarget.tableId,
+                      ),
+                      `已从${table.name}换到${transferTarget.name}`,
+                      () => onTransferComplete?.(transferTarget.tableId),
+                    )}
+                    className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-sky-700 px-4 text-sm font-black text-white disabled:opacity-50"
+                  >
+                    <ArrowRightLeft size={18} />
+                    {busyAction === 'transfer'
+                      ? '正在换桌…'
+                      : `确认换到${transferTarget.name}`}
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onChooseTransferTarget?.(table.tableId)}
+                      className="min-h-11 rounded-xl border border-sky-200 bg-white text-sm font-bold text-sky-800 disabled:opacity-50"
+                    >
+                      重新选择
+                    </button>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={onCancelTransfer}
+                      className="min-h-11 rounded-xl border border-stone-200 bg-white text-sm font-bold text-stone-600 disabled:opacity-50"
+                    >
+                      取消换桌
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onChooseTransferTarget?.(table.tableId)}
+                  className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-sky-300 bg-white text-sm font-black text-sky-800 disabled:opacity-50"
+                >
+                  <ArrowRightLeft size={18} />
+                  选择目标桌台
+                </button>
+              )}
             </div>
           ) : null}
 
@@ -294,57 +392,115 @@ export function TableActionDialog({
                   <Pause size={19} />
                   暂停
                 </button>
-                <div className="grid grid-cols-3 gap-2">
-                  {[5, 10, 30].map((minutes) => (
+                <div className="grid grid-cols-4 gap-2">
+                  {[-5, 5, 10, 30].map((minutes) => (
                     <button
                       key={minutes}
                       type="button"
                       disabled={disabled}
                       onClick={() => runAction(
-                        `add-${minutes}`,
+                        `${minutes < 0 ? 'subtract' : 'add'}-${Math.abs(minutes)}`,
                         () => adjustTimer(
                           selectedStoreId,
                           table.tableId,
                           minutes * 60,
                         ),
-                        `已加时 ${minutes} 分钟`,
+                        `已${minutes < 0 ? '减时' : '加时'} ${Math.abs(minutes)} 分钟`,
                       )}
-                      className="flex min-h-12 items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800 disabled:opacity-50"
+                      className={clsx(
+                        'flex min-h-12 items-center justify-center gap-1 rounded-xl border text-sm font-black disabled:opacity-50',
+                        minutes < 0
+                          ? 'border-amber-200 bg-amber-50 text-amber-900'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-800',
+                      )}
                     >
-                      <Plus size={16} />
-                      {minutes}
+                      {minutes > 0 ? <Plus size={16} /> : '−'}
+                      {Math.abs(minutes)}
                     </button>
                   ))}
                 </div>
-                <label className="block">
-                  <span className="text-xs font-bold text-stone-500">
-                    减时备注（可选）
-                  </span>
-                  <input
-                    value={subtractReason}
-                    onChange={(event) => setSubtractReason(event.target.value)}
-                    placeholder="例如：客人提前离店"
-                    className="mt-1.5 min-h-11 w-full rounded-xl border border-stone-200 px-3 text-sm outline-none focus:border-ember-400"
-                  />
-                </label>
                 <button
                   type="button"
                   disabled={disabled}
-                  onClick={() => runAction(
-                    'subtract',
-                    () => adjustTimer(
-                      selectedStoreId,
-                      table.tableId,
-                      -300,
-                      subtractReason.trim() || undefined,
-                    ),
-                    '已减时 5 分钟',
-                  )}
-                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 text-sm font-black text-amber-900 disabled:opacity-50"
+                  onClick={() => setAdjustOpen((value) => !value)}
+                  className="min-h-11 w-full rounded-xl border border-stone-200 bg-white text-sm font-bold text-stone-600 disabled:opacity-50"
                 >
-                  <CircleMinus size={18} />
-                  减时 5 分钟
+                  {adjustOpen ? '收起自定义调整' : '自定义调整'}
                 </button>
+                {adjustOpen ? (
+                  <div className="space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                    <div className="grid grid-cols-2 gap-2" aria-label="调整方向">
+                      {[
+                        ['add', '增加时间'],
+                        ['subtract', '减少时间'],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setAdjustDirection(value)}
+                          className={clsx(
+                            'min-h-10 rounded-xl border text-sm font-black',
+                            adjustDirection === value
+                              ? value === 'add'
+                                ? 'border-emerald-500 bg-emerald-100 text-emerald-900'
+                                : 'border-amber-500 bg-amber-100 text-amber-950'
+                              : 'border-stone-200 bg-white text-stone-500',
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="block">
+                      <span className="text-xs font-bold text-stone-600">
+                        调整分钟数
+                      </span>
+                      <input
+                        type="number"
+                        min="5"
+                        max="480"
+                        step="5"
+                        value={adjustMinutes}
+                        onChange={(event) => setAdjustMinutes(Number(event.target.value))}
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-stone-200 bg-white px-3 outline-none focus:border-sky-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-bold text-stone-600">
+                        调整原因（可选）
+                      </span>
+                      <input
+                        value={adjustReason}
+                        maxLength={100}
+                        onChange={(event) => setAdjustReason(event.target.value)}
+                        placeholder="例如：顾客临时调整时间"
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm outline-none focus:border-sky-400"
+                      />
+                    </label>
+                    <p className="rounded-xl bg-white px-3 py-2 text-xs text-stone-500">
+                      计划总时长：
+                      <strong className="ml-1 text-ink-950">{plannedMinutes} 分钟</strong>
+                      <span className="mx-2">→</span>
+                      <strong className={adjustDirection === 'subtract' ? 'text-amber-800' : 'text-emerald-800'}>
+                        {adjustedPlannedMinutes} 分钟
+                      </strong>
+                    </p>
+                    <button
+                      type="button"
+                      disabled={disabled || !Number.isInteger(adjustMinutes) || adjustMinutes < 5 || adjustMinutes > 480 || adjustedPlannedMinutes === plannedMinutes}
+                      onClick={() => {
+                        if (adjustDirection === 'subtract' && adjustMinutes >= 10) {
+                          setConfirmAdjustment(true);
+                          return;
+                        }
+                        runCustomAdjustment();
+                      }}
+                      className="min-h-11 w-full rounded-xl bg-sky-700 px-4 text-sm font-black text-white disabled:opacity-50"
+                    >
+                      确认{adjustDirection === 'subtract' ? '减少' : '增加'} {adjustMinutes} 分钟
+                    </button>
+                  </div>
+                ) : null}
               </>
             ) : null}
 
@@ -381,8 +537,47 @@ export function TableActionDialog({
             <Clock3 size={14} />
             操作提交前会使用轮询获得的最新状态；冲突时自动重新同步。
           </p>
+
+          {table.timer?.adjustments?.length > 0 ? (
+            <details className="mt-4 border-t border-stone-100 pt-4">
+              <summary className="cursor-pointer text-xs font-black text-stone-500">
+                调整记录（{table.timer.adjustments.length}）
+              </summary>
+              <div className="mt-2 max-h-36 space-y-2 overflow-y-auto">
+                {[...table.timer.adjustments].reverse().map((adjustment, reverseIndex) => (
+                  <div
+                    key={`${adjustment.at}-${table.timer.adjustments.length - reverseIndex}`}
+                    className="rounded-xl bg-stone-50 px-3 py-2 text-xs text-stone-600"
+                  >
+                    <strong>
+                      {adjustment.type === 'add' ? '+' : '-'}
+                      {Math.round(adjustment.seconds / 60)} 分
+                    </strong>
+                    {' · '}
+                    {adjustment.reason || '无备注'}
+                    {' · '}
+                    {adjustment.byNameSnapshot}
+                    {' '}
+                    {formatStoreTime(adjustment.at, timezone)}
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmAdjustment}
+        title={`确认减少 ${adjustMinutes} 分钟？`}
+        description={`计划总时长将从 ${plannedMinutes} 分钟调整为 ${adjustedPlannedMinutes} 分钟。`}
+        confirmText="确认减时"
+        onCancel={() => setConfirmAdjustment(false)}
+        onConfirm={async () => {
+          setConfirmAdjustment(false);
+          await runCustomAdjustment();
+        }}
+      />
 
       <ConfirmDialog
         open={confirmReset}

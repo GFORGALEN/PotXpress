@@ -93,6 +93,58 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     [201, 409],
   );
 
+  const startedTimer = concurrentStarts.find(
+    (result) => result.status === 201,
+  ).body.data.timer;
+  const transferred = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'transfer'),
+    {
+      method: 'POST',
+      token: staff.token,
+      body: { targetTableId: 'table_demo_02' },
+      headers: { 'Idempotency-Key': 'transfer-table-01-to-02' },
+    },
+  );
+  assert.equal(transferred.status, 200);
+  assert.equal(transferred.body.data.timer.id, startedTimer.id);
+  assert.equal(transferred.body.data.timer.tableId, 'table_demo_02');
+  assert.deepEqual(
+    transferred.body.data.timer.memberTableIds,
+    ['table_demo_02'],
+  );
+  assert.equal(
+    transferred.body.data.timer.startTime,
+    startedTimer.startTime,
+  );
+  assert.equal(
+    transferred.body.data.timer.plannedDurationSeconds,
+    startedTimer.plannedDurationSeconds,
+  );
+  const replayedTransfer = await request(
+    baseUrl,
+    timerPath('table_demo_01', 'transfer'),
+    {
+      method: 'POST',
+      token: staff.token,
+      body: { targetTableId: 'table_demo_02' },
+      headers: { 'Idempotency-Key': 'transfer-table-01-to-02' },
+    },
+  );
+  assert.equal(replayedTransfer.status, 200);
+  assert.equal(replayedTransfer.headers.get('idempotency-replayed'), 'true');
+  const transferredBack = await request(
+    baseUrl,
+    timerPath('table_demo_02', 'transfer'),
+    {
+      method: 'POST',
+      token: staff.token,
+      body: { targetTableId: 'table_demo_01' },
+    },
+  );
+  assert.equal(transferredBack.status, 200);
+  assert.equal(transferredBack.body.data.timer.tableId, 'table_demo_01');
+
   const beforeReads = await fileStore.readJSON('activeTimers.json');
   const firstRead = await request(
     baseUrl,

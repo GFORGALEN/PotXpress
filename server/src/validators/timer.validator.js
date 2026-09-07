@@ -9,3 +9,7 @@ export const adjustTimerBodySchema = z.object({
     .refine((value) => value !== 0, 'deltaSeconds 不能为 0'),
   reason: z.string().trim().max(100).optional(),
 }).strict();
+
+export const transferTimerBodySchema = z.object({
+  targetTableId: z.string().min(1).max(100),
+}).strict();

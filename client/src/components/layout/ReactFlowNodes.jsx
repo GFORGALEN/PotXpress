@@ -68,6 +68,7 @@ export const FlowTableNode = memo(function FlowTableNode({ id, data, selected })
         embedded
         editing={data.editing}
         selected={selected}
+        transferRole={data.transferRole}
         timezone={data.timezone}
         onTableClick={data.onActivate}
         onTableDoubleClick={data.onDoubleActivate}

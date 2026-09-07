@@ -60,6 +60,18 @@ export async function adjustTimerController(req, res) {
   return ok(res, { timer }, '计时时长已调整');
 }
 
+export async function transferTimerController(req, res) {
+  const { value: timer, replayed } = await timerService.transfer({
+    storeId: req.params.storeId,
+    tableId: req.params.tableId,
+    targetTableId: req.body.targetTableId,
+    idempotencyKey: readIdempotencyKey(req),
+    user: req.user,
+  });
+  markIdempotencyReplay(res, replayed);
+  return ok(res, { timer }, '已更换桌台');
+}
+
 export async function resetTimerController(req, res) {
   const { value: result, replayed } = await timerService.reset({
     storeId: req.params.storeId,

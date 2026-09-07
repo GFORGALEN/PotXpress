@@ -7,6 +7,7 @@ import {
   resetTimerController,
   resumeTimerController,
   startTimerController,
+  transferTimerController,
 } from '../controllers/timer.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { storeAccess } from '../middleware/storeAccess.middleware.js';
@@ -21,6 +22,7 @@ import {
 import {
   adjustTimerBodySchema,
   startTimerBodySchema,
+  transferTimerBodySchema,
 } from '../validators/timer.validator.js';
 
 export const timerListRouter = Router({ mergeParams: true });
@@ -80,6 +82,17 @@ tableTimerRouter.post(
   }),
   asyncHandler(storeAccess),
   asyncHandler(adjustTimerController),
+);
+tableTimerRouter.post(
+  '/transfer',
+  asyncHandler(authenticate),
+  validate({
+    params: storeTableParamsSchema,
+    query: emptyQuerySchema,
+    body: transferTimerBodySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(transferTimerController),
 );
 tableTimerRouter.post(
   '/reset',

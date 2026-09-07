@@ -9,7 +9,13 @@ const statusClasses = {
   overtime: 'bg-red-100 text-red-800',
 };
 
-export function TableListView({ tables, onTableClick, onTableDoubleClick }) {
+export function TableListView({
+  tables,
+  onTableClick,
+  onTableDoubleClick,
+  transferSourceTableId = null,
+  transferTargetTableId = null,
+}) {
   const priority = { overtime: 0, warning: 1, paused: 2, running: 3, idle: 4 };
   const sorted = [...tables].sort((left, right) => (
     priority[left.status] - priority[right.status]
@@ -25,6 +31,15 @@ export function TableListView({ tables, onTableClick, onTableDoubleClick }) {
   return (
     <div className="grid gap-3">
       {sorted.map((table) => {
+        const transferRole = transferSourceTableId
+          ? table.tableId === transferSourceTableId
+            ? 'source'
+            : table.tableId === transferTargetTableId
+              ? 'target'
+              : table.status === 'idle' && !table.groupName
+                ? 'available'
+                : 'unavailable'
+          : null;
         const seconds = table.status === 'overtime'
           ? table.overtimeSeconds
           : table.remainingSeconds;
@@ -34,11 +49,24 @@ export function TableListView({ tables, onTableClick, onTableDoubleClick }) {
             type="button"
             onClick={() => onTableClick(table.tableId)}
             onDoubleClick={() => onTableDoubleClick?.(table.tableId)}
-            className="flex min-h-[5.5rem] items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-4 text-left shadow-card transition active:scale-[0.99]"
+            className={clsx(
+              'flex min-h-[5.5rem] items-center justify-between gap-4 rounded-2xl border bg-white p-4 text-left shadow-card transition active:scale-[0.99]',
+              transferRole === 'source' && 'border-orange-400 ring-2 ring-orange-200',
+              transferRole === 'target' && 'border-sky-500 ring-2 ring-sky-200',
+              transferRole === 'available' && 'border-emerald-400 ring-2 ring-emerald-100',
+              transferRole === 'unavailable' && 'border-stone-200 opacity-40',
+              !transferRole && 'border-stone-200',
+            )}
           >
             <span className="min-w-0">
               <span className="block truncate text-base font-black text-ink-950">{table.name}</span>
-              <span className="mt-1 block text-xs text-stone-500">桌台 #{table.number}</span>
+              <span className="mt-1 block text-xs text-stone-500">
+                {transferRole === 'source'
+                  ? '当前桌台'
+                  : transferRole === 'available'
+                    ? '可换入'
+                    : `桌台 #${table.number}`}
+              </span>
             </span>
             <span className="shrink-0 text-right">
               <span className={clsx('inline-flex rounded-full px-2.5 py-1 text-xs font-bold', statusClasses[table.status])}>{TIMER_STATUS_LABELS[table.status]}</span>

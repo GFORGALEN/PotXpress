@@ -104,6 +104,7 @@ export function DashboardPage() {
   const [areaFilter, setAreaFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedTableId, setSelectedTableId] = useState(null);
+  const [tableTransfer, setTableTransfer] = useState(null);
   const [customDurationTableId, setCustomDurationTableId] = useState(null);
   const [canvasFocused, setCanvasFocused] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -161,6 +162,7 @@ export function DashboardPage() {
     setLayoutError(null);
     setTimersError(null);
     setSelectedTableId(null);
+    setTableTransfer(null);
     setCustomDurationTableId(null);
     clearTimeout(pendingTableClickRef.current);
     pendingTableClickRef.current = null;
@@ -478,6 +480,18 @@ export function DashboardPage() {
     () => allTables.find((table) => table.tableId === selectedTableId) ?? null,
     [allTables, selectedTableId],
   );
+  const transferSourceTable = useMemo(
+    () => allTables.find(
+      (table) => table.tableId === tableTransfer?.sourceTableId,
+    ) ?? null,
+    [allTables, tableTransfer?.sourceTableId],
+  );
+  const transferTargetTable = useMemo(
+    () => allTables.find(
+      (table) => table.tableId === tableTransfer?.targetTableId,
+    ) ?? null,
+    [allTables, tableTransfer?.targetTableId],
+  );
   const currentTimeLabel = useMemo(() => {
     try {
       return new Intl.DateTimeFormat('zh-CN', {
@@ -502,6 +516,29 @@ export function DashboardPage() {
     }
 
     const table = allTables.find((item) => item.tableId === tableId);
+    if (tableTransfer) {
+      if (tableId === tableTransfer.sourceTableId) {
+        showToast('请选择另一张空闲桌台', 'error');
+        return;
+      }
+      if (!table || table.status !== 'idle' || table.groupName) {
+        showToast(
+          table?.groupName
+            ? '拼桌组内的桌台不能作为普通换桌目标'
+            : '这张桌台当前不可用，请选择空闲桌台',
+          'error',
+        );
+        return;
+      }
+      clearTimeout(pendingTableClickRef.current);
+      pendingTableClickRef.current = null;
+      setTableTransfer((current) => current ? {
+        ...current,
+        targetTableId: tableId,
+      } : null);
+      setSelectedTableId(tableTransfer.sourceTableId);
+      return;
+    }
     if (!table || table.status !== 'idle') {
       setCustomDurationTableId(null);
       setSelectedTableId(tableId);
@@ -532,19 +569,36 @@ export function DashboardPage() {
         quickStartTableIdsRef.current.delete(tableId);
       }
     }, TABLE_DOUBLE_CLICK_DELAY);
-  }, [allTables, layoutEditor, refreshTimers, selectedStoreId, settings, showToast]);
+  }, [allTables, layoutEditor, refreshTimers, selectedStoreId, settings, showToast, tableTransfer]);
 
   const handleTableDoubleClick = useCallback((tableId) => {
-    if (layoutEditor.mode !== 'view') return;
+    if (layoutEditor.mode !== 'view' || tableTransfer) return;
     clearTimeout(pendingTableClickRef.current);
     pendingTableClickRef.current = null;
     setCustomDurationTableId(tableId);
     setSelectedTableId(tableId);
-  }, [layoutEditor.mode]);
+  }, [layoutEditor.mode, tableTransfer]);
 
   const handleCloseDialog = useCallback(() => {
     setSelectedTableId(null);
     setCustomDurationTableId(null);
+    setTableTransfer(null);
+  }, []);
+  const chooseTransferTarget = useCallback((sourceTableId) => {
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
+    setCustomDurationTableId(null);
+    setTableTransfer({ sourceTableId, targetTableId: null });
+    setSelectedTableId(null);
+  }, []);
+  const cancelTableTransfer = useCallback(() => {
+    const sourceTableId = tableTransfer?.sourceTableId ?? null;
+    setTableTransfer(null);
+    setSelectedTableId(sourceTableId);
+  }, [tableTransfer?.sourceTableId]);
+  const completeTableTransfer = useCallback((targetTableId) => {
+    setTableTransfer(null);
+    setSelectedTableId(targetTableId);
   }, []);
   const retryInitialLoad = useCallback(() => {
     setLayoutError(null);
@@ -915,6 +969,26 @@ export function DashboardPage() {
         collapsible
       />
 
+      {tableTransfer && !tableTransfer.targetTableId ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm shadow-sm">
+          <div>
+            <p className="font-black text-sky-950">
+              正在为{transferSourceTable?.name ?? '当前桌台'}选择新桌台
+            </p>
+            <p className="mt-0.5 text-xs text-sky-700">
+              绿色桌台可以换入；点击目标桌后再确认。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={cancelTableTransfer}
+            className="min-h-10 rounded-xl border border-sky-300 bg-white px-4 text-xs font-black text-sky-800"
+          >
+            取消换桌
+          </button>
+        </div>
+      ) : null}
+
       {allTables.length === 0 ? (
         <EmptyState
           title="本店还没有桌台"
@@ -945,9 +1019,11 @@ export function DashboardPage() {
           ) : (
             isMobile && mobileView === 'list' && layoutEditor.mode === 'view' ? (
               <TableListView
-                tables={visibleTables}
+                tables={tableTransfer ? allTables : visibleTables}
                 onTableClick={handleTableClick}
                 onTableDoubleClick={handleTableDoubleClick}
+                transferSourceTableId={tableTransfer?.sourceTableId}
+                transferTargetTableId={tableTransfer?.targetTableId}
               />
             ) : (
             <div className={canvasFocused
@@ -1027,13 +1103,17 @@ export function DashboardPage() {
                   ? layout.canvas
                   : layoutEditor.draftCanvas}
                 tables={layoutEditor.mode === 'view'
-                  ? (canvasFocused ? canvasAllTables : canvasVisibleTables)
+                  ? (canvasFocused || tableTransfer
+                    ? canvasAllTables
+                    : canvasVisibleTables)
                   : canvasAllTables}
                 fitTables={canvasAllTables}
                 decorations={canvasDecorations}
                 timezone={currentStore?.timezone}
                 onTableClick={handleTableClick}
                 onTableDoubleClick={handleTableDoubleClick}
+                transferSourceTableId={tableTransfer?.sourceTableId}
+                transferTargetTableId={tableTransfer?.targetTableId}
                 onCanvasContextMenu={canManageTables
                   ? (position) => {
                     const activeCanvas = layoutEditor.mode === 'view'
@@ -1111,6 +1191,10 @@ export function DashboardPage() {
           ?? 90
         }
         initialCustomOpen={customDurationTableId === selectedTableId}
+        transferTarget={transferTargetTable}
+        onChooseTransferTarget={chooseTransferTarget}
+        onCancelTransfer={cancelTableTransfer}
+        onTransferComplete={completeTableTransfer}
         onRefresh={refreshTimers}
         onClose={handleCloseDialog}
       />

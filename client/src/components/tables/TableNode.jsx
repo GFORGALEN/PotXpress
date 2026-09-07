@@ -62,6 +62,7 @@ export const TableNode = memo(function TableNode({
   embedded = false,
   editing = false,
   selected = false,
+  transferRole = null,
   shape = 'rectangle',
   groupName = null,
 }) {
@@ -87,6 +88,10 @@ export const TableNode = memo(function TableNode({
         config.shell,
         highlighted && 'ring-4 ring-orange-300 ring-offset-2',
         selected && 'ring-4 ring-sky-500 ring-offset-2 ring-offset-white',
+        transferRole === 'source' && 'ring-4 ring-orange-400 ring-offset-2 ring-offset-white',
+        transferRole === 'target' && 'ring-4 ring-sky-500 ring-offset-2 ring-offset-white',
+        transferRole === 'available' && 'ring-4 ring-emerald-300 ring-offset-2 ring-offset-white',
+        transferRole === 'unavailable' && 'opacity-40 grayscale-[.35]',
         groupName && 'outline outline-2 outline-dashed outline-violet-500 outline-offset-2',
       )}
       style={embedded ? {
@@ -138,7 +143,7 @@ export const TableNode = memo(function TableNode({
         event.stopPropagation();
         onTableDoubleClick?.(tableId, event);
       }}
-      aria-label={`${name}，${editing ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '已超时' : '剩余'} ${duration}，预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}`}
+      aria-label={`${name}，${transferRole === 'available' ? '可换入，' : ''}${transferRole === 'source' ? '当前桌，' : ''}${editing ? '编辑位置，' : ''}${TIMER_STATUS_LABELS[status]}${isIdle ? '' : `，${status === 'overtime' ? '已超时' : '剩余'} ${duration}，预计结束 ${formatStoreTime(effectiveEndTime, timezone)}`}`}
     >
       <span aria-hidden="true" className="table-seat table-seat-top" />
       <span aria-hidden="true" className="table-seat table-seat-right" />

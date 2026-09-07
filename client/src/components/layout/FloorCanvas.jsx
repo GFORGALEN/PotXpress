@@ -288,6 +288,8 @@ export function FloorCanvas({
   timezone,
   onTableClick,
   onTableDoubleClick,
+  transferSourceTableId = null,
+  transferTargetTableId = null,
   onCanvasContextMenu,
   onTableContextMenu,
   editing = false,
@@ -922,7 +924,13 @@ export function FloorCanvas({
           editing,
           uiSelected: selectedDecorationId === item.id,
           ...minimums,
-          maxWidth: Math.max(minimums.minWidth, canvas.virtualWidth - item.x),
+          // Walls may span the full canvas even when they were originally
+          // placed away from the left edge. The persisted layout clamp will
+          // move the wall inside the canvas instead of shrinking it back to
+          // the space that happened to remain on its right.
+          maxWidth: item.type === 'wall'
+            ? canvas.virtualWidth
+            : Math.max(minimums.minWidth, canvas.virtualWidth - item.x),
           maxHeight: Math.max(minimums.minHeight, canvas.virtualHeight - item.y),
           onActivate: handleDecorationActivate,
           onResizeStart: handleResizeStart,
@@ -951,6 +959,15 @@ export function FloorCanvas({
         data: {
           table,
           editing,
+          transferRole: transferSourceTableId
+            ? table.tableId === transferSourceTableId
+              ? 'source'
+              : table.tableId === transferTargetTableId
+                ? 'target'
+                : table.status === 'idle' && !table.groupName
+                  ? 'available'
+                  : 'unavailable'
+            : null,
           uiSelected: selectedTableIdSet.has(table.tableId),
           timezone,
           ...getTableResizeLimits(table),
@@ -984,6 +1001,8 @@ export function FloorCanvas({
     tableDisplayLayout,
     tables,
     timezone,
+    transferSourceTableId,
+    transferTargetTableId,
     verticalFillProjection,
   ]);
 
