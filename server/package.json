@@ -17,6 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "create-admin": "node --env-file-if-exists=../.env scripts/createAdmin.js",
     "db:migrate": "node --env-file-if-exists=../.env scripts/migrateDatabase.js",
+    "prelayout:branches:local": "npm run build --workspace @potxpress/contracts",
+    "layout:branches:local": "node scripts/applyLocalBranchLayouts.js",
     "prelayout:transfer": "npm run build --workspace @potxpress/contracts",
     "layout:transfer": "node --env-file-if-exists=../.env --env-file-if-exists=../.env.render.local scripts/transferStoreLayout.js"
   },
