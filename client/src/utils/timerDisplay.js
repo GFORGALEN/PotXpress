@@ -57,6 +57,38 @@ export function formatTimerDuration(seconds, { overtime = false } = {}) {
   return overtime ? `+${value}` : value;
 }
 
+export function deriveTimerAdjustmentPreview({
+  status,
+  remainingSeconds,
+  overtimeSeconds,
+  effectiveEndTime,
+  plannedDurationSeconds,
+  deltaSeconds,
+}) {
+  const adjustedPlannedDurationSeconds = Math.min(
+    480 * 60,
+    Math.max(60, plannedDurationSeconds + deltaSeconds),
+  );
+  const appliedDeltaSeconds = (
+    adjustedPlannedDurationSeconds - plannedDurationSeconds
+  );
+  const currentSignedSeconds = status === 'overtime'
+    ? -Math.max(0, overtimeSeconds)
+    : Math.max(0, remainingSeconds);
+  const adjustedSignedSeconds = currentSignedSeconds + appliedDeltaSeconds;
+  const effectiveEndMilliseconds = Date.parse(effectiveEndTime);
+
+  return {
+    adjustedPlannedDurationSeconds,
+    appliedDeltaSeconds,
+    adjustedRemainingSeconds: Math.max(0, adjustedSignedSeconds),
+    adjustedOvertimeSeconds: Math.max(0, -adjustedSignedSeconds),
+    adjustedEffectiveEndTime: Number.isFinite(effectiveEndMilliseconds)
+      ? new Date(effectiveEndMilliseconds + appliedDeltaSeconds * 1000).toISOString()
+      : null,
+  };
+}
+
 export function formatStoreTime(value, timezone) {
   if (!value) {
     return '—';

@@ -20,6 +20,7 @@ import {
 import { useStore } from '../../contexts/StoreContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';
 import {
+  deriveTimerAdjustmentPreview,
   formatStoreTime,
   formatTimerDuration,
   TIMER_STATUS_LABELS,
@@ -131,10 +132,20 @@ export function TableActionDialog({
   const signedAdjustmentMinutes = adjustDirection === 'subtract'
     ? -adjustMinutes
     : adjustMinutes;
-  const adjustedPlannedMinutes = Math.min(
-    480,
-    Math.max(1, plannedMinutes + signedAdjustmentMinutes),
+  const adjustmentPreview = deriveTimerAdjustmentPreview({
+    status: table.status,
+    remainingSeconds: table.remainingSeconds,
+    overtimeSeconds: table.overtimeSeconds,
+    effectiveEndTime: table.effectiveEndTime,
+    plannedDurationSeconds: table.timer?.plannedDurationSeconds ?? 0,
+    deltaSeconds: signedAdjustmentMinutes * 60,
+  });
+  const adjustedPlannedMinutes = Math.round(
+    adjustmentPreview.adjustedPlannedDurationSeconds / 60,
   );
+  const adjustedDuration = adjustmentPreview.adjustedOvertimeSeconds > 0
+    ? `超时 ${formatTimerDuration(adjustmentPreview.adjustedOvertimeSeconds)}`
+    : formatTimerDuration(adjustmentPreview.adjustedRemainingSeconds);
   const runCustomAdjustment = () => runAction(
     `custom-${adjustDirection}`,
     () => adjustTimer(
@@ -161,7 +172,7 @@ export function TableActionDialog({
         />
         <div
           data-potx-touch-scroll
-          className="detail-panel-enter touch-scroll-region pointer-events-auto absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[2rem] border border-stone-200 bg-white p-5 shadow-2xl xl:inset-y-[4.5rem] xl:left-auto xl:right-0 xl:max-h-none xl:w-[23.5rem] xl:rounded-none xl:border-y-0 xl:border-r-0 xl:p-6"
+          className="detail-panel-enter touch-scroll-region pointer-events-auto absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[2rem] border border-stone-200 bg-white p-5 shadow-2xl xl:bottom-0 xl:left-auto xl:right-0 xl:top-20 xl:max-h-none xl:w-[23.5rem] xl:rounded-none xl:border-y-0 xl:border-r-0 xl:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="table-action-title"
@@ -478,14 +489,40 @@ export function TableActionDialog({
                         className="mt-1.5 min-h-11 w-full rounded-xl border border-stone-200 bg-white px-3 text-sm outline-none focus:border-sky-400"
                       />
                     </label>
-                    <p className="rounded-xl bg-white px-3 py-2 text-xs text-stone-500">
-                      计划总时长：
-                      <strong className="ml-1 text-ink-950">{plannedMinutes} 分钟</strong>
-                      <span className="mx-2">→</span>
-                      <strong className={adjustDirection === 'subtract' ? 'text-amber-800' : 'text-emerald-800'}>
-                        {adjustedPlannedMinutes} 分钟
-                      </strong>
-                    </p>
+                    <div className="space-y-2 rounded-xl bg-white px-3 py-3 text-xs text-stone-500">
+                      <p className="flex flex-wrap items-center justify-between gap-2">
+                        <span>剩余/超时</span>
+                        <span className="font-mono tabular-nums">
+                          <strong className="text-ink-950">
+                            {isOvertime ? `超时 ${duration}` : duration}
+                          </strong>
+                          <span className="mx-2 text-stone-400">→</span>
+                          <strong className={adjustmentPreview.adjustedOvertimeSeconds > 0 ? 'text-red-700' : 'text-sky-800'}>
+                            {adjustedDuration}
+                          </strong>
+                        </span>
+                      </p>
+                      <p className="flex flex-wrap items-center justify-between gap-2">
+                        <span>预计结束</span>
+                        <span className="tabular-nums">
+                          <strong className="text-ink-950">
+                            {formatStoreTime(table.effectiveEndTime, timezone)}
+                          </strong>
+                          <span className="mx-2 text-stone-400">→</span>
+                          <strong className={adjustDirection === 'subtract' ? 'text-amber-800' : 'text-emerald-800'}>
+                            {formatStoreTime(adjustmentPreview.adjustedEffectiveEndTime, timezone)}
+                          </strong>
+                        </span>
+                      </p>
+                      <p className="border-t border-stone-100 pt-2">
+                        计划总时长：
+                        <strong className="ml-1 text-ink-950">{plannedMinutes} 分钟</strong>
+                        <span className="mx-2">→</span>
+                        <strong className={adjustDirection === 'subtract' ? 'text-amber-800' : 'text-emerald-800'}>
+                          {adjustedPlannedMinutes} 分钟
+                        </strong>
+                      </p>
+                    </div>
                     <button
                       type="button"
                       disabled={disabled || !Number.isInteger(adjustMinutes) || adjustMinutes < 5 || adjustMinutes > 480 || adjustedPlannedMinutes === plannedMinutes}

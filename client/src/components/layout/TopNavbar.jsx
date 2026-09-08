@@ -98,7 +98,7 @@ export function TopNavbar({ onOpenMenu }) {
 
   return (
     <>
-    <header className="relative z-30 flex h-20 shrink-0 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur sm:px-5 lg:px-7">
+    <header className={`relative z-30 flex h-20 shrink-0 items-center gap-3 border-b border-stone-200 bg-white/95 px-3 backdrop-blur sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:px-5 lg:px-7 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] ${userMenuOpen ? 'xl:z-[100]' : ''}`}>
       <button
         type="button"
         onClick={onOpenMenu}
@@ -108,7 +108,7 @@ export function TopNavbar({ onOpenMenu }) {
         <Menu size={20} />
       </button>
 
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
         <img
           src="/potxpress-logo.png?v=3"
           alt="PotXpress 小锅快线"
@@ -122,7 +122,7 @@ export function TopNavbar({ onOpenMenu }) {
             </span>
           </p>
           {user.role === 'system_admin' ? (
-            <label className="mt-1 flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 shadow-sm transition hover:border-sky-300 hover:bg-sky-100">
+            <label className="mt-1 flex min-w-0 max-w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 shadow-sm transition hover:border-sky-300 hover:bg-sky-100">
               <ArrowRightLeft className="shrink-0 text-ember-600" size={15} />
               <span className="hidden shrink-0 font-black sm:inline">切换门店</span>
               <select
@@ -130,7 +130,7 @@ export function TopNavbar({ onOpenMenu }) {
                 value={selectedStoreId ?? ''}
                 disabled={loading || enabledStores.length === 0}
                 onChange={(event) => selectStore(event.target.value)}
-                className="min-w-0 max-w-[7rem] cursor-pointer appearance-none truncate bg-transparent pr-5 font-bold text-sky-950 outline-none disabled:cursor-default sm:max-w-[22rem] xl:max-w-[34rem]"
+                className="min-w-0 max-w-[7rem] cursor-pointer appearance-none truncate bg-transparent pr-5 font-bold text-sky-950 outline-none disabled:cursor-default sm:max-w-full"
               >
                 {enabledStores.length === 0 ? (
                   <option value="">暂无可用门店</option>
@@ -151,11 +151,11 @@ export function TopNavbar({ onOpenMenu }) {
         </div>
       </div>
 
-      <div className="shrink-0 sm:absolute sm:left-1/2 sm:-translate-x-1/2">
+      <div className="shrink-0">
         <StoreClock store={currentStore} />
       </div>
 
-      <div className="flex flex-none items-center justify-end gap-2 sm:ml-auto sm:flex-1">
+      <div className="flex flex-none items-center justify-end gap-2 sm:ml-auto xl:flex-1">
         <button
           type="button"
           onClick={authorized ? toggleLocalSound : enableSound}

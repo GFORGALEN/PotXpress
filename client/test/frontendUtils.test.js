@@ -8,6 +8,7 @@ import {
 } from '../src/utils/storeSelection.js';
 import {
   calculateClockOffset,
+  deriveTimerAdjustmentPreview,
   deriveTimerDisplay,
   formatTimerDuration,
 } from '../src/utils/timerDisplay.js';
@@ -112,6 +113,45 @@ test('tablet dialogs keep the complete touch-scroll safety contract', () => {
     assert.match(source, /dvh/, `${file} must follow the dynamic viewport`);
     assert.match(source, /overflow-y-auto/, `${file} must scroll vertically`);
   }
+});
+
+test('desktop table actions leave the account menu above the side panel', () => {
+  const navbarSource = readFileSync(
+    new URL('../src/components/layout/TopNavbar.jsx', import.meta.url),
+    'utf8',
+  );
+  const tableActionSource = readFileSync(
+    new URL('../src/components/tables/TableActionDialog.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(navbarSource, /userMenuOpen \? 'xl:z-\[100\]'/);
+  assert.match(tableActionSource, /xl:top-20/);
+  assert.doesNotMatch(tableActionSource, /xl:inset-y-\[4\.5rem\]/);
+});
+
+test('tablet navbar reserves separate columns for store, clock and account actions', () => {
+  const source = readFileSync(
+    new URL('../src/components/layout/TopNavbar.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /sm:grid-cols-\[auto_minmax\(0,1fr\)_auto_auto\]/);
+  assert.match(source, /max-w-full cursor-pointer/);
+  assert.doesNotMatch(source, /sm:absolute sm:left-1\/2/);
+});
+
+test('operating-mode table clicks always open table actions', () => {
+  const source = readFileSync(
+    new URL('../src/pages/DashboardPage.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    source,
+    /if \(!table\) return;\s+setCustomDurationTableId\(null\);\s+setSelectedTableId\(tableId\);/,
+  );
+  assert.doesNotMatch(source, /TABLE_DOUBLE_CLICK_DELAY|startTimer\(/);
 });
 
 test('resolveEnabledStore restores an enabled saved store', () => {
@@ -355,6 +395,39 @@ test('deriveTimerDisplay never exceeds the server snapshot after clock correctio
 
   assert.equal(display.remainingSeconds, 5400);
   assert.equal(formatTimerDuration(display.remainingSeconds), '90:00');
+});
+
+test('timer adjustment preview uses remaining time while retaining planned duration', () => {
+  const preview = deriveTimerAdjustmentPreview({
+    status: 'running',
+    remainingSeconds: 86 * 60 + 53,
+    overtimeSeconds: 0,
+    effectiveEndTime: '2026-09-08T07:25:00.000Z',
+    plannedDurationSeconds: 111 * 60,
+    deltaSeconds: -55 * 60,
+  });
+
+  assert.equal(preview.adjustedPlannedDurationSeconds, 56 * 60);
+  assert.equal(preview.appliedDeltaSeconds, -55 * 60);
+  assert.equal(preview.adjustedRemainingSeconds, 31 * 60 + 53);
+  assert.equal(preview.adjustedOvertimeSeconds, 0);
+  assert.equal(preview.adjustedEffectiveEndTime, '2026-09-08T06:30:00.000Z');
+});
+
+test('timer adjustment preview reports overtime and honors the one-minute floor', () => {
+  const preview = deriveTimerAdjustmentPreview({
+    status: 'overtime',
+    remainingSeconds: 0,
+    overtimeSeconds: 120,
+    effectiveEndTime: '2026-09-08T06:00:00.000Z',
+    plannedDurationSeconds: 6 * 60,
+    deltaSeconds: -10 * 60,
+  });
+
+  assert.equal(preview.adjustedPlannedDurationSeconds, 60);
+  assert.equal(preview.appliedDeltaSeconds, -5 * 60);
+  assert.equal(preview.adjustedRemainingSeconds, 0);
+  assert.equal(preview.adjustedOvertimeSeconds, 7 * 60);
 });
 
 test('clock offset uses the request midpoint and rejects slow samples', () => {
