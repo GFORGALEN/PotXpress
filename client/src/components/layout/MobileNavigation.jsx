@@ -53,7 +53,10 @@ export function MobileDrawer({ open, onClose }) {
         onClick={onClose}
         aria-label="关闭导航"
       />
-      <div className="absolute inset-y-0 left-0 w-[min(19rem,86vw)] border-r border-stone-200 bg-white p-5 text-ink-950 shadow-soft">
+      <div
+        data-potx-touch-scroll
+        className="touch-scroll-region absolute inset-y-0 left-0 w-[min(19rem,86vw)] overflow-y-auto border-r border-stone-200 bg-white p-5 text-ink-950 shadow-soft"
+      >
         <div className="flex h-12 items-center gap-3 px-2">
           <img
             src="/potxpress-logo.png?v=3"

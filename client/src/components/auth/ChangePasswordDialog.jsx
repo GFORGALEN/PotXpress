@@ -40,7 +40,7 @@ export function ChangePasswordDialog({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-ink-950/60 p-4" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-soft" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
+      <div data-potx-touch-scroll className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-soft" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
         <h2 id="change-password-title" className="text-xl font-black">修改密码</h2>
         <p className="mt-2 text-sm text-stone-500">修改成功后，所有已登录设备都会退出。</p>
         <form className="mt-5 grid gap-3" onSubmit={submit}>

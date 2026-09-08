@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { navigationForRole, ROLE_LABELS } from '../src/utils/navigation.js';
 import {
   formatStoreDisplayName,
@@ -90,6 +91,27 @@ test('fullscreen touch guard preserves tablet scrolling inside marked panels', (
   assert.equal(isFullscreenTouchScrollTarget(panelTarget), true);
   assert.equal(isFullscreenTouchScrollTarget(canvasTarget), false);
   assert.equal(isFullscreenTouchScrollTarget(null), false);
+});
+
+test('tablet dialogs keep the complete touch-scroll safety contract', () => {
+  const dialogFiles = [
+    '../src/components/alerts/AlertDialogs.jsx',
+    '../src/components/auth/ChangePasswordDialog.jsx',
+    '../src/components/common/ConfirmDialog.jsx',
+    '../src/components/layout/LayoutConflictDialog.jsx',
+    '../src/components/tables/CanvasTableDialog.jsx',
+    '../src/components/tables/TableActionDialog.jsx',
+    '../src/components/tables/TableDetailDialog.jsx',
+  ];
+
+  for (const file of dialogFiles) {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    assert.match(source, /data-potx-touch-scroll/, `${file} must allow touchmove`);
+    assert.match(source, /touch-scroll-region/, `${file} must enable pan-y`);
+    assert.match(source, /max-h-\[/, `${file} must fit the viewport`);
+    assert.match(source, /dvh/, `${file} must follow the dynamic viewport`);
+    assert.match(source, /overflow-y-auto/, `${file} must scroll vertically`);
+  }
 });
 
 test('resolveEnabledStore restores an enabled saved store', () => {

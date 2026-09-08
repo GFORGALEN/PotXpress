@@ -9,7 +9,8 @@ export function WarningAlertDialog({ tables, onClose }) {
   return (
     <div className="fixed inset-0 z-[96] flex items-center justify-center bg-ink-950/60 p-4 backdrop-blur-sm">
       <div
-        className="w-full max-w-md rounded-3xl bg-white p-6 shadow-soft"
+        data-potx-touch-scroll
+        className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-soft"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="warning-alert-title"
@@ -73,7 +74,8 @@ export function OvertimeAlertDialog({
   return (
     <div className="fixed inset-0 z-[98] flex items-center justify-center bg-red-950/80 p-4 backdrop-blur-sm">
       <div
-        className="w-full max-w-lg rounded-3xl border-2 border-red-300 bg-white p-6 shadow-soft"
+        data-potx-touch-scroll
+        className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border-2 border-red-300 bg-white p-6 shadow-soft"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="overtime-alert-title"

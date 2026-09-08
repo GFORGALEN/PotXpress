@@ -49,7 +49,8 @@ export function ConfirmDialog({
       }}
     >
       <div
-        className="w-full max-w-md rounded-3xl border border-white/60 bg-white p-6 shadow-soft"
+        data-potx-touch-scroll
+        className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl border border-white/60 bg-white p-6 shadow-soft"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"

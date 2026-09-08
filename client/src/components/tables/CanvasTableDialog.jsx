@@ -52,7 +52,7 @@ export function CanvasTableDialog({ dialog, busy, onClose, onSubmit }) {
     >
       <form
         data-potx-touch-scroll
-        className="touch-scroll-region max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/60 bg-white p-6 shadow-2xl"
+        className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/60 bg-white p-6 shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="canvas-table-dialog-title"
