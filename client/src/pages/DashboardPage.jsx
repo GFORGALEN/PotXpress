@@ -63,6 +63,7 @@ import {
   shouldLockCanvasPan,
   shouldUseNativeFullscreen,
 } from '../utils/canvasInteraction.js';
+import { isFullscreenTouchScrollTarget } from '../utils/fullscreenTouch.js';
 import { formatStoreDisplayName } from '../utils/storeSelection.js';
 import { deriveServerContactHealth } from '../utils/connectionHealth.js';
 import {
@@ -219,6 +220,7 @@ export function DashboardPage() {
     document.body.style.overscrollBehavior = 'none';
 
     const preventTouchNavigation = (event) => {
+      if (isFullscreenTouchScrollTarget(event.target)) return;
       if (event.cancelable) event.preventDefault();
     };
     root.addEventListener('touchmove', preventTouchNavigation, { passive: false });

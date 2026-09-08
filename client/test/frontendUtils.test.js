@@ -57,6 +57,10 @@ import {
   updateMarqueeSelectionIds,
 } from '../src/utils/canvasInteraction.js';
 import { deriveServerContactHealth } from '../src/utils/connectionHealth.js';
+import {
+  FULLSCREEN_TOUCH_SCROLL_SELECTOR,
+  isFullscreenTouchScrollTarget,
+} from '../src/utils/fullscreenTouch.js';
 
 const stores = [
   { id: 'disabled', name: '暂停营业门店', enabled: false },
@@ -72,6 +76,20 @@ test('decoration resize callbacks resolve the persisted decoration id', () => {
   assert.equal(decorationIdFromNode(nodeId), decorationId);
   assert.equal(layoutItemIdFromNode(nodeId), decorationId);
   assert.equal(layoutItemIdFromNode('table-main'), 'table-main');
+});
+
+test('fullscreen touch guard preserves tablet scrolling inside marked panels', () => {
+  const panel = { id: 'table-action-panel' };
+  const panelTarget = {
+    closest(selector) {
+      return selector === FULLSCREEN_TOUCH_SCROLL_SELECTOR ? panel : null;
+    },
+  };
+  const canvasTarget = { closest: () => null };
+
+  assert.equal(isFullscreenTouchScrollTarget(panelTarget), true);
+  assert.equal(isFullscreenTouchScrollTarget(canvasTarget), false);
+  assert.equal(isFullscreenTouchScrollTarget(null), false);
 });
 
 test('resolveEnabledStore restores an enabled saved store', () => {

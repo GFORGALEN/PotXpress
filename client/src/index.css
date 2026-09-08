@@ -156,7 +156,12 @@
 
 .fullscreen-canvas-shell {
   overscroll-behavior: none;
-  touch-action: none;
+}
+
+.touch-scroll-region {
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 [data-potx-fullscreen-root]:fullscreen {

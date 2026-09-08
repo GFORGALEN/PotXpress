@@ -160,7 +160,8 @@ export function TableActionDialog({
           aria-label="关闭桌台详情"
         />
         <div
-          className="detail-panel-enter pointer-events-auto absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[2rem] border border-stone-200 bg-white p-5 shadow-2xl xl:inset-y-[4.5rem] xl:left-auto xl:right-0 xl:max-h-none xl:w-[23.5rem] xl:rounded-none xl:border-y-0 xl:border-r-0 xl:p-6"
+          data-potx-touch-scroll
+          className="detail-panel-enter touch-scroll-region pointer-events-auto absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-y-auto rounded-t-[2rem] border border-stone-200 bg-white p-5 shadow-2xl xl:inset-y-[4.5rem] xl:left-auto xl:right-0 xl:max-h-none xl:w-[23.5rem] xl:rounded-none xl:border-y-0 xl:border-r-0 xl:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="table-action-title"
