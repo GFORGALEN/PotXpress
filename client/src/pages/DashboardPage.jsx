@@ -24,7 +24,7 @@ import {
   updateTable,
 } from '../api/admin.js';
 import { getLayout } from '../api/layout.ts';
-import { listTimers } from '../api/timers.ts';
+import { listTimers, startTimer } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
 import {
   OvertimeAlertDialog,
@@ -75,6 +75,7 @@ const TIMER_POLL_INTERVAL = 3000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
 const CLOCK_RECALIBRATION_POLLS = 30;
 const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
+const TABLE_DOUBLE_CLICK_DELAY = 320;
 
 export function DashboardPage() {
   const location = useLocation();
@@ -127,6 +128,8 @@ export function DashboardPage() {
   const realtimeRefreshRef = useRef(() => {});
   const fullscreenRootRef = useRef(null);
   const nativeFullscreenActiveRef = useRef(false);
+  const pendingTableClickRef = useRef(null);
+  const quickStartTableIdsRef = useRef(new Set());
   const now = useSecondTick(Boolean(selectedStoreId));
 
   const loadSettings = useCallback(async () => {
@@ -162,6 +165,9 @@ export function DashboardPage() {
     setSelectedTableId(null);
     setTableTransfer(null);
     setCustomDurationTableId(null);
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
+    quickStartTableIdsRef.current.clear();
     setCanvasFocused(false);
     setCanvasMenu(null);
     setTableDialog(null);
@@ -503,6 +509,8 @@ export function DashboardPage() {
       });
     }
   }, [correctedNow, currentStore?.timezone]);
+  useEffect(() => () => clearTimeout(pendingTableClickRef.current), []);
+
   const handleTableClick = useCallback((tableId) => {
     if (layoutEditor.mode !== 'view') {
       layoutEditor.setSelectedTableId(tableId);
@@ -524,6 +532,8 @@ export function DashboardPage() {
         );
         return;
       }
+      clearTimeout(pendingTableClickRef.current);
+      pendingTableClickRef.current = null;
       setTableTransfer((current) => current ? {
         ...current,
         targetTableId: tableId,
@@ -531,13 +541,42 @@ export function DashboardPage() {
       setSelectedTableId(tableTransfer.sourceTableId);
       return;
     }
-    if (!table) return;
-    setCustomDurationTableId(null);
-    setSelectedTableId(tableId);
-  }, [allTables, layoutEditor, showToast, tableTransfer]);
+    if (!table || table.status !== 'idle') {
+      setCustomDurationTableId(null);
+      setSelectedTableId(tableId);
+      return;
+    }
+
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = setTimeout(async () => {
+      pendingTableClickRef.current = null;
+      if (quickStartTableIdsRef.current.has(tableId)) return;
+      quickStartTableIdsRef.current.add(tableId);
+      const durationMinutes = table.defaultDurationMinutes
+        ?? settings?.defaultDurationMinutes
+        ?? 90;
+      try {
+        await startTimer(selectedStoreId, tableId, durationMinutes);
+        await refreshTimers();
+        showToast(`${table.name} 已开始计时（${durationMinutes} 分钟）`, 'success');
+      } catch (error) {
+        showToast(
+          error.code === 'TIMER_STATE_CONFLICT'
+            ? '桌台状态已被其他设备更新，已同步最新状态'
+            : error.message,
+          'error',
+        );
+        await refreshTimers();
+      } finally {
+        quickStartTableIdsRef.current.delete(tableId);
+      }
+    }, TABLE_DOUBLE_CLICK_DELAY);
+  }, [allTables, layoutEditor, refreshTimers, selectedStoreId, settings, showToast, tableTransfer]);
 
   const handleTableDoubleClick = useCallback((tableId) => {
     if (layoutEditor.mode !== 'view' || tableTransfer) return;
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
     setCustomDurationTableId(tableId);
     setSelectedTableId(tableId);
   }, [layoutEditor.mode, tableTransfer]);
@@ -548,6 +587,8 @@ export function DashboardPage() {
     setTableTransfer(null);
   }, []);
   const chooseTransferTarget = useCallback((sourceTableId) => {
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
     setCustomDurationTableId(null);
     setTableTransfer({ sourceTableId, targetTableId: null });
     setSelectedTableId(null);

@@ -141,17 +141,19 @@ test('tablet navbar reserves separate columns for store, clock and account actio
   assert.doesNotMatch(source, /sm:absolute sm:left-1\/2/);
 });
 
-test('operating-mode table clicks always open table actions', () => {
+test('idle tables quick-start on one click and open actions on double click', () => {
   const source = readFileSync(
     new URL('../src/pages/DashboardPage.jsx', import.meta.url),
     'utf8',
   );
 
+  assert.match(source, /const TABLE_DOUBLE_CLICK_DELAY = 320/);
+  assert.match(source, /table\.status !== 'idle'/);
+  assert.match(source, /startTimer\(selectedStoreId, tableId, durationMinutes\)/);
   assert.match(
     source,
-    /if \(!table\) return;\s+setCustomDurationTableId\(null\);\s+setSelectedTableId\(tableId\);/,
+    /clearTimeout\(pendingTableClickRef\.current\);\s+pendingTableClickRef\.current = null;\s+setCustomDurationTableId\(tableId\);\s+setSelectedTableId\(tableId\);/,
   );
-  assert.doesNotMatch(source, /TABLE_DOUBLE_CLICK_DELAY|startTimer\(/);
 });
 
 test('resolveEnabledStore restores an enabled saved store', () => {
