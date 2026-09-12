@@ -71,6 +71,10 @@ export function OvertimeAlertDialog({
     return null;
   }
 
+  const overdueReminderActive = tables.some(
+    (table) => (table.timer?.overdueReminderCount ?? 0) > 0,
+  );
+
   return (
     <div className="fixed inset-0 z-[98] flex items-center justify-center bg-red-950/80 p-4 backdrop-blur-sm">
       <div
@@ -87,7 +91,9 @@ export function OvertimeAlertDialog({
           id="overtime-alert-title"
           className="mt-4 text-2xl font-black text-red-700"
         >
-          桌台已超时，需要立即处理
+          {overdueReminderActive
+            ? '桌台已超时 20 分钟（第 1 次提醒）'
+            : '桌台已超时，需要立即处理'}
         </h2>
         <div className="mt-4 space-y-2">
           {tables.map((table) => (
@@ -96,10 +102,17 @@ export function OvertimeAlertDialog({
               className="flex items-center justify-between rounded-xl bg-red-50 px-3 py-3"
             >
               <strong>{table.name}</strong>
-              <span className="font-mono font-black text-red-700">
-                {formatTimerDuration(table.overtimeSeconds, {
-                  overtime: true,
-                })}
+              <span className="text-right">
+                {(table.timer?.overdueReminderCount ?? 0) > 0 ? (
+                  <small className="block font-bold text-red-600">
+                    第 {table.timer.overdueReminderCount} 次提醒
+                  </small>
+                ) : null}
+                <span className="font-mono font-black text-red-700">
+                  {formatTimerDuration(table.overtimeSeconds, {
+                    overtime: true,
+                  })}
+                </span>
               </span>
             </div>
           ))}

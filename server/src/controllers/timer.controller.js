@@ -83,6 +83,22 @@ export async function resetTimerController(req, res) {
   return ok(res, result, '计时已清台并生成记录');
 }
 
+export async function resetAllTimersController(req, res) {
+  const { value: result, replayed } = await timerService.resetAll({
+    storeId: req.params.storeId,
+    idempotencyKey: readIdempotencyKey(req),
+    user: req.user,
+  });
+  markIdempotencyReplay(res, replayed);
+  return ok(
+    res,
+    result,
+    result.resetCount > 0
+      ? `已一键清台 ${result.resetCount} 个计时`
+      : '当前没有需要清台的计时',
+  );
+}
+
 export async function acknowledgeTimerAlertController(req, res) {
   const { value: timer, replayed } = await timerService.acknowledgeAlert({
     storeId: req.params.storeId,

@@ -4,6 +4,7 @@ import {
   ListChecks,
   Settings,
   ShieldCheck,
+  Siren,
   Store,
   Users,
 } from 'lucide-react';
@@ -35,6 +36,14 @@ export const NAV_ITEMS = Object.freeze([
     to: '/admin/tables',
     label: '桌台管理',
     icon: ListChecks,
+    roles: ['system_admin', 'store_admin'],
+    requiresStore: true,
+  },
+  {
+    to: '/admin/interventions',
+    label: '异常处理记录',
+    shortLabel: '异常',
+    icon: Siren,
     roles: ['system_admin', 'store_admin'],
     requiresStore: true,
   },

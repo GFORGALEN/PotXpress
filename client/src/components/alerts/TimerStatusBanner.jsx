@@ -59,6 +59,9 @@ export function TimerStatusBanner({
               className="rounded-xl bg-white/15 px-2.5 py-1 text-xs font-semibold"
             >
               {table.name}
+              {overtime && (table.timer?.overdueReminderCount ?? 0) > 0
+                ? ` · 第${table.timer.overdueReminderCount}次提醒`
+                : ''}
               {' · '}
               {formatTimerDuration(
                 overtime ? table.overtimeSeconds : table.remainingSeconds,

@@ -12,6 +12,7 @@ export const ARRAY_DATA_FILES = Object.freeze([
   'tableGroups.json',
   'activeTimers.json',
   'records.json',
+  'timerInterventionRecords.json',
   'settings.json',
   'auditLogs.json',
   'layouts.json',

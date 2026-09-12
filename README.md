@@ -17,6 +17,7 @@ PotXpress 是面向餐厅、台球厅等门店的桌台计时与运营管理网�
 
 - WebSocket 事件驱动的实时计时看板，断线时自动回退轮询。
 - 开始、暂停、继续、加减时、超时确认、清台和历史记录。
+- 超时满 20 分钟再次提醒，满 40 分钟自动清台；管理员可对门店一键清台，所有专项处理均独立留痕。
 - 16:9 门店平面画布，桌台拖拽、缩放、网格吸附、重叠检查和乐观锁保存。
 - 浏览器声音授权、本机静音、门店声音策略和跨设备超时确认。
 - 门店、桌台、用户、设置、记录和审计日志管理页面。
@@ -52,7 +53,7 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
 绕过并发控制。历史记录同时保存 `groupId` 与成员桌台快照，因此解除
 临时拼桌后仍可追溯。
 
-数据库 schemaVersion 5 使用显式业务列、主键、唯一约束、外键和门店维度
+数据库 schemaVersion 6 使用显式业务列、主键、唯一约束、外键和门店维度
 索引，不再把整条业务记录放进通用 `payload JSONB`。拼桌成员、计时成员和
 调整历史使用独立明细表；只有画布布局、审计前后快照、幂等响应和实时事件
 载荷等复杂或整体保存的数据使用 JSONB。HTTP 与 WebSocket 接口仍使用 JSON；启动迁移会在事务内把旧版
@@ -129,7 +130,7 @@ $env:RUN_POSTGRES_INTEGRATION = "true"
 npm run test:postgres --workspace @potxpress/server
 ```
 
-该集成测试会在隔离 schema 中建立旧版 v4 表，验证 v5 数据迁移、显式列、
+该集成测试会在隔离 schema 中建立旧版 v4 表，验证数据迁移、显式列、
 跨实例资源锁、事件版本唯一性及失败事务回滚，结束后自动删除测试 schema。
 
 另开一个终端：
@@ -233,7 +234,9 @@ $password | npm run create-admin --workspace @potxpress/server -- --password-std
 | `GET/PATCH` | `/api/stores/:storeId/settings` | 门店设置 |
 | `GET/PUT` | `/api/stores/:storeId/layout` | 布局读取与保存 |
 | `GET/POST` | `/api/stores/:storeId/.../timer...` | 活动计时与操作 |
+| `POST` | `/api/stores/:storeId/timers/reset-all` | 管理员一键清台 |
 | `GET` | `/api/stores/:storeId/records` | 记录查询 |
+| `GET` | `/api/stores/:storeId/timer-interventions` | 超时提醒、自动清台和一键清台专项记录 |
 | `GET` | `/api/stores/:storeId/records/export` | CSV 导出 |
 | `GET` | `/api/stores/:storeId/audit-logs` | 审计日志 |
 

@@ -17,6 +17,14 @@ export async function getRecordController(req, res) {
   return ok(res, { record }, '已获取计时记录详情');
 }
 
+export async function listTimerInterventionsController(req, res) {
+  const result = await recordService.listTimerInterventions(
+    req.params.storeId,
+    req.validated.query,
+  );
+  return ok(res, result, '已获取异常处理记录');
+}
+
 export async function deleteRecordController(req, res) {
   const [record] = await recordService.deleteRecords(
     req.params.storeId,

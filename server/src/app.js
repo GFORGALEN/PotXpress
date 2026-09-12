@@ -13,6 +13,7 @@ import { layoutRouter } from './routes/layout.routes.js';
 import {
   auditLogRouter,
   recordRouter,
+  timerInterventionRouter,
 } from './routes/record.routes.js';
 import { settingRouter } from './routes/setting.routes.js';
 import { storeRouter } from './routes/store.routes.js';
@@ -82,6 +83,10 @@ export function createApp() {
     tableTimerRouter,
   );
   app.use('/api/stores/:storeId/records', recordRouter);
+  app.use(
+    '/api/stores/:storeId/timer-interventions',
+    timerInterventionRouter,
+  );
   app.use('/api/stores/:storeId/audit-logs', auditLogRouter);
   app.use('/api', (req, res, next) => {
     next(new AppError(404, 'NOT_FOUND', '接口不存在'));

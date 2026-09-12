@@ -28,6 +28,16 @@ export const auditLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(200),
 }).strict();
 
+export const timerInterventionQuerySchema = z.object({
+  date: dateSchema.optional(),
+  tableId: idSchema.optional(),
+  action: z.enum([
+    'overdue_reminder',
+    'auto_reset',
+    'admin_bulk_reset',
+  ]).optional(),
+}).strict();
+
 export const batchDeleteBodySchema = z.object({
   ids: z.array(idSchema).min(1).max(500),
 }).strict();

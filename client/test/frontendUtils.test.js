@@ -180,8 +180,8 @@ test('store display names remove the repeated PotXpress business prefix', () => 
 
 test('navigation exposes only routes allowed for each role', () => {
   assert.equal(navigationForRole('store_staff').length, 2);
-  assert.equal(navigationForRole('store_admin').length, 5);
-  assert.equal(navigationForRole('system_admin').length, 7);
+  assert.equal(navigationForRole('store_admin').length, 6);
+  assert.equal(navigationForRole('system_admin').length, 8);
   assert.deepEqual(
     navigationForRole('store_staff').map((item) => item.to),
     ['/', '/admin/records'],

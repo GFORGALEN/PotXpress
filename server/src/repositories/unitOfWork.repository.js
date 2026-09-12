@@ -7,6 +7,10 @@ const REPOSITORY_DEFINITIONS = Object.freeze({
   tableGroups: { filename: 'tableGroups.json', idField: 'id' },
   activeTimers: { filename: 'activeTimers.json', idField: 'id' },
   records: { filename: 'records.json', idField: 'id' },
+  timerInterventionRecords: {
+    filename: 'timerInterventionRecords.json',
+    idField: 'id',
+  },
   settings: { filename: 'settings.json', idField: 'storeId' },
   auditLogs: { filename: 'auditLogs.json', idField: 'id' },
   layouts: { filename: 'layouts.json', idField: 'storeId' },

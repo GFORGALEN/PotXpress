@@ -4,6 +4,7 @@ import {
   adjustTimerController,
   listTimersController,
   pauseTimerController,
+  resetAllTimersController,
   resetTimerController,
   resumeTimerController,
   startTimerController,
@@ -11,6 +12,7 @@ import {
 } from '../controllers/timer.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { storeAccess } from '../middleware/storeAccess.middleware.js';
+import { requireRole } from '../middleware/requireRole.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import {
@@ -37,6 +39,18 @@ timerListRouter.get(
   }),
   asyncHandler(storeAccess),
   asyncHandler(listTimersController),
+);
+timerListRouter.post(
+  '/reset-all',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    query: emptyQuerySchema,
+    body: emptyBodySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(resetAllTimersController),
 );
 
 tableTimerRouter.post(

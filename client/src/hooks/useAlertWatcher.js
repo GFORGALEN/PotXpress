@@ -17,6 +17,11 @@ function uniqueTimerTables(tables) {
   });
 }
 
+function overtimeAlertKey(table) {
+  const reminderCount = table.timer?.overdueReminderCount ?? 0;
+  return `${table.timerId ?? table.tableId}:${reminderCount}`;
+}
+
 function readWarningIds(storeId) {
   try {
     const parsed = JSON.parse(
@@ -107,7 +112,9 @@ export function useAlertWatcher(tables, refreshTimers) {
 
     startOvertimeAlarm();
     const hasNewUndismissedTimer = unacknowledgedOvertime.some(
-      (table) => !dismissedOvertimeIdsRef.current.has(table.timerId),
+      (table) => !dismissedOvertimeIdsRef.current.has(
+        overtimeAlertKey(table),
+      ),
     );
 
     if (hasNewUndismissedTimer) {
@@ -152,7 +159,7 @@ export function useAlertWatcher(tables, refreshTimers) {
 
   const goHandle = useCallback(() => {
     for (const table of unacknowledgedOvertime) {
-      dismissedOvertimeIdsRef.current.add(table.timerId);
+      dismissedOvertimeIdsRef.current.add(overtimeAlertKey(table));
     }
     setOvertimeDialogOpen(false);
   }, [unacknowledgedOvertime]);

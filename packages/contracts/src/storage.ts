@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { storedLayoutSchema } from './layout.js';
+import { timerInterventionRecordSchema } from './intervention.js';
 import { recordSchema } from './record.js';
 import { webSocketEventSchema } from './realtime.js';
 import {
@@ -20,6 +21,7 @@ export const fileDataSchemas = Object.freeze({
   'tableGroups.json': z.array(tableGroupSchema),
   'activeTimers.json': z.array(activeTimerSchema),
   'records.json': z.array(recordSchema),
+  'timerInterventionRecords.json': z.array(timerInterventionRecordSchema),
   'settings.json': z.array(settingsSchema),
   'auditLogs.json': z.array(auditLogSchema),
   'layouts.json': z.array(storedLayoutSchema),

@@ -44,6 +44,7 @@ const activeTimer = {
   remainingSeconds: 1800,
   overtimeSeconds: 0,
   effectiveEndTime: '2026-07-30T11:00:00.000Z',
+  overdueReminderCount: 0,
 };
 
 test('Timer 快照契约同时校验持久字段与计算字段', () => {

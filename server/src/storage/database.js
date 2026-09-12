@@ -54,6 +54,17 @@ export const DATABASE_RESOURCES = Object.freeze({
     col('resetBy', 'reset_by'), col('resetByNameSnapshot', 'reset_by_name_snapshot'),
     col('finalStatus', 'final_status'), col('createdAt', 'created_at', { timestamp: true }),
   ]),
+  'timerInterventionRecords.json': resource('timer_intervention_records', 'id', 'id', [
+    col('id', 'id'), col('timerId', 'timer_id'), col('storeId', 'store_id'),
+    col('tableId', 'table_id'), col('targetType', 'target_type'), col('groupId', 'group_id'),
+    col('memberTableIds', 'member_table_ids', { json: true }),
+    col('tableNameSnapshot', 'table_name_snapshot'),
+    col('tableNumberSnapshot', 'table_number_snapshot'), col('action', 'action'),
+    col('reminderNumber', 'reminder_number'), col('thresholdSeconds', 'threshold_seconds'),
+    col('overtimeSeconds', 'overtime_seconds'), col('timerRecordId', 'timer_record_id'),
+    col('actorUserId', 'actor_user_id'), col('actorNameSnapshot', 'actor_name_snapshot'),
+    col('createdAt', 'created_at', { timestamp: true }),
+  ]),
   'settings.json': resource('store_settings', 'storeId', 'store_id', [
     col('storeId', 'store_id'), col('defaultDurationMinutes', 'default_duration_minutes'),
     col('warningThresholdMinutes', 'warning_threshold_minutes'), col('timezone', 'timezone'),
@@ -156,6 +167,14 @@ const CREATE_STATEMENTS = [
     position INTEGER NOT NULL, type TEXT NOT NULL, seconds INTEGER NOT NULL, requested_seconds INTEGER NOT NULL,
     reason TEXT NULL, adjusted_by TEXT NOT NULL, adjusted_by_name_snapshot TEXT NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (record_id, position))`,
+  `CREATE TABLE IF NOT EXISTS timer_intervention_records (id TEXT PRIMARY KEY,
+    timer_id TEXT NOT NULL, store_id TEXT NOT NULL REFERENCES stores(id),
+    table_id TEXT NOT NULL, target_type TEXT NOT NULL,
+    group_id TEXT NULL, member_table_ids JSONB NOT NULL,
+    table_name_snapshot TEXT NOT NULL, table_number_snapshot INTEGER NOT NULL,
+    action TEXT NOT NULL, reminder_number INTEGER NULL, threshold_seconds INTEGER NULL,
+    overtime_seconds INTEGER NOT NULL, timer_record_id TEXT NULL,
+    actor_user_id TEXT NULL, actor_name_snapshot TEXT NULL, created_at TIMESTAMPTZ NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS store_settings (store_id TEXT PRIMARY KEY REFERENCES stores(id),
     default_duration_minutes INTEGER NOT NULL, warning_threshold_minutes INTEGER NOT NULL,
     timezone TEXT NOT NULL, sound_enabled BOOLEAN NOT NULL, updated_at TIMESTAMPTZ NOT NULL)`,
@@ -182,6 +201,8 @@ const INDEX_STATEMENTS = [
   'CREATE INDEX IF NOT EXISTS table_groups_store_enabled_idx ON table_groups (store_id, enabled)',
   'CREATE INDEX IF NOT EXISTS active_timers_store_status_idx ON active_timers (store_id, status)',
   'CREATE INDEX IF NOT EXISTS timer_records_store_start_idx ON timer_records (store_id, start_time DESC)',
+  'CREATE INDEX IF NOT EXISTS timer_interventions_store_time_idx ON timer_intervention_records (store_id, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS timer_interventions_timer_reminder_idx ON timer_intervention_records (timer_id, reminder_number)',
   'CREATE INDEX IF NOT EXISTS audit_logs_store_time_idx ON audit_logs (store_id, occurred_at DESC)',
   'CREATE INDEX IF NOT EXISTS audit_logs_user_time_idx ON audit_logs (user_id, occurred_at DESC)',
   'CREATE INDEX IF NOT EXISTS idempotency_keys_expiry_idx ON idempotency_keys (expires_at)',
@@ -402,15 +423,26 @@ async function hasLegacyPayloadSchema(client) {
 
 async function migrateLegacyPayloadSchema(client) {
   const snapshots = {};
+  const legacyColumns = await client.query(`SELECT table_name FROM information_schema.columns
+    WHERE table_schema = current_schema() AND column_name = 'payload'`);
+  const legacyTables = new Set(legacyColumns.rows.map((row) => row.table_name));
   for (const [filename, definition] of Object.entries(DATABASE_RESOURCES)) {
+    if (!legacyTables.has(definition.table)) {
+      snapshots[filename] = definition.idField ? [] : null;
+      continue;
+    }
     const result = await client.query(`SELECT payload FROM ${definition.table} ORDER BY id`);
     const values = result.rows.map(({ payload }) => payload);
     snapshots[filename] = definition.idField ? values : (values[0] ?? null);
   }
-  for (const definition of Object.values(DATABASE_RESOURCES)) await client.query(`DROP TABLE ${definition.table}`);
+  for (const definition of Object.values(DATABASE_RESOURCES)) {
+    if (legacyTables.has(definition.table)) {
+      await client.query(`DROP TABLE ${definition.table}`);
+    }
+  }
   await createNormalizedSchema(client);
   for (const filename of ['stores.json', 'users.json', 'tables.json', 'tableGroups.json', 'activeTimers.json',
-    'records.json', 'settings.json', 'auditLogs.json', 'layouts.json', 'idempotencyKeys.json',
+    'records.json', 'timerInterventionRecords.json', 'settings.json', 'auditLogs.json', 'layouts.json', 'idempotencyKeys.json',
     'realtimeEvents.json', 'metadata.json']) {
     await replaceResource(client, filename, snapshots[filename]);
   }
@@ -431,7 +463,7 @@ export async function initializeDatabase() {
         await client.query(`INSERT INTO resource_locks (resource_name) VALUES ($1)
           ON CONFLICT (resource_name) DO NOTHING`, [filename]);
       }
-      await client.query(`INSERT INTO schema_migrations (version) VALUES (5) ON CONFLICT (version) DO NOTHING`);
+      await client.query(`INSERT INTO schema_migrations (version) VALUES (6) ON CONFLICT (version) DO NOTHING`);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});

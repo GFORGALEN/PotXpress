@@ -68,6 +68,7 @@ export async function checkDataConsistency() {
   const tableGroups = data['tableGroups.json'];
   const timers = data['activeTimers.json'];
   const records = data['records.json'];
+  const timerInterventionRecords = data['timerInterventionRecords.json'];
   const settings = data['settings.json'];
   const layouts = data['layouts.json'];
   const idempotencyKeys = data['idempotencyKeys.json'];
@@ -88,6 +89,7 @@ export async function checkDataConsistency() {
   assertUnique(timers, (timer) => timer.tableId, '活动计时桌台');
   assertUnique(records, (record) => record.id, '记录 id');
   assertUnique(records, (record) => record.timerId, '记录 timerId');
+  assertUnique(timerInterventionRecords, (record) => record.id, '异常处理记录 id');
   assertUnique(settings, (entry) => entry.storeId, '门店设置');
   assertUnique(layouts, (entry) => entry.storeId, '门店布局');
   assertUnique(idempotencyKeys, (entry) => entry.id, '幂等记录 id');
@@ -251,6 +253,12 @@ export async function checkDataConsistency() {
 
     if (!storeById.has(record.storeId) || !table || table.storeId !== record.storeId) {
       throw new Error(`记录 ${record.id} 的门店或桌台引用无效`);
+    }
+  }
+
+  for (const record of timerInterventionRecords) {
+    if (!storeById.has(record.storeId)) {
+      throw new Error(`异常处理记录 ${record.id} 的门店引用无效`);
     }
   }
 

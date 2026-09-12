@@ -12,6 +12,12 @@ import {
 
 const MIN_DURATION_SECONDS = 60;
 const MAX_DURATION_SECONDS = 28800;
+export const OVERDUE_REMINDER_INTERVAL_SECONDS = 20 * 60;
+export const MAX_OVERDUE_REMINDERS = 2;
+const AUTOMATION_ACTOR = Object.freeze({
+  userId: 'system_automation',
+  displayName: '系统自动清台',
+});
 const TIMER_EVENT_TYPES = Object.freeze({
   'timer.pause': 'timer.paused',
   'timer.resume': 'timer.resumed',
@@ -87,10 +93,33 @@ function timerConflict(message) {
   throw new AppError(409, 'TIMER_STATE_CONFLICT', message);
 }
 
-function timerResponse(timer, now, warningThresholdMinutes) {
+function reminderCountForTimer(timerInterventionRecords, timer, now) {
+  if (!timerInterventionRecords) {
+    return 0;
+  }
+
+  const { effectiveEndMilliseconds } = computeRawRemainingSeconds(timer, now);
+
+  return timerInterventionRecords.find((record) => (
+    record.timerId === timer.id
+    && record.reminderNumber !== null
+    && Date.parse(record.createdAt) >= effectiveEndMilliseconds
+  )).reduce(
+    (count, record) => Math.max(count, record.reminderNumber),
+    0,
+  );
+}
+
+function timerResponse(
+  timer,
+  now,
+  warningThresholdMinutes,
+  overdueReminderCount = 0,
+) {
   return {
     ...timer,
     ...computeTimerState(timer, now, warningThresholdMinutes),
+    overdueReminderCount,
   };
 }
 
@@ -110,6 +139,100 @@ function timerAuditSnapshot(timer) {
   };
 }
 
+function buildResetRecord(timer, now, timestamp, actor) {
+  const currentPauseSeconds = timer.status === 'paused'
+    ? Math.max(
+      0,
+      Math.round((now - Date.parse(timer.pauseStartedAt)) / 1000),
+    )
+    : 0;
+  const totalPausedSeconds = timer.totalPausedSeconds + currentPauseSeconds;
+  const elapsedSeconds = Math.max(
+    0,
+    Math.round((now - Date.parse(timer.startTime)) / 1000),
+  );
+  const startMilliseconds = Date.parse(timer.startTime);
+
+  return {
+    id: `record_${uuidv4()}`,
+    timerId: timer.id,
+    storeId: timer.storeId,
+    tableId: timer.tableId,
+    targetType: timer.targetType,
+    groupId: timer.groupId,
+    memberTableIds: structuredClone(timer.memberTableIds),
+    tableNameSnapshot: timer.tableNameSnapshot,
+    tableNumberSnapshot: timer.tableNumberSnapshot,
+    startTime: timer.startTime,
+    plannedEndTime: new Date(
+      startMilliseconds + timer.plannedDurationSeconds * 1000,
+    ).toISOString(),
+    effectiveEndTimeAtReset: new Date(
+      startMilliseconds + (
+        timer.plannedDurationSeconds + totalPausedSeconds
+      ) * 1000,
+    ).toISOString(),
+    actualEndTime: timestamp,
+    plannedDurationSeconds: timer.plannedDurationSeconds,
+    actualDurationSeconds: Math.max(0, elapsedSeconds - totalPausedSeconds),
+    totalPausedSeconds,
+    adjustments: structuredClone(timer.adjustments),
+    startedBy: timer.startedBy,
+    startedByNameSnapshot: timer.startedByNameSnapshot,
+    resetBy: actor.userId,
+    resetByNameSnapshot: actor.displayName,
+    finalStatus: 'reset',
+    createdAt: timestamp,
+  };
+}
+
+function resetTimerInRepositories(repositories, timer, now, timestamp, actor) {
+  if (
+    repositories.records.findOne(
+      (candidate) => candidate.timerId === timer.id,
+    )
+  ) {
+    timerConflict('该计时器已经生成历史记录');
+  }
+
+  const record = buildResetRecord(timer, now, timestamp, actor);
+  repositories.records.create(record);
+  repositories.activeTimers.delete(timer.id);
+  return record;
+}
+
+function buildInterventionRecord({
+  timer,
+  action,
+  reminderNumber,
+  overtimeSeconds,
+  timerRecordId = null,
+  actor = null,
+  timestamp,
+}) {
+  return {
+    id: `intervention_${uuidv4()}`,
+    timerId: timer.id,
+    storeId: timer.storeId,
+    tableId: timer.tableId,
+    targetType: timer.targetType,
+    groupId: timer.groupId,
+    memberTableIds: structuredClone(timer.memberTableIds),
+    tableNameSnapshot: timer.tableNameSnapshot,
+    tableNumberSnapshot: timer.tableNumberSnapshot,
+    action,
+    reminderNumber,
+    thresholdSeconds: reminderNumber === null
+      ? null
+      : reminderNumber * OVERDUE_REMINDER_INTERVAL_SECONDS,
+    overtimeSeconds,
+    timerRecordId,
+    actorUserId: actor?.userId ?? null,
+    actorNameSnapshot: actor?.displayName ?? null,
+    createdAt: timestamp,
+  };
+}
+
 export class TimerService {
   constructor({ nowProvider = Date.now } = {}) {
     this.nowProvider = nowProvider;
@@ -124,10 +247,20 @@ export class TimerService {
 
     return unitOfWorkRepository.run(
       {
-        resources: ['settings', 'activeTimers', 'realtimeEvents'],
+        resources: [
+          'settings',
+          'activeTimers',
+          'timerInterventionRecords',
+          'realtimeEvents',
+        ],
         writeOrder: [],
       },
-      ({ settings, activeTimers, realtimeEvents }) => {
+      ({
+        settings,
+        activeTimers,
+        timerInterventionRecords,
+        realtimeEvents,
+      }) => {
         const storeSettings = getSettings(settings, storeId);
         const timers = activeTimers.findByStoreId(storeId)
           .sort(
@@ -139,6 +272,7 @@ export class TimerService {
             timer,
             now,
             storeSettings.warningThresholdMinutes,
+            reminderCountForTimer(timerInterventionRecords, timer, now),
           ));
 
         return {
@@ -168,6 +302,7 @@ export class TimerService {
           'tables',
           'settings',
           'activeTimers',
+          'timerInterventionRecords',
           'tableGroups',
           'auditLogs',
           'idempotencyKeys',
@@ -455,6 +590,7 @@ export class TimerService {
           'tables',
           'settings',
           'activeTimers',
+          'timerInterventionRecords',
           'tableGroups',
           'auditLogs',
           'idempotencyKeys',
@@ -548,6 +684,11 @@ export class TimerService {
             updated,
             now,
             getSettings(repositories.settings, storeId).warningThresholdMinutes,
+            reminderCountForTimer(
+              repositories.timerInterventionRecords,
+              updated,
+              now,
+            ),
           );
         },
       }),
@@ -612,65 +753,14 @@ export class TimerService {
             timerConflict('桌台当前没有活动计时');
           }
 
-          if (
-            repositories.records.findOne(
-              (candidate) => candidate.timerId === timer.id,
-            )
-          ) {
-            timerConflict('该计时器已经生成历史记录');
-          }
-
           const timerBefore = structuredClone(timer);
-          const currentPauseSeconds = timer.status === 'paused'
-            ? Math.max(
-              0,
-              Math.round((now - Date.parse(timer.pauseStartedAt)) / 1000),
-            )
-            : 0;
-          const totalPausedSeconds = (
-            timer.totalPausedSeconds + currentPauseSeconds
+          const record = resetTimerInRepositories(
+            repositories,
+            timer,
+            now,
+            timestamp,
+            user,
           );
-          const elapsedSeconds = Math.max(
-            0,
-            Math.round((now - Date.parse(timer.startTime)) / 1000),
-          );
-          const startMilliseconds = Date.parse(timer.startTime);
-          const record = {
-            id: `record_${uuidv4()}`,
-            timerId: timer.id,
-            storeId,
-            tableId: timer.tableId,
-            targetType: timer.targetType,
-            groupId: timer.groupId,
-            memberTableIds: structuredClone(timer.memberTableIds),
-            tableNameSnapshot: timer.tableNameSnapshot,
-            tableNumberSnapshot: timer.tableNumberSnapshot,
-            startTime: timer.startTime,
-            plannedEndTime: new Date(
-              startMilliseconds + timer.plannedDurationSeconds * 1000,
-            ).toISOString(),
-            effectiveEndTimeAtReset: new Date(
-              startMilliseconds + (
-                timer.plannedDurationSeconds + totalPausedSeconds
-              ) * 1000,
-            ).toISOString(),
-            actualEndTime: timestamp,
-            plannedDurationSeconds: timer.plannedDurationSeconds,
-            actualDurationSeconds: Math.max(
-              0,
-              elapsedSeconds - totalPausedSeconds,
-            ),
-            totalPausedSeconds,
-            adjustments: structuredClone(timer.adjustments),
-            startedBy: timer.startedBy,
-            startedByNameSnapshot: timer.startedByNameSnapshot,
-            resetBy: user.userId,
-            resetByNameSnapshot: user.displayName,
-            finalStatus: 'reset',
-            createdAt: timestamp,
-          };
-          repositories.records.create(record);
-          repositories.activeTimers.delete(timer.id);
           appendAuditLog(repositories.auditLogs, {
             userId: user.userId,
             userNameSnapshot: user.displayName,
@@ -716,6 +806,322 @@ export class TimerService {
     return outcome;
   }
 
+  async resetAll({ storeId, idempotencyKey, user }) {
+    const now = this.nowProvider();
+    const timestamp = new Date(now).toISOString();
+    let committedEvent = null;
+
+    const outcome = await unitOfWorkRepository.run(
+      {
+        resources: [
+          'stores',
+          'activeTimers',
+          'records',
+          'timerInterventionRecords',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+        writeOrder: [
+          'records',
+          'timerInterventionRecords',
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+      },
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: 'timer.reset_all',
+        request: { storeId },
+        now,
+        execute: () => {
+          const store = repositories.stores.findById(storeId);
+          if (!store) {
+            throw new AppError(404, 'STORE_NOT_FOUND', '门店不存在');
+          }
+          if (!store.enabled && user.role !== 'system_admin') {
+            throw new AppError(403, 'STORE_DISABLED', '门店已停用');
+          }
+
+          const timers = repositories.activeTimers
+            .findByStoreId(storeId)
+            .sort(
+              (left, right) => (
+                left.tableNumberSnapshot - right.tableNumberSnapshot
+              ),
+            );
+          const records = timers.map((timer) => {
+            const record = resetTimerInRepositories(
+              repositories,
+              timer,
+              now,
+              timestamp,
+              user,
+            );
+            const { rawRemainingSeconds } = computeRawRemainingSeconds(
+              timer,
+              now,
+            );
+            repositories.timerInterventionRecords.create(
+              buildInterventionRecord({
+                timer,
+                action: 'admin_bulk_reset',
+                reminderNumber: null,
+                overtimeSeconds: Math.max(
+                  0,
+                  Math.floor(-rawRemainingSeconds),
+                ),
+                timerRecordId: record.id,
+                actor: user,
+                timestamp,
+              }),
+            );
+            return record;
+          });
+
+          appendAuditLog(repositories.auditLogs, {
+            userId: user.userId,
+            userNameSnapshot: user.displayName,
+            storeId,
+            action: 'timer.reset_all',
+            targetType: 'timer_batch',
+            targetId: null,
+            dataBefore: {
+              count: timers.length,
+              timerIds: timers.map((timer) => timer.id),
+            },
+            dataAfter: {
+              count: records.length,
+              recordIds: records.map((record) => record.id),
+            },
+          }, { timestamp });
+
+          if (records.length > 0) {
+            committedEvent = appendRealtimeEvent(
+              repositories.realtimeEvents,
+              {
+                storeId,
+                type: 'timer.bulk_reset',
+                entityType: 'timer',
+                entityId: null,
+                payload: {
+                  resetCount: records.length,
+                  tableIds: records.map((record) => record.tableId),
+                  tableNames: records.map(
+                    (record) => record.tableNameSnapshot,
+                  ),
+                },
+                timestamp,
+              },
+            );
+          }
+
+          return {
+            records,
+            resetCount: records.length,
+          };
+        },
+      }),
+    );
+
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
+    }
+    return outcome;
+  }
+
+  async processOverdueTimers() {
+    const now = this.nowProvider();
+    const timestamp = new Date(now).toISOString();
+    const committedEvents = [];
+
+    const result = await unitOfWorkRepository.run(
+      {
+        resources: [
+          'activeTimers',
+          'records',
+          'timerInterventionRecords',
+          'auditLogs',
+          'realtimeEvents',
+        ],
+        writeOrder: [
+          'records',
+          'timerInterventionRecords',
+          'activeTimers',
+          'auditLogs',
+          'realtimeEvents',
+        ],
+      },
+      (repositories) => {
+        const reminders = [];
+        const automaticResets = [];
+
+        for (const timer of repositories.activeTimers.find()) {
+          const {
+            rawRemainingSeconds,
+            effectiveEndMilliseconds,
+          } = computeRawRemainingSeconds(
+            timer,
+            now,
+          );
+          const overtimeSeconds = Math.max(
+            0,
+            Math.floor(-rawRemainingSeconds),
+          );
+          if (overtimeSeconds < OVERDUE_REMINDER_INTERVAL_SECONDS) {
+            continue;
+          }
+
+          const existingReminderNumbers = new Set(
+            repositories.timerInterventionRecords.find((record) => (
+              record.timerId === timer.id
+              && record.reminderNumber !== null
+              && Date.parse(record.createdAt) >= effectiveEndMilliseconds
+            )).map((record) => record.reminderNumber),
+          );
+
+          if (!existingReminderNumbers.has(1)) {
+            const reminder = buildInterventionRecord({
+              timer,
+              action: 'overdue_reminder',
+              reminderNumber: 1,
+              overtimeSeconds,
+              timestamp,
+            });
+            repositories.timerInterventionRecords.create(reminder);
+            reminders.push(reminder);
+          }
+
+          if (
+            overtimeSeconds
+            < MAX_OVERDUE_REMINDERS * OVERDUE_REMINDER_INTERVAL_SECONDS
+          ) {
+            if (existingReminderNumbers.has(1)) {
+              continue;
+            }
+
+            if (timer.overtimeAcknowledged) {
+              repositories.activeTimers.update(timer.id, {
+                ...timer,
+                overtimeAcknowledged: false,
+                updatedAt: timestamp,
+              });
+            }
+            appendAuditLog(repositories.auditLogs, {
+              userId: null,
+              userNameSnapshot: null,
+              storeId: timer.storeId,
+              action: 'timer.overdue_reminder',
+              targetType: 'timer',
+              targetId: timer.id,
+              dataBefore: timerAuditSnapshot(timer),
+              dataAfter: {
+                reminderNumber: 1,
+                thresholdSeconds: OVERDUE_REMINDER_INTERVAL_SECONDS,
+                overtimeSeconds,
+              },
+            }, { timestamp });
+            committedEvents.push(appendRealtimeEvent(
+              repositories.realtimeEvents,
+              {
+                storeId: timer.storeId,
+                type: 'timer.overdue_reminder',
+                entityType: 'timer',
+                entityId: timer.id,
+                payload: {
+                  tableId: timer.tableId,
+                  memberTableIds: timer.memberTableIds,
+                  tableNameSnapshot: timer.tableNameSnapshot,
+                  reminderNumber: 1,
+                  overtimeSeconds,
+                },
+                timestamp,
+              },
+            ));
+            continue;
+          }
+
+          if (existingReminderNumbers.has(2)) {
+            continue;
+          }
+
+          const timerBefore = structuredClone(timer);
+          const record = resetTimerInRepositories(
+            repositories,
+            timer,
+            now,
+            timestamp,
+            AUTOMATION_ACTOR,
+          );
+          const intervention = buildInterventionRecord({
+            timer,
+            action: 'auto_reset',
+            reminderNumber: 2,
+            overtimeSeconds,
+            timerRecordId: record.id,
+            actor: AUTOMATION_ACTOR,
+            timestamp,
+          });
+          repositories.timerInterventionRecords.create(intervention);
+          automaticResets.push(intervention);
+          appendAuditLog(repositories.auditLogs, {
+            userId: null,
+            userNameSnapshot: null,
+            storeId: timer.storeId,
+            action: 'timer.auto_reset',
+            targetType: 'timer',
+            targetId: timer.id,
+            dataBefore: timerAuditSnapshot(timerBefore),
+            dataAfter: {
+              recordId: record.id,
+              reminderNumber: 2,
+              thresholdSeconds: (
+                MAX_OVERDUE_REMINDERS
+                * OVERDUE_REMINDER_INTERVAL_SECONDS
+              ),
+              overtimeSeconds,
+            },
+          }, { timestamp });
+          committedEvents.push(appendRealtimeEvent(
+            repositories.realtimeEvents,
+            {
+              storeId: timer.storeId,
+              type: 'timer.auto_reset',
+              entityType: 'timer',
+              entityId: timer.id,
+              payload: {
+                tableId: timer.tableId,
+                memberTableIds: timer.memberTableIds,
+                tableNameSnapshot: timer.tableNameSnapshot,
+                reminderNumber: 2,
+                overtimeSeconds,
+                recordId: record.id,
+              },
+              timestamp,
+            },
+          ));
+        }
+
+        return {
+          remindersCreated: reminders.length,
+          automaticResets: automaticResets.length,
+          reminders,
+          resetRecords: automaticResets,
+        };
+      },
+    );
+
+    for (const event of committedEvents) {
+      realtimeHub.publish(event);
+    }
+    return result;
+  }
+
   async updateTimer({
     storeId,
     tableId,
@@ -736,6 +1142,7 @@ export class TimerService {
           'tables',
           'settings',
           'activeTimers',
+          'timerInterventionRecords',
           'tableGroups',
           'auditLogs',
           'idempotencyKeys',
@@ -816,6 +1223,11 @@ export class TimerService {
             updated,
             now,
             settings.warningThresholdMinutes,
+            reminderCountForTimer(
+              repositories.timerInterventionRecords,
+              updated,
+              now,
+            ),
           );
         },
       }),

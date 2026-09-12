@@ -82,6 +82,14 @@ export async function listRecords(storeId, query) {
   return response.data.data;
 }
 
+export async function listTimerInterventions(storeId, query) {
+  const response = await apiClient.get(
+    `/stores/${storeId}/timer-interventions`,
+    { params: query },
+  );
+  return response.data.data;
+}
+
 export async function deleteRecord(storeId, recordId) {
   const response = await apiClient.delete(
     `/stores/${storeId}/records/${recordId}`,

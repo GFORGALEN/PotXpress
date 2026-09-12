@@ -1,6 +1,6 @@
 import { fileStore, METADATA_FILE } from './fileStore.js';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 async function migrateVersionZeroToOne() {
   await fileStore.withFiles(
@@ -106,6 +106,22 @@ async function migrateVersionFourToFive() {
   }));
 }
 
+async function migrateVersionFiveToSix() {
+  await fileStore.withFiles(
+    ['timerInterventionRecords.json', METADATA_FILE],
+    (drafts) => {
+      drafts['timerInterventionRecords.json'] ??= [];
+      drafts[METADATA_FILE] = {
+        schemaVersion: 6,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    {
+      writeOrder: ['timerInterventionRecords.json', METADATA_FILE],
+    },
+  );
+}
+
 export async function runMigrations() {
   const metadata = await fileStore.readJSON(METADATA_FILE);
 
@@ -149,6 +165,12 @@ export async function runMigrations() {
     if (version === 4) {
       await migrateVersionFourToFive();
       version = 5;
+      continue;
+    }
+
+    if (version === 5) {
+      await migrateVersionFiveToSix();
+      version = 6;
       continue;
     }
 

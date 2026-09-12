@@ -12,6 +12,7 @@ import {
   tableGroupSchema,
   tableLayoutSchema,
   tableSchema,
+  timerInterventionRecordSchema,
   userSchema,
   webSocketEventSchema,
 } from '@potxpress/contracts';
@@ -27,6 +28,7 @@ export const settingsDataSchema = settingsSchema;
 export const storeLayoutDataSchema = storedLayoutSchema;
 export const activeTimerDataSchema = activeTimerSchema;
 export const recordDataSchema = recordSchema;
+export const timerInterventionRecordDataSchema = timerInterventionRecordSchema;
 export const auditLogDataSchema = auditLogSchema;
 export const idempotencyKeyDataSchema = idempotencyKeySchema;
 export const realtimeEventDataSchema = webSocketEventSchema;

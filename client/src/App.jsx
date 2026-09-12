@@ -9,6 +9,7 @@ import {
   SettingsPage,
   StoresAdminPage,
   TablesAdminPage,
+  TimerInterventionRecordsPage,
   UsersAdminPage,
 } from './pages/AdminPages.jsx';
 import { DashboardPage } from './pages/DashboardPage.jsx';
@@ -35,6 +36,7 @@ export default function App() {
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route index element={<GuardedPage roles={ALL_ROLES} requiresStore><DashboardPage /></GuardedPage>} />
         <Route path="admin/records" element={<GuardedPage roles={ALL_ROLES} requiresStore><RecordsPage /></GuardedPage>} />
+        <Route path="admin/interventions" element={<GuardedPage roles={ADMIN_ROLES} requiresStore><TimerInterventionRecordsPage /></GuardedPage>} />
         <Route path="admin/tables" element={<GuardedPage roles={ADMIN_ROLES} requiresStore><TablesAdminPage /></GuardedPage>} />
         <Route path="admin/settings" element={<GuardedPage roles={ADMIN_ROLES} requiresStore><SettingsPage /></GuardedPage>} />
         <Route path="admin/audit-logs" element={<GuardedPage roles={ADMIN_ROLES} requiresStore><AuditLogsPage /></GuardedPage>} />

@@ -1,8 +1,10 @@
 import {
   timerActionResultSchema,
+  timerBulkResetResultSchema,
   timerListSnapshotSchema,
   timerResetResultSchema,
   type TimerActionResult,
+  type TimerBulkResetResult,
   type TimerListSnapshot,
   type TimerResetResult,
 } from '@potxpress/contracts';
@@ -117,6 +119,18 @@ export async function resetTimer(
       url: `/stores/${storeId}/tables/${tableId}/timer/reset`,
     },
     timerResetResultSchema,
+  );
+}
+
+export async function resetAllTimers(
+  storeId: string,
+): Promise<TimerBulkResetResult> {
+  return sendIdempotentApiData(
+    {
+      method: 'post',
+      url: `/stores/${storeId}/timers/reset-all`,
+    },
+    timerBulkResetResultSchema,
   );
 }
 

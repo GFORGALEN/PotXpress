@@ -47,6 +47,7 @@ export const timerSchema = activeTimerSchema
     remainingSeconds: z.number().int().nonnegative(),
     overtimeSeconds: z.number().int().nonnegative(),
     effectiveEndTime: isoDateSchema,
+    overdueReminderCount: z.number().int().min(0).max(2),
   })
   .passthrough();
 
@@ -60,9 +61,20 @@ export const timerActionResultSchema = z.object({
   timer: timerSchema,
 }).strict();
 
+export const timerBulkResetResultSchema = z.object({
+  records: z.array(z.object({
+    id: identifierSchema,
+    timerId: identifierSchema,
+    tableId: identifierSchema,
+    tableNameSnapshot: z.string().min(1).max(100),
+  }).passthrough()),
+  resetCount: z.number().int().nonnegative(),
+}).strict();
+
 export type TimerAdjustment = z.infer<typeof timerAdjustmentSchema>;
 export type ActiveTimer = z.infer<typeof activeTimerSchema>;
 export type TimerStatus = z.infer<typeof timerStatusSchema>;
 export type Timer = z.infer<typeof timerSchema>;
 export type TimerListSnapshot = z.infer<typeof timerListSnapshotSchema>;
 export type TimerActionResult = z.infer<typeof timerActionResultSchema>;
+export type TimerBulkResetResult = z.infer<typeof timerBulkResetResultSchema>;

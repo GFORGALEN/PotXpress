@@ -82,6 +82,34 @@ export class RecordService {
     );
   }
 
+  async listTimerInterventions(storeId, query) {
+    const now = this.nowProvider();
+
+    return unitOfWorkRepository.run(
+      {
+        resources: ['stores', 'timerInterventionRecords'],
+        writeOrder: [],
+      },
+      ({ stores, timerInterventionRecords }) => {
+        const store = getStoreOrThrow(stores, storeId);
+        const date = query.date ?? formatDateInTimezone(now, store.timezone);
+        const records = timerInterventionRecords.find((record) => (
+          record.storeId === storeId
+          && formatDateInTimezone(record.createdAt, store.timezone) === date
+          && (
+            !query.tableId
+            || record.memberTableIds.includes(query.tableId)
+          )
+          && (!query.action || record.action === query.action)
+        )).sort(
+          (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
+        );
+
+        return { date, records };
+      },
+    );
+  }
+
   async deleteRecords(storeId, recordIds, user) {
     const deleted = await unitOfWorkRepository.run(
       {

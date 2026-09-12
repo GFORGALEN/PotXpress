@@ -11,6 +11,9 @@ export const realtimeEventTypeSchema = z.enum([
   'timer.transferred',
   'timer.reset',
   'timer.alert_acknowledged',
+  'timer.overdue_reminder',
+  'timer.auto_reset',
+  'timer.bulk_reset',
   'table_group.created',
   'table_group.deleted',
 ]);

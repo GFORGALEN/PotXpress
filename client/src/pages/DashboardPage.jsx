@@ -14,6 +14,7 @@ import {
   Maximize2,
   Minimize2,
   Radio,
+  RotateCcw,
   RotateCw,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -24,7 +25,7 @@ import {
   updateTable,
 } from '../api/admin.js';
 import { getLayout } from '../api/layout.ts';
-import { listTimers, startTimer } from '../api/timers.ts';
+import { listTimers, resetAllTimers, startTimer } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
 import {
   OvertimeAlertDialog,
@@ -114,6 +115,8 @@ export function DashboardPage() {
   const [tableDialog, setTableDialog] = useState(null);
   const [tableMutation, setTableMutation] = useState(null);
   const [tableMutationBusy, setTableMutationBusy] = useState(false);
+  const [bulkResetOpen, setBulkResetOpen] = useState(false);
+  const [bulkResetBusy, setBulkResetBusy] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
   const [lastServerContactAt, setLastServerContactAt] = useState(null);
@@ -172,6 +175,8 @@ export function DashboardPage() {
     setCanvasMenu(null);
     setTableDialog(null);
     setTableMutation(null);
+    setBulkResetOpen(false);
+    setBulkResetBusy(false);
     setAreaFilter('all');
     setSettings(null);
     clockOffsetRef.current = 0;
@@ -327,9 +332,28 @@ export function DashboardPage() {
     pollingFailedRef.current = true;
   }, []);
 
-  const handleRealtimeSnapshotRequired = useCallback(() => (
-    realtimeRefreshRef.current()
-  ), []);
+  const handleRealtimeSnapshotRequired = useCallback((details = {}) => {
+    const event = details.event;
+    const tableName = event?.payload?.tableNameSnapshot || '桌台';
+    const overtimeMinutes = Math.max(
+      0,
+      Math.floor(Number(event?.payload?.overtimeSeconds ?? 0) / 60),
+    );
+
+    if (event?.type === 'timer.overdue_reminder') {
+      showToast(
+        `${tableName} 已超时 ${overtimeMinutes || 20} 分钟（第 1 次提醒）`,
+        'error',
+      );
+    } else if (event?.type === 'timer.auto_reset') {
+      showToast(
+        `${tableName} 已超时 ${overtimeMinutes || 40} 分钟，系统已自动清台`,
+        'error',
+      );
+    }
+
+    return realtimeRefreshRef.current();
+  }, [showToast]);
   const realtime = useStoreRealtime({
     storeId: selectedStoreId,
     token,
@@ -614,6 +638,28 @@ export function DashboardPage() {
     return result;
   }, [selectedStoreId]);
   const canManageTables = ['system_admin', 'store_admin'].includes(user.role);
+  const confirmBulkReset = useCallback(async () => {
+    if (bulkResetBusy) return;
+    setBulkResetBusy(true);
+
+    try {
+      const result = await resetAllTimers(selectedStoreId);
+      await refreshTimers();
+      setBulkResetOpen(false);
+      setSelectedTableId(null);
+      showToast(
+        result.resetCount > 0
+          ? `已一键清台 ${result.resetCount} 个计时`
+          : '当前没有需要清台的计时',
+        result.resetCount > 0 ? 'success' : 'info',
+      );
+    } catch (error) {
+      showToast(error.message, 'error');
+      await refreshTimers();
+    } finally {
+      setBulkResetBusy(false);
+    }
+  }, [bulkResetBusy, refreshTimers, selectedStoreId, showToast]);
   const toggleCanvasFocus = useCallback(async () => {
     if (layoutEditor.mode !== 'view') {
       setCanvasFocused((value) => !value);
@@ -908,6 +954,17 @@ export function DashboardPage() {
             <RotateCw size={16} />
             立即同步
           </button>
+          {canManageTables && layoutEditor.mode === 'view' ? (
+            <button
+              type="button"
+              disabled={timers.length === 0}
+              onClick={() => setBulkResetOpen(true)}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-300 bg-red-50 px-3 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <RotateCcw size={16} />
+              一键清台（{timers.length}）
+            </button>
+          ) : null}
           {['system_admin', 'store_admin'].includes(user.role)
             && layoutEditor.mode === 'view' ? (
             <button
@@ -1210,6 +1267,17 @@ export function DashboardPage() {
         busy={tableMutationBusy}
         onClose={() => setTableDialog(null)}
         onSubmit={submitTableDialog}
+      />
+      <ConfirmDialog
+        open={bulkResetOpen}
+        title={`确认一键清台 ${timers.length} 个计时？`}
+        description="当前门店所有进行中、暂停中和已超时计时都会立即结束；每一桌都会写入计时记录和异常处理记录。"
+        confirmText={bulkResetBusy ? '正在清台…' : '确认全部清台'}
+        danger
+        onConfirm={confirmBulkReset}
+        onCancel={() => {
+          if (!bulkResetBusy) setBulkResetOpen(false);
+        }}
       />
       <ConfirmDialog
         open={Boolean(tableMutation)}

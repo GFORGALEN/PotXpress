@@ -54,7 +54,7 @@ export class DatabaseStore {
 
       if (!metadata) {
         await this.updateJSON('metadata.json', () => ({
-          schemaVersion: 5,
+          schemaVersion: 6,
           updatedAt: new Date().toISOString(),
         }));
       }

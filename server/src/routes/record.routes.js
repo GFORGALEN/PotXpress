@@ -8,6 +8,7 @@ import {
   getRecordController,
   listAuditLogsController,
   listRecordsController,
+  listTimerInterventionsController,
 } from '../controllers/record.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { requireRole } from '../middleware/requireRole.middleware.js';
@@ -25,10 +26,24 @@ import {
   batchDeleteBodySchema,
   exportRecordQuerySchema,
   recordQuerySchema,
+  timerInterventionQuerySchema,
 } from '../validators/record.validator.js';
 
 export const recordRouter = Router({ mergeParams: true });
 export const auditLogRouter = Router({ mergeParams: true });
+export const timerInterventionRouter = Router({ mergeParams: true });
+
+timerInterventionRouter.get(
+  '/',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    query: timerInterventionQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(listTimerInterventionsController),
+);
 
 recordRouter.get(
   '/',

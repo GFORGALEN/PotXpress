@@ -15,6 +15,7 @@ import {
   exportRecords,
   listAuditLogs,
   listRecords,
+  listTimerInterventions,
   listTables,
   listTableGroups,
   listUsers,
@@ -23,7 +24,7 @@ import {
 } from '../api/admin.js';
 import { createStore, updateStore } from '../api/stores.js';
 import { getSettings, updateSettings } from '../api/settings.js';
-import { listTimers } from '../api/timers.ts';
+import { listTimers, resetAllTimers } from '../api/timers.ts';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -420,8 +421,23 @@ export function StoresAdminPage() {
         <div className="grid gap-3">{stores.map((store) => (
           <Card key={store.id} className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div><p className="font-black">{store.name}</p><p className="mt-1 text-xs text-stone-500">{store.code} · {store.timezone} · {store.address || '无地址'} · {store.tableCount ?? 0} 张桌 · {store.activeTimerCount ?? 0} 个未结束计时</p></div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {!store.enabled ? <button className={secondaryButtonClass} onClick={() => selectStore(store.id, { allowDisabled: true })}>临时查看</button> : null}
+              <button
+                type="button"
+                disabled={!store.activeTimerCount}
+                className="min-h-10 rounded-xl border border-red-200 bg-red-50 px-3 text-sm font-bold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                onClick={async () => {
+                  if (!window.confirm(`确定将“${store.name}”当前 ${store.activeTimerCount} 个计时全部清台吗？`)) return;
+                  try {
+                    const result = await resetAllTimers(store.id);
+                    await refreshStores();
+                    showToast(`已一键清台 ${result.resetCount} 个计时`, 'success');
+                  } catch (error) {
+                    showToast(error.message, 'error');
+                  }
+                }}
+              >一键清台（{store.activeTimerCount ?? 0}）</button>
               <button className={secondaryButtonClass} onClick={() => {
                 const name = window.prompt('门店名称', store.name);
                 if (!name?.trim()) return;
@@ -434,7 +450,7 @@ export function StoresAdminPage() {
                   .catch((error) => showToast(error.message, 'error'));
               }}>编辑</button>
               <button className={secondaryButtonClass} onClick={async () => {
-                if (store.enabled && !window.confirm('禁用后普通员工无法登录，仅系统管理员可查看并逐桌重置。确认继续？')) return;
+                if (store.enabled && !window.confirm('禁用后普通员工无法登录；系统管理员仍可查看并一键清台。确认继续？')) return;
                 try { await updateStore(store.id, { enabled: !store.enabled }); await refreshStores(); showToast(store.enabled ? '门店已停用' : '门店已启用', 'success'); } catch (error) { showToast(error.message, 'error'); }
               }}>{store.enabled ? '停用' : '启用'}</button>
             </div>
@@ -552,6 +568,118 @@ export function RecordsPage() {
             }}>删除</button></td> : null}
           </tr>
         ))}</tbody></table>{records.data.records.length === 0 ? <p className="py-10 text-center text-sm text-stone-500">今日暂无计时记录</p> : null}</div>}
+      </Card>
+    </Page>
+  );
+}
+
+const INTERVENTION_LABELS = Object.freeze({
+  overdue_reminder: '超时 20 分钟提醒',
+  auto_reset: '第 2 次提醒并自动清台',
+  admin_bulk_reset: '管理员一键清台',
+});
+
+export function TimerInterventionRecordsPage() {
+  const { selectedStoreId } = useStore();
+  const [date, setDate] = useState(today);
+  const [tableId, setTableId] = useState('');
+  const [action, setAction] = useState('');
+  const tables = useResource(
+    () => listTables(selectedStoreId),
+    [selectedStoreId],
+  );
+  const records = useResource(
+    () => listTimerInterventions(selectedStoreId, {
+      date,
+      ...(tableId ? { tableId } : {}),
+      ...(action ? { action } : {}),
+    }),
+    [selectedStoreId, date, tableId, action],
+  );
+
+  if (records.error) {
+    return (
+      <ErrorMessage
+        message={records.error.message}
+        onRetry={records.refresh}
+      />
+    );
+  }
+
+  return (
+    <Page
+      title="异常处理记录"
+      description="单独记录超时 20 分钟提醒、第 2 次自动清台和管理员一键清台。"
+    >
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <input
+            className={fieldClass}
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+          <select
+            className={fieldClass}
+            value={tableId}
+            onChange={(event) => setTableId(event.target.value)}
+          >
+            <option value="">全部桌台</option>
+            {tables.data?.map((table) => (
+              <option key={table.id} value={table.id}>{table.name}</option>
+            ))}
+          </select>
+          <select
+            className={fieldClass}
+            value={action}
+            onChange={(event) => setAction(event.target.value)}
+          >
+            <option value="">全部类型</option>
+            {Object.entries(INTERVENTION_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        {!records.data ? (
+          <LoadingSpinner label="正在读取异常处理记录" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[58rem] text-left text-sm">
+              <thead className="text-xs uppercase text-stone-400">
+                <tr>
+                  <th className="p-3">处理时间</th>
+                  <th>桌台</th>
+                  <th>处理类型</th>
+                  <th>提醒次数</th>
+                  <th>当时超时</th>
+                  <th>执行方</th>
+                  <th>关联计时记录</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.data.records.map((record) => (
+                  <tr key={record.id} className="border-t border-stone-100">
+                    <td className="p-3">{new Date(record.createdAt).toLocaleString()}</td>
+                    <td className="font-bold">{record.tableNameSnapshot}</td>
+                    <td>{INTERVENTION_LABELS[record.action] ?? record.action}</td>
+                    <td>{record.reminderNumber ? `第 ${record.reminderNumber} 次` : '—'}</td>
+                    <td>{Math.floor(record.overtimeSeconds / 60)} 分钟</td>
+                    <td>{record.actorNameSnapshot || '系统提醒'}</td>
+                    <td className="font-mono text-xs text-stone-500">
+                      {record.timerRecordId || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {records.data.records.length === 0 ? (
+              <p className="py-10 text-center text-sm text-stone-500">
+                当天没有异常处理记录
+              </p>
+            ) : null}
+          </div>
+        )}
       </Card>
     </Page>
   );
