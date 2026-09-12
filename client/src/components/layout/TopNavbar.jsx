@@ -15,6 +15,7 @@ import { ROLE_LABELS } from '../../utils/navigation.js';
 import { formatStoreDisplayName } from '../../utils/storeSelection.js';
 import { useSound } from '../../contexts/SoundContext.jsx';
 import { ChangePasswordDialog } from '../auth/ChangePasswordDialog.jsx';
+import { SoundSettingsDialog } from '../alerts/SoundSettingsDialog.jsx';
 
 function StoreClock({ store }) {
   const [now, setNow] = useState(() => new Date());
@@ -66,13 +67,13 @@ export function TopNavbar({ onOpenMenu }) {
   } = useStore();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [soundDialogOpen, setSoundDialogOpen] = useState(false);
   const {
     authorized,
     localEnabled,
+    storeEnabled,
     reason: soundReason,
     alertCounts,
-    enableSound,
-    toggleLocalSound,
   } = useSound();
   const menuRef = useRef(null);
   const enabledStores = stores.filter((store) => store.enabled);
@@ -158,14 +159,14 @@ export function TopNavbar({ onOpenMenu }) {
       <div className="flex flex-none items-center justify-end gap-2 sm:ml-auto xl:flex-1">
         <button
           type="button"
-          onClick={authorized ? toggleLocalSound : enableSound}
-          className="relative hidden h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600 sm:flex"
+          onClick={() => setSoundDialogOpen(true)}
+          className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 text-stone-500 transition hover:border-ember-200 hover:bg-ember-50 hover:text-ember-600"
           title={soundReason}
-          aria-label={authorized
-            ? (localEnabled ? '关闭本机声音提醒' : '开启本机声音提醒')
-            : '启用声音提醒'}
+          aria-label="打开声音提醒设置"
         >
-          {localEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}
+          {authorized && localEnabled && storeEnabled
+            ? <Volume2 size={19} />
+            : <VolumeX size={19} />}
           {!authorized ? (
             <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
           ) : null}
@@ -248,6 +249,10 @@ export function TopNavbar({ onOpenMenu }) {
     <ChangePasswordDialog
       open={passwordDialogOpen}
       onClose={() => setPasswordDialogOpen(false)}
+    />
+    <SoundSettingsDialog
+      open={soundDialogOpen}
+      onClose={() => setSoundDialogOpen(false)}
     />
     </>
   );

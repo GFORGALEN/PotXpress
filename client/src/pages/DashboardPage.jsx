@@ -32,6 +32,7 @@ import {
   WarningAlertDialog,
 } from '../components/alerts/AlertDialogs.jsx';
 import { TimerStatusBanner } from '../components/alerts/TimerStatusBanner.jsx';
+import { SoundSettingsDialog } from '../components/alerts/SoundSettingsDialog.jsx';
 import { EmptyState } from '../components/common/EmptyState.jsx';
 import { ErrorMessage } from '../components/common/ErrorMessage.jsx';
 import { LoadingSpinner } from '../components/common/LoadingSpinner.jsx';
@@ -93,7 +94,8 @@ export function DashboardPage() {
   const layoutEditor = useLayoutEditor();
   const {
     authorized: soundAuthorized,
-    enableSound,
+    localEnabled: localSoundEnabled,
+    storeEnabled: storeSoundEnabled,
     reason: soundReason,
     setStoreSettings,
   } = useSound();
@@ -117,6 +119,7 @@ export function DashboardPage() {
   const [tableMutationBusy, setTableMutationBusy] = useState(false);
   const [bulkResetOpen, setBulkResetOpen] = useState(false);
   const [bulkResetBusy, setBulkResetBusy] = useState(false);
+  const [soundDialogOpen, setSoundDialogOpen] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
   const [lastServerContactAt, setLastServerContactAt] = useState(null);
@@ -177,6 +180,7 @@ export function DashboardPage() {
     setTableMutation(null);
     setBulkResetOpen(false);
     setBulkResetBusy(false);
+    setSoundDialogOpen(false);
     setAreaFilter('all');
     setSettings(null);
     clockOffsetRef.current = 0;
@@ -986,10 +990,12 @@ export function DashboardPage() {
         <EditorToolbar onAddTable={() => openCreateTableDialog()} />
       ) : null}
 
-      {!soundAuthorized && frontDeskMode ? (
+      {storeSoundEnabled
+        && (!soundAuthorized || !localSoundEnabled)
+        && frontDeskMode ? (
         <button
           type="button"
-          onClick={enableSound}
+          onClick={() => setSoundDialogOpen(true)}
           className="min-h-12 rounded-2xl border border-amber-300 bg-amber-100 px-4 text-left text-sm font-black text-amber-950 shadow-card"
         >
           🔔 启用声音提醒
@@ -1303,6 +1309,10 @@ export function DashboardPage() {
         }}
       />
       <LayoutConflictDialog />
+      <SoundSettingsDialog
+        open={soundDialogOpen}
+        onClose={() => setSoundDialogOpen(false)}
+      />
       <WarningAlertDialog
         tables={alerts.newWarningTables}
         onClose={alerts.closeWarningDialog}

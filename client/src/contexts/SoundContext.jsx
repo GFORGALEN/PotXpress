@@ -22,7 +22,7 @@ const SoundContext = createContext(null);
 export function SoundProvider({ children }) {
   const { selectedStoreId } = useStore();
   const [localEnabled, setLocalEnabled] = useState(
-    () => localStorage.getItem(SOUND_STORAGE_KEY) !== 'false',
+    () => localStorage.getItem(SOUND_STORAGE_KEY) === 'true',
   );
   const [authorized, setAuthorized] = useState(() => isSoundAuthorized());
   const [storeSettings, setStoreSettings] = useState(null);
@@ -44,28 +44,49 @@ export function SoundProvider({ children }) {
   }, []);
 
   const enableSound = useCallback(async () => {
-    const result = await authorizeSound();
+    let result = false;
+    try {
+      result = await authorizeSound();
+    } catch {
+      result = false;
+    }
     setAuthorized(result);
+    if (result) {
+      setLocalEnabled(true);
+      localStorage.setItem(SOUND_STORAGE_KEY, 'true');
+      playWarningTone();
+    }
     return result;
   }, []);
 
-  const toggleLocalSound = useCallback(() => {
-    setLocalEnabled((current) => {
-      const next = !current;
-      localStorage.setItem(SOUND_STORAGE_KEY, String(next));
-
-      if (!next) {
-        stopAlarmTone();
-      }
-
-      return next;
-    });
+  const disableSound = useCallback(() => {
+    setLocalEnabled(false);
+    localStorage.setItem(SOUND_STORAGE_KEY, 'false');
+    stopAlarmTone();
   }, []);
+
+  const refreshAuthorization = useCallback(() => {
+    const next = isSoundAuthorized();
+    setAuthorized(next);
+    return next;
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => refreshAuthorization();
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('pageshow', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('pageshow', refresh);
+    };
+  }, [refreshAuthorization]);
 
   const playWarning = useCallback(() => {
     if (canPlay) {
       playWarningTone();
+      return true;
     }
+    return false;
   }, [canPlay]);
 
   const startOvertimeAlarm = useCallback(() => {
@@ -101,7 +122,8 @@ export function SoundProvider({ children }) {
     canPlay,
     reason,
     enableSound,
-    toggleLocalSound,
+    disableSound,
+    refreshAuthorization,
     setStoreSettings,
     setAlertCounts,
     playWarning,
@@ -111,6 +133,7 @@ export function SoundProvider({ children }) {
     alertCounts,
     authorized,
     canPlay,
+    disableSound,
     enableSound,
     localEnabled,
     playWarning,
@@ -119,7 +142,7 @@ export function SoundProvider({ children }) {
     stopOvertimeAlarm,
     storeEnabled,
     storeSettings,
-    toggleLocalSound,
+    refreshAuthorization,
   ]);
 
   return (

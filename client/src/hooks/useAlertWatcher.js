@@ -84,18 +84,19 @@ export function useAlertWatcher(tables, refreshTimers) {
       return;
     }
 
-    for (const table of nextWarnings) {
-      seenWarningIdsRef.current.add(table.timerId);
-    }
-
-    const boundedIds = [...seenWarningIdsRef.current].slice(-MAX_WARNING_IDS);
-    seenWarningIdsRef.current = new Set(boundedIds);
-    localStorage.setItem(
-      `${WARNING_STORAGE_PREFIX}${selectedStoreId}`,
-      JSON.stringify(boundedIds),
-    );
     setNewWarningTables(nextWarnings);
-    playWarning();
+    if (playWarning()) {
+      for (const table of nextWarnings) {
+        seenWarningIdsRef.current.add(table.timerId);
+      }
+
+      const boundedIds = [...seenWarningIdsRef.current].slice(-MAX_WARNING_IDS);
+      seenWarningIdsRef.current = new Set(boundedIds);
+      localStorage.setItem(
+        `${WARNING_STORAGE_PREFIX}${selectedStoreId}`,
+        JSON.stringify(boundedIds),
+      );
+    }
   }, [playWarning, selectedStoreId, warningTables]);
 
   useEffect(() => {

@@ -90,7 +90,7 @@ export async function createStore(input, user) {
         defaultDurationMinutes: 90,
         warningThresholdMinutes: 10,
         timezone: store.timezone,
-        soundEnabled: true,
+        soundEnabled: false,
         updatedAt: timestamp,
       });
       layouts.create({

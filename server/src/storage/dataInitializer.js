@@ -251,7 +251,7 @@ export async function initializeDemoData() {
           defaultDurationMinutes: 90,
           warningThresholdMinutes: 10,
           timezone: 'Pacific/Auckland',
-          soundEnabled: true,
+          soundEnabled: false,
           updatedAt: timestamp,
         });
       }

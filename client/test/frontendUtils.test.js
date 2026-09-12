@@ -97,6 +97,7 @@ test('fullscreen touch guard preserves tablet scrolling inside marked panels', (
 test('tablet dialogs keep the complete touch-scroll safety contract', () => {
   const dialogFiles = [
     '../src/components/alerts/AlertDialogs.jsx',
+    '../src/components/alerts/SoundSettingsDialog.jsx',
     '../src/components/auth/ChangePasswordDialog.jsx',
     '../src/components/common/ConfirmDialog.jsx',
     '../src/components/layout/LayoutConflictDialog.jsx',
@@ -113,6 +114,24 @@ test('tablet dialogs keep the complete touch-scroll safety contract', () => {
     assert.match(source, /dvh/, `${file} must follow the dynamic viewport`);
     assert.match(source, /overflow-y-auto/, `${file} must scroll vertically`);
   }
+});
+
+test('sound reminders default off and use a single accessible switch', () => {
+  const contextSource = readFileSync(
+    new URL('../src/contexts/SoundContext.jsx', import.meta.url),
+    'utf8',
+  );
+  const dialogSource = readFileSync(
+    new URL('../src/components/alerts/SoundSettingsDialog.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(contextSource, /getItem\(SOUND_STORAGE_KEY\) === 'true'/);
+  assert.match(contextSource, /localStorage\.setItem\(SOUND_STORAGE_KEY, 'true'\)/);
+  assert.match(contextSource, /playWarningTone\(\)/);
+  assert.match(dialogSource, /role="switch"/);
+  assert.match(dialogSource, /aria-checked=\{active\}/);
+  assert.match(dialogSource, /disabled=\{!storeEnabled \|\| busy\}/);
 });
 
 test('desktop table actions leave the account menu above the side panel', () => {
