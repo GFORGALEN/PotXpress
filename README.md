@@ -225,6 +225,7 @@ $password | npm run create-admin --workspace @potxpress/server -- --password-std
 | `GET` | `/api/health` | 服务与存储状态 |
 | `POST` | `/api/auth/login` | 登录 |
 | `GET` | `/api/auth/me` | 当前用户 |
+| `POST` | `/api/auth/refresh` | 为正在使用的登录状态续期 |
 | `PATCH` | `/api/auth/password` | 修改自己的密码并使旧令牌失效 |
 | `POST` | `/api/auth/logout` | 退出登录 |
 | `GET/POST/PATCH` | `/api/users`、`/api/users/:userId` | 用户管理 |

@@ -18,6 +18,11 @@ export async function me() {
   return response.data.data;
 }
 
+export async function refreshSession() {
+  const response = await apiClient.post('/auth/refresh', {});
+  return response.data.data;
+}
+
 export async function logout() {
   const response = await apiClient.post('/auth/logout');
   return response.data.data;

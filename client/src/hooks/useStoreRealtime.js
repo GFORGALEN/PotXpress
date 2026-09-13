@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { UNAUTHORIZED_EVENT } from '../api/client.js';
+import { rejectStoredToken } from '../api/client.js';
 import { useErrorContext } from '../contexts/ErrorContext.jsx';
 import {
   buildWebSocketUrl,
@@ -226,7 +226,7 @@ export function useStoreRealtime({
         }
         if (closeEvent.code === 4401) {
           setDisconnected();
-          window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+          rejectStoredToken(token);
           return;
         }
         if (closeEvent.code === 4403) {

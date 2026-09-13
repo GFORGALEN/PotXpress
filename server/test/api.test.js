@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
+test('健康检查、登录续期和 tokenVersion 失效链路可用', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'potxpress-api-test-'));
   process.env.NODE_ENV = 'test';
   process.env.PORT = '0';
@@ -15,6 +15,7 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
 
   const { startServer, stopServer } = await import('../server.js');
   const { fileStore } = await import('../src/storage/fileStore.js');
+  const { userRepository } = await import('../src/repositories/user.repository.js');
   let server;
 
   t.after(async () => {
@@ -84,6 +85,35 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
     headers: { authorization: `Bearer ${loginBody.data.token}` },
   });
   assert.equal(meResponse.status, 200);
+
+  const refreshResponse = await fetch(`${baseUrl}/api/auth/refresh`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${loginBody.data.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+  const refreshBody = await refreshResponse.json();
+  assert.equal(refreshResponse.status, 200);
+  assert.equal(typeof refreshBody.data.token, 'string');
+  assert.equal(refreshBody.data.user.id, loginBody.data.user.id);
+
+  const originalFindById = userRepository.findById;
+  userRepository.findById = async () => {
+    throw new Error('simulated storage interruption');
+  };
+  let storageFailureResponse;
+  try {
+    storageFailureResponse = await fetch(`${baseUrl}/api/auth/me`, {
+      headers: { authorization: `Bearer ${refreshBody.data.token}` },
+    });
+  } finally {
+    userRepository.findById = originalFindById;
+  }
+  const storageFailureBody = await storageFailureResponse.json();
+  assert.equal(storageFailureResponse.status, 500);
+  assert.equal(storageFailureBody.error.code, 'INTERNAL_ERROR');
 
   const createUserResponse = await fetch(`${baseUrl}/api/users`, {
     method: 'POST',
@@ -159,4 +189,9 @@ test('健康检查、登录和 tokenVersion 失效链路可用', async (t) => {
   const expiredBody = await expiredResponse.json();
   assert.equal(expiredResponse.status, 401);
   assert.equal(expiredBody.error.code, 'UNAUTHORIZED');
+
+  const invalidatedRefreshResponse = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { authorization: `Bearer ${refreshBody.data.token}` },
+  });
+  assert.equal(invalidatedRefreshResponse.status, 401);
 });

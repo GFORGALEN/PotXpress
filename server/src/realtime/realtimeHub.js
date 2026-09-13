@@ -24,16 +24,37 @@ function sendJson(socket, value) {
   return true;
 }
 
+export function closeCodeForRealtimeError(error) {
+  if (error?.status === 401) {
+    return 4401;
+  }
+  if (error?.status >= 400 && error?.status < 500) {
+    return 4403;
+  }
+  return 1011;
+}
+
 function closeWithError(socket, error) {
+  const closeCode = closeCodeForRealtimeError(error);
+  const internalFailure = closeCode === 1011;
+
+  if (internalFailure) {
+    console.error('实时连接服务器错误：', error);
+  }
+
   sendJson(socket, {
     type: 'error',
     error: {
-      code: error.code ?? 'REALTIME_ERROR',
-      message: error.message ?? '实时连接失败',
+      code: internalFailure ? 'REALTIME_UNAVAILABLE' : (error.code ?? 'REALTIME_ERROR'),
+      message: internalFailure
+        ? '实时服务暂时不可用，正在重连'
+        : (error.message ?? '实时连接失败'),
     },
   });
-  const closeCode = error.status === 403 ? 4403 : 4401;
-  socket.close(closeCode, error.code ?? 'REALTIME_ERROR');
+  socket.close(
+    closeCode,
+    internalFailure ? 'REALTIME_UNAVAILABLE' : (error.code ?? 'REALTIME_ERROR'),
+  );
 }
 
 function originAllowed(request) {

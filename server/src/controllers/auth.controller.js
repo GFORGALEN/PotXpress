@@ -1,4 +1,10 @@
-import { changePassword, kioskLogin, login, logout } from '../services/auth.service.js';
+import {
+  changePassword,
+  kioskLogin,
+  login,
+  logout,
+  refreshSession,
+} from '../services/auth.service.js';
 import { ok } from '../utils/response.js';
 
 export async function loginController(req, res) {
@@ -25,6 +31,10 @@ export async function meController(req, res) {
     },
     '已获取当前用户',
   );
+}
+
+export async function refreshController(req, res) {
+  return ok(res, refreshSession(req.user), '登录状态已续期');
 }
 
 export async function logoutController(req, res) {

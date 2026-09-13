@@ -16,43 +16,46 @@ export async function authenticate(req, res, next) {
     return next(new AppError(401, 'UNAUTHORIZED', '请先登录'));
   }
 
+  let payload;
   try {
-    const payload = verifyToken(token);
-    const user = await userRepository.findById(payload.userId);
-
-    if (
-      !user
-      || !user.enabled
-      || user.tokenVersion !== payload.tokenVersion
-    ) {
-      throw new AppError(401, 'UNAUTHORIZED', '登录状态已失效');
-    }
-
-    if (user.role !== 'system_admin') {
-      const store = await storeRepository.findById(user.storeId);
-
-      if (!store || !store.enabled) {
-        throw new AppError(401, 'UNAUTHORIZED', '登录状态已失效');
-      }
-    }
-
-    req.user = {
-      userId: user.id,
-      username: user.username,
-      displayName: user.displayName,
-      role: user.role,
-      storeId: user.storeId,
-    };
-    next();
+    payload = verifyToken(token);
   } catch (error) {
-    if (error instanceof AppError) {
-      return next(error);
-    }
-
     if (error?.name === 'TokenExpiredError') {
       return next(new AppError(401, 'TOKEN_EXPIRED', '登录已过期，请重新登录'));
     }
 
     return next(new AppError(401, 'UNAUTHORIZED', '登录状态无效'));
   }
+
+  // Keep storage access outside the JWT parsing catch. A database timeout is a
+  // temporary server failure, not proof that the caller's token is invalid.
+  // Misclassifying it as 401 makes every client discard an otherwise valid
+  // session during a short database or connection-pool interruption.
+  const user = await userRepository.findById(payload.userId);
+
+  if (
+    !user
+    || !user.enabled
+    || user.tokenVersion !== payload.tokenVersion
+  ) {
+    return next(new AppError(401, 'UNAUTHORIZED', '登录状态已失效'));
+  }
+
+  if (user.role !== 'system_admin') {
+    const store = await storeRepository.findById(user.storeId);
+
+    if (!store || !store.enabled) {
+      return next(new AppError(401, 'UNAUTHORIZED', '登录状态已失效'));
+    }
+  }
+
+  req.user = {
+    userId: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    storeId: user.storeId,
+    tokenVersion: user.tokenVersion,
+  };
+  return next();
 }

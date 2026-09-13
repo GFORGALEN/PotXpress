@@ -97,6 +97,22 @@ export async function kioskLogin({ key }) {
   return { token, user: safeUser };
 }
 
+export function refreshSession(user) {
+  return {
+    token: signToken({
+      userId: user.userId,
+      tokenVersion: user.tokenVersion,
+    }),
+    user: {
+      id: user.userId,
+      username: user.username,
+      displayName: user.displayName,
+      role: user.role,
+      storeId: user.storeId,
+    },
+  };
+}
+
 export async function logout(user) {
   await writeAuthAuditBestEffort({
     userId: user.userId,

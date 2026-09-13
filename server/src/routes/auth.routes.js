@@ -5,13 +5,17 @@ import {
   loginController,
   logoutController,
   meController,
+  refreshController,
 } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { loginRateLimit } from '../middleware/loginRateLimit.middleware.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { kioskBodySchema, loginBodySchema } from '../validators/auth.validator.js';
-import { emptyQuerySchema } from '../validators/common.validator.js';
+import {
+  emptyBodySchema,
+  emptyQuerySchema,
+} from '../validators/common.validator.js';
 import { changePasswordBodySchema } from '../validators/user.validator.js';
 
 export const authRouter = Router();
@@ -33,6 +37,12 @@ authRouter.get(
   asyncHandler(authenticate),
   validate({ query: emptyQuerySchema }),
   asyncHandler(meController),
+);
+authRouter.post(
+  '/refresh',
+  asyncHandler(authenticate),
+  validate({ body: emptyBodySchema, query: emptyQuerySchema }),
+  asyncHandler(refreshController),
 );
 authRouter.post(
   '/logout',

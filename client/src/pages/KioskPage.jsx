@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { kioskLogin } from '../api/auth.js';
-import { storeToken } from '../api/client.js';
+import {
+  resetUnauthorizedSignal,
+  storeKioskKey,
+  storeToken,
+} from '../api/client.js';
 import { FRONT_DESK_PATH } from '../utils/frontDeskMode.js';
 
 // 店员免登录入口：/kiosk/:key
@@ -18,7 +22,9 @@ export function KioskPage() {
     async function enter() {
       try {
         const result = await kioskLogin(key);
+        storeKioskKey(key);
         storeToken(result.token);
+        resetUnauthorizedSignal();
         window.location.replace(FRONT_DESK_PATH);
       } catch (requestError) {
         if (active) {

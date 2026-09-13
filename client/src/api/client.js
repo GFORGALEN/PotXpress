@@ -2,6 +2,7 @@ import axios from 'axios';
 import { ApiError } from './ApiError.js';
 
 export const TOKEN_STORAGE_KEY = 'potxpress_token';
+export const KIOSK_KEY_STORAGE_KEY = 'potxpress_kiosk_key';
 export const UNAUTHORIZED_EVENT = 'potxpress:unauthorized';
 
 let unauthorizedSignalSent = false;
@@ -13,6 +14,18 @@ export function getStoredToken() {
 export function storeToken(token) {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
   localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+export function getStoredKioskKey() {
+  return sessionStorage.getItem(KIOSK_KEY_STORAGE_KEY);
+}
+
+export function storeKioskKey(key) {
+  sessionStorage.setItem(KIOSK_KEY_STORAGE_KEY, key);
+}
+
+export function removeStoredKioskKey() {
+  sessionStorage.removeItem(KIOSK_KEY_STORAGE_KEY);
 }
 
 export function removeStoredToken() {
@@ -31,6 +44,18 @@ function emitUnauthorizedOnce() {
 
   unauthorizedSignalSent = true;
   window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
+
+export function rejectStoredToken(rejectedToken) {
+  // A response can arrive after another request has already refreshed the
+  // session. Never let a late 401 from the old token erase the new one.
+  if (!rejectedToken || getStoredToken() !== rejectedToken) {
+    return false;
+  }
+
+  removeStoredToken();
+  emitUnauthorizedOnce();
+  return true;
 }
 
 export const apiClient = axios.create({
@@ -75,7 +100,7 @@ export async function sendIdempotentRequest(config, { retries = 1 } = {}) {
 
 apiClient.interceptors.request.use((request) => {
   const token = getStoredToken();
-  request.potxpressHadToken = Boolean(token);
+  request.potxpressToken = token;
 
   if (token) {
     request.headers.Authorization = `Bearer ${token}`;
@@ -104,10 +129,9 @@ apiClient.interceptors.response.use(
     if (
       status === 401
       && !isLoginRequest
-      && error.config?.potxpressHadToken
+      && error.config?.potxpressToken
     ) {
-      removeStoredToken();
-      emitUnauthorizedOnce();
+      rejectStoredToken(error.config.potxpressToken);
     }
 
     if (!error.response || (status >= 500 && !payload)) {

@@ -134,6 +134,27 @@ test('sound reminders default off and use a single accessible switch', () => {
   assert.match(dialogSource, /disabled=\{!storeEnabled \|\| busy\}/);
 });
 
+test('front-desk sessions renew and recover without treating stale failures as logout', () => {
+  const authSource = readFileSync(
+    new URL('../src/contexts/AuthContext.jsx', import.meta.url),
+    'utf8',
+  );
+  const clientSource = readFileSync(
+    new URL('../src/api/client.js', import.meta.url),
+    'utf8',
+  );
+  const kioskSource = readFileSync(
+    new URL('../src/pages/KioskPage.jsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(authSource, /refreshSessionRequest\(\)/);
+  assert.match(authSource, /recoverAfterUnauthorized/);
+  assert.match(authSource, /SESSION_RESTORE_RETRY_INTERVAL/);
+  assert.match(clientSource, /getStoredToken\(\) !== rejectedToken/);
+  assert.match(kioskSource, /storeKioskKey\(key\)/);
+});
+
 test('desktop table actions leave the account menu above the side panel', () => {
   const navbarSource = readFileSync(
     new URL('../src/components/layout/TopNavbar.jsx', import.meta.url),
