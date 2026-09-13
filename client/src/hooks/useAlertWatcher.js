@@ -85,18 +85,17 @@ export function useAlertWatcher(tables, refreshTimers) {
     }
 
     setNewWarningTables(nextWarnings);
-    if (playWarning()) {
-      for (const table of nextWarnings) {
-        seenWarningIdsRef.current.add(table.timerId);
-      }
-
-      const boundedIds = [...seenWarningIdsRef.current].slice(-MAX_WARNING_IDS);
-      seenWarningIdsRef.current = new Set(boundedIds);
-      localStorage.setItem(
-        `${WARNING_STORAGE_PREFIX}${selectedStoreId}`,
-        JSON.stringify(boundedIds),
-      );
+    for (const table of nextWarnings) {
+      seenWarningIdsRef.current.add(table.timerId);
     }
+
+    const boundedIds = [...seenWarningIdsRef.current].slice(-MAX_WARNING_IDS);
+    seenWarningIdsRef.current = new Set(boundedIds);
+    localStorage.setItem(
+      `${WARNING_STORAGE_PREFIX}${selectedStoreId}`,
+      JSON.stringify(boundedIds),
+    );
+    playWarning();
   }, [playWarning, selectedStoreId, warningTables]);
 
   useEffect(() => {

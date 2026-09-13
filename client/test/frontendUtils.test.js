@@ -121,6 +121,10 @@ test('sound reminders default off and use a single accessible switch', () => {
     new URL('../src/contexts/SoundContext.jsx', import.meta.url),
     'utf8',
   );
+  const alertWatcherSource = readFileSync(
+    new URL('../src/hooks/useAlertWatcher.js', import.meta.url),
+    'utf8',
+  );
   const dialogSource = readFileSync(
     new URL('../src/components/alerts/SoundSettingsDialog.jsx', import.meta.url),
     'utf8',
@@ -129,6 +133,11 @@ test('sound reminders default off and use a single accessible switch', () => {
   assert.match(contextSource, /getItem\(SOUND_STORAGE_KEY\) === 'true'/);
   assert.match(contextSource, /localStorage\.setItem\(SOUND_STORAGE_KEY, 'true'\)/);
   assert.match(contextSource, /playWarningTone\(\)/);
+  assert.doesNotMatch(alertWatcherSource, /if \(playWarning\(\)\)/);
+  assert.match(
+    alertWatcherSource,
+    /localStorage\.setItem\([\s\S]*?JSON\.stringify\(boundedIds\),[\s\S]*?\);\s+playWarning\(\);/,
+  );
   assert.match(dialogSource, /role="switch"/);
   assert.match(dialogSource, /aria-checked=\{active\}/);
   assert.match(dialogSource, /disabled=\{!storeEnabled \|\| busy\}/);
