@@ -10,7 +10,6 @@ import {
 import { fileStore } from './src/storage/fileStore.js';
 import { runMigrations } from './src/storage/migrations.js';
 import { realtimeHub } from './src/realtime/realtimeHub.js';
-import { timerOverdueMonitor } from './src/services/timerOverdueMonitor.service.js';
 
 let httpServer = null;
 let shutdownPromise = null;
@@ -28,7 +27,6 @@ export async function startServer() {
     await initializeDemoData();
     await initializeBootstrapAdmin();
     await checkDataConsistency();
-    await timerOverdueMonitor.start();
 
     const app = createApp();
     const candidateServer = http.createServer(app);
@@ -43,7 +41,6 @@ export async function startServer() {
     console.log(`PotXpress API 已启动：http://127.0.0.1:${port}`);
     return httpServer;
   } catch (error) {
-    await timerOverdueMonitor.stop().catch(() => {});
     await realtimeHub.close().catch(() => {});
     throw error;
   }
@@ -69,8 +66,6 @@ export async function stopServer() {
         });
       });
     }
-
-    await timerOverdueMonitor.stop();
 
     await fileStore.drain();
     shutdownPromise = null;

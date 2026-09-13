@@ -45,14 +45,10 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
 
   const { startServer, stopServer } = await import('../server.js');
   const { timerService } = await import('../src/services/timer.service.js');
-  const {
-    timerOverdueMonitor,
-  } = await import('../src/services/timerOverdueMonitor.service.js');
   const { fileStore } = await import('../src/storage/fileStore.js');
   let now = Date.parse('2026-01-15T00:00:00.000Z');
   timerService.setNowProvider(() => now);
   const server = await startServer();
-  await timerOverdueMonitor.stop();
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
   t.after(async () => {
