@@ -1,6 +1,11 @@
 import { unitOfWorkRepository } from '../repositories/unitOfWork.repository.js';
 import { formatDateInTimezone, formatDateTimeInTimezone } from '../utils/dateTime.js';
 import { computeTimerState } from '../utils/timeCalculator.ts';
+import {
+  MAX_OVERDUE_REMINDERS,
+  OVERDUE_REMINDER_INTERVAL_SECONDS,
+  timerService,
+} from './timer.service.js';
 
 function shiftDate(date, offset) {
   return new Date(Date.parse(`${date}T12:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
@@ -44,6 +49,9 @@ export function summarizeStore(store, tables, timers, records, period, now, date
     for (const id of session.memberTableIds) tableCounts.set(id, (tableCounts.get(id) ?? 0) + 1);
   }
   const completed = selected.filter((session) => session.completed);
+  const automaticallyCompleted = completed.filter(
+    (session) => session.resetBy === 'system_automation',
+  );
   const overtimeCount = completed.filter((session) => Date.parse(session.actualEndTime) > Date.parse(session.effectiveEndTimeAtReset)).length;
   return {
     id: store.id, name: store.name, timezone: store.timezone, startDate, endDate,
@@ -51,6 +59,11 @@ export function summarizeStore(store, tables, timers, records, period, now, date
     idle: enabledTables.length - occupied.size, overtime: overdue.size,
     utilization: enabledTables.length ? occupied.size / enabledTables.length : null,
     sessions: selected.length, completed: completed.length,
+    manuallyCompleted: completed.length - automaticallyCompleted.length,
+    automaticallyCompleted: automaticallyCompleted.length,
+    automaticResetRate: completed.length
+      ? automaticallyCompleted.length / completed.length
+      : null,
     perTable: enabledTables.length ? selected.length / enabledTables.length : null,
     averageMinutes: completed.length ? completed.reduce((sum, session) => sum + session.actualDurationSeconds, 0) / completed.length / 60 : null,
     overtimeRate: completed.length ? overtimeCount / completed.length : null,
@@ -60,12 +73,17 @@ export function summarizeStore(store, tables, timers, records, period, now, date
       id: session.timerId ?? session.id, table: session.tableNameSnapshot,
       startTime: formatDateTimeInTimezone(session.startTime, store.timezone),
       completed: session.completed, minutes: session.completed ? Math.round(session.actualDurationSeconds / 60) : null,
+      automaticallyCompleted: session.resetBy === 'system_automation',
       grouped: session.memberTableIds.length > 1,
     })),
   };
 }
 
-export async function getDataOverview(period, date) {
+export async function getDataOverview(
+  period,
+  date,
+  { settleOverdue = true } = {},
+) {
   const now = Date.now();
   const day = 86400000;
   const reference = period === 'date'
@@ -75,19 +93,38 @@ export async function getDataOverview(period, date) {
   const startTimeFrom = new Date(reference - lookbackDays * day).toISOString();
   const startTimeTo = new Date(reference + 2 * day).toISOString();
 
-  return unitOfWorkRepository.run({
+  const snapshot = await unitOfWorkRepository.run({
     resources: ['stores', 'tables', 'activeTimers', 'records'],
     writeOrder: [],
     readScopes: {
       records: { startTimeFrom, startTimeTo },
     },
   }, (repos) => {
-    return {
-      generatedAt: new Date(now).toISOString(), period,
-      stores: repos.stores.find((store) => store.enabled).map((store) => summarizeStore(
+    const timers = repos.activeTimers.find();
+    const stores = repos.stores.find((store) => store.enabled).map((store) => summarizeStore(
         store, repos.tables.findByStoreId(store.id), repos.activeTimers.findByStoreId(store.id),
         repos.records.findByStoreId(store.id), period, now, date,
-      )),
+      ));
+    const storesRequiringSettlement = [...new Set(timers
+      .filter((timer) => (
+        computeTimerState(timer, now, 0).overtimeSeconds
+        >= MAX_OVERDUE_REMINDERS * OVERDUE_REMINDER_INTERVAL_SECONDS
+      ))
+      .map((timer) => timer.storeId))];
+    return {
+      overview: {
+        generatedAt: new Date(now).toISOString(), period, stores,
+      },
+      storesRequiringSettlement,
     };
   });
+
+  if (settleOverdue && snapshot.storesRequiringSettlement.length > 0) {
+    for (const storeId of snapshot.storesRequiringSettlement) {
+      await timerService.processOverdueTimers({ storeId, now });
+    }
+    return getDataOverview(period, date, { settleOverdue: false });
+  }
+
+  return snapshot.overview;
 }

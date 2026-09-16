@@ -134,10 +134,6 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
   assert.equal(acknowledged.body.data.timer.overtimeAcknowledged, true);
 
   now += 20 * 60 * 1000;
-  const secondPass = await timerService.processOverdueTimers();
-  assert.equal(secondPass.remindersCreated, 0);
-  assert.equal(secondPass.automaticResets, 1);
-
   const afterAutomaticReset = await request(
     baseUrl,
     '/api/stores/store_demo/timers',
@@ -169,6 +165,14 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
   assert.equal(
     recordsAfterAutomaticReset.body.data.records[0].resetByNameSnapshot,
     '系统自动清台',
+  );
+  assert.equal(
+    recordsAfterAutomaticReset.body.data.records[0].actualEndTime,
+    '2026-01-15T00:45:00.000Z',
+  );
+  assert.equal(
+    recordsAfterAutomaticReset.body.data.records[0].actualDurationSeconds,
+    45 * 60,
   );
 
   for (const tableId of ['table_demo_02', 'table_demo_03']) {

@@ -182,17 +182,23 @@ function timerAuditSnapshot(timer) {
   };
 }
 
-function buildResetRecord(timer, now, timestamp, actor) {
+function buildResetRecord(
+  timer,
+  now,
+  timestamp,
+  actor,
+  { actualEndMilliseconds = now, actualEndTime = timestamp } = {},
+) {
   const currentPauseSeconds = timer.status === 'paused'
     ? Math.max(
       0,
-      Math.round((now - Date.parse(timer.pauseStartedAt)) / 1000),
+      Math.round((actualEndMilliseconds - Date.parse(timer.pauseStartedAt)) / 1000),
     )
     : 0;
   const totalPausedSeconds = timer.totalPausedSeconds + currentPauseSeconds;
   const elapsedSeconds = Math.max(
     0,
-    Math.round((now - Date.parse(timer.startTime)) / 1000),
+    Math.round((actualEndMilliseconds - Date.parse(timer.startTime)) / 1000),
   );
   const startMilliseconds = Date.parse(timer.startTime);
 
@@ -215,7 +221,7 @@ function buildResetRecord(timer, now, timestamp, actor) {
         timer.plannedDurationSeconds + totalPausedSeconds
       ) * 1000,
     ).toISOString(),
-    actualEndTime: timestamp,
+    actualEndTime,
     plannedDurationSeconds: timer.plannedDurationSeconds,
     actualDurationSeconds: Math.max(0, elapsedSeconds - totalPausedSeconds),
     totalPausedSeconds,
@@ -229,7 +235,14 @@ function buildResetRecord(timer, now, timestamp, actor) {
   };
 }
 
-function resetTimerInRepositories(repositories, timer, now, timestamp, actor) {
+function resetTimerInRepositories(
+  repositories,
+  timer,
+  now,
+  timestamp,
+  actor,
+  options,
+) {
   if (
     repositories.records.findOne(
       (candidate) => candidate.timerId === timer.id,
@@ -238,7 +251,7 @@ function resetTimerInRepositories(repositories, timer, now, timestamp, actor) {
     timerConflict('该计时器已经生成历史记录');
   }
 
-  const record = buildResetRecord(timer, now, timestamp, actor);
+  const record = buildResetRecord(timer, now, timestamp, actor, options);
   repositories.records.create(record);
   repositories.activeTimers.delete(timer.id);
   return record;
@@ -285,10 +298,10 @@ export class TimerService {
     this.nowProvider = nowProvider;
   }
 
-  async list(storeId) {
+  async list(storeId, { settleOverdue = true } = {}) {
     const now = this.nowProvider();
 
-    return unitOfWorkRepository.run(
+    const snapshot = await unitOfWorkRepository.run(
       {
         resources: [
           'settings',
@@ -331,6 +344,28 @@ export class TimerService {
         };
       },
     );
+
+    const requiresSettlement = snapshot.timers.some((timer) => (
+      timer.status === 'overtime'
+      && (
+        (
+          timer.overtimeSeconds >= OVERDUE_REMINDER_INTERVAL_SECONDS
+          && timer.overdueReminderCount < 1
+        )
+        || (
+          timer.overtimeSeconds
+          >= MAX_OVERDUE_REMINDERS * OVERDUE_REMINDER_INTERVAL_SECONDS
+          && timer.overdueReminderCount < MAX_OVERDUE_REMINDERS
+        )
+      )
+    ));
+
+    if (settleOverdue && requiresSettlement) {
+      await this.processOverdueTimers({ storeId, now });
+      return this.list(storeId, { settleOverdue: false });
+    }
+
+    return snapshot;
   }
 
   async start({
@@ -1011,8 +1046,7 @@ export class TimerService {
     return outcome;
   }
 
-  async processOverdueTimers() {
-    const now = this.nowProvider();
+  async processOverdueTimers({ storeId = null, now = this.nowProvider() } = {}) {
     const timestamp = new Date(now).toISOString();
     const committedEvents = [];
 
@@ -1033,12 +1067,25 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeId ? {
+          activeTimers: { storeId },
+          records: { storeId, activeTimersOnly: true },
+          timerInterventionRecords: { storeId, activeTimersOnly: true },
+          realtimeEvents: {
+            storeId,
+            orderBy: 'version',
+            latest: true,
+            limit: 1,
+          },
+        } : {},
       },
       (repositories) => {
         const reminders = [];
         const automaticResets = [];
 
-        for (const timer of repositories.activeTimers.find()) {
+        for (const timer of repositories.activeTimers.find((candidate) => (
+          !storeId || candidate.storeId === storeId
+        ))) {
           const {
             rawRemainingSeconds,
             effectiveEndMilliseconds,
@@ -1128,12 +1175,21 @@ export class TimerService {
           }
 
           const timerBefore = structuredClone(timer);
+          const automaticEndMilliseconds = effectiveEndMilliseconds + (
+            MAX_OVERDUE_REMINDERS
+            * OVERDUE_REMINDER_INTERVAL_SECONDS
+            * 1000
+          );
           const record = resetTimerInRepositories(
             repositories,
             timer,
             now,
             timestamp,
             AUTOMATION_ACTOR,
+            {
+              actualEndMilliseconds: automaticEndMilliseconds,
+              actualEndTime: new Date(automaticEndMilliseconds).toISOString(),
+            },
           );
           const intervention = buildInterventionRecord({
             timer,

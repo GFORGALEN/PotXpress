@@ -26,16 +26,20 @@ test('拼桌按一次接待、两张占用桌统计，实时值不受历史筛�
 });
 
 test('按门店当地日期归属、计时去重、已结束记录统计时长及超时', () => {
-  const record = { ...timer, timerId: 't1', startTime: '2026-09-15T16:30:00Z', actualDurationSeconds: 5400, actualEndTime: '2026-09-15T18:00:00Z', effectiveEndTimeAtReset: '2026-09-15T17:30:00Z' };
+  const record = { ...timer, timerId: 't1', startTime: '2026-09-15T16:30:00Z', actualDurationSeconds: 5400, actualEndTime: '2026-09-15T18:00:00Z', effectiveEndTimeAtReset: '2026-09-15T17:30:00Z', resetBy: 'system_automation' };
   const result = summarizeStore(store, tables, [timer], [record], '7d', now);
   assert.equal(result.sessions, 1);
   assert.equal(result.completed, 1);
+  assert.equal(result.manuallyCompleted, 0);
+  assert.equal(result.automaticallyCompleted, 1);
+  assert.equal(result.automaticResetRate, 1);
   assert.equal(result.averageMinutes, 90);
   assert.equal(result.overtimeRate, 1);
   assert.equal(result.trend.length, 7);
   assert.equal(result.trend.at(-1).count, 1);
   assert.equal(result.hours[0].count, 1);
   assert.equal(result.tables[0].sessions, 1);
+  assert.equal(result.recent[0].automaticallyCompleted, true);
   assert.equal(summarizeStore(store, [], [], [], '30d', now).utilization, null);
 });
 
