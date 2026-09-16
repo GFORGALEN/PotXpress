@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
 import { authRouter } from './routes/auth.routes.js';
+import { dataRouter } from './routes/data.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { layoutRouter } from './routes/layout.routes.js';
 import {
@@ -71,6 +72,7 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use('/api/health', healthRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/data', dataRouter);
   app.use('/api/users', userRouter);
   app.use('/api/stores', storeRouter);
   app.use('/api/stores/:storeId/tables', tableRouter);

@@ -38,7 +38,10 @@ export function LoginPage() {
   }, [username, password]);
 
   if (!authLoading && isAuthenticated) {
-    return <Navigate to={defaultAuthenticatedPath(user?.role)} replace />;
+    const destination = typeof location.state?.from === 'string'
+      ? location.state.from
+      : defaultAuthenticatedPath(user?.role);
+    return <Navigate to={destination} replace />;
   }
 
   const handleSubmit = async (event) => {
