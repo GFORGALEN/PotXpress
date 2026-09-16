@@ -44,6 +44,7 @@ export function TableActionDialog({
   onChooseTransferTarget,
   onCancelTransfer,
   onTransferComplete,
+  onActionResult,
   onRefresh,
   onClose,
 }) {
@@ -101,8 +102,8 @@ export function TableActionDialog({
     setBusyAction(name);
 
     try {
-      await request();
-      await onRefresh();
+      const result = await request();
+      onActionResult?.(name, result);
       showToast(successMessage, 'success');
       onSuccess?.();
 

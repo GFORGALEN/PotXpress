@@ -336,6 +336,24 @@ export function DashboardPage() {
     pollingFailedRef.current = true;
   }, []);
 
+  const applyTimerActionResult = useCallback((action, result) => {
+    if (action === 'reset') {
+      const timerId = result?.record?.timerId;
+      if (timerId) {
+        setTimers((current) => current.filter((timer) => timer.id !== timerId));
+      }
+    } else if (result?.timer) {
+      setTimers((current) => [
+        ...current.filter((timer) => timer.id !== result.timer.id),
+        result.timer,
+      ].sort((left, right) => (
+        left.tableNumberSnapshot - right.tableNumberSnapshot
+      )));
+    }
+    setLastServerContactAt(Date.now());
+    setTimersError(null);
+  }, []);
+
   const handleRealtimeSnapshotRequired = useCallback((details = {}) => {
     const event = details.event;
     const tableName = event?.payload?.tableNameSnapshot || '桌台';
@@ -584,8 +602,8 @@ export function DashboardPage() {
         ?? settings?.defaultDurationMinutes
         ?? 90;
       try {
-        await startTimer(selectedStoreId, tableId, durationMinutes);
-        await refreshTimers();
+        const result = await startTimer(selectedStoreId, tableId, durationMinutes);
+        applyTimerActionResult('start', result);
         showToast(`${table.name} 已开始计时（${durationMinutes} 分钟）`, 'success');
       } catch (error) {
         showToast(
@@ -599,7 +617,7 @@ export function DashboardPage() {
         quickStartTableIdsRef.current.delete(tableId);
       }
     }, TABLE_DOUBLE_CLICK_DELAY);
-  }, [allTables, layoutEditor, refreshTimers, selectedStoreId, settings, showToast, tableTransfer]);
+  }, [allTables, applyTimerActionResult, layoutEditor, refreshTimers, selectedStoreId, settings, showToast, tableTransfer]);
 
   const handleTableDoubleClick = useCallback((tableId) => {
     if (layoutEditor.mode !== 'view' || tableTransfer) return;
@@ -648,7 +666,9 @@ export function DashboardPage() {
 
     try {
       const result = await resetAllTimers(selectedStoreId);
-      await refreshTimers();
+      const resetIds = new Set(result.records.map((record) => record.timerId));
+      setTimers((current) => current.filter((timer) => !resetIds.has(timer.id)));
+      setLastServerContactAt(Date.now());
       setBulkResetOpen(false);
       setSelectedTableId(null);
       showToast(
@@ -1260,6 +1280,7 @@ export function DashboardPage() {
         onChooseTransferTarget={chooseTransferTarget}
         onCancelTransfer={cancelTableTransfer}
         onTransferComplete={completeTableTransfer}
+        onActionResult={applyTimerActionResult}
         onRefresh={refreshTimers}
         onClose={handleCloseDialog}
       />

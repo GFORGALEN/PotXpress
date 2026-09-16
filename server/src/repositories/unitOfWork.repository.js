@@ -72,7 +72,12 @@ class TransactionRepository {
 }
 
 class UnitOfWorkRepository {
-  async run({ resources, writeOrder = [], skipRead = [] }, callback) {
+  async run({
+    resources,
+    writeOrder = [],
+    skipRead = [],
+    readScopes = {},
+  }, callback) {
     const lockFiles = resources.map((name) => {
       const definition = REPOSITORY_DEFINITIONS[name];
 
@@ -104,6 +109,20 @@ class UnitOfWorkRepository {
 
       return definition.filename;
     });
+    const readScopeFiles = Object.fromEntries(
+      Object.entries(readScopes).map(([name, scope]) => {
+        const definition = REPOSITORY_DEFINITIONS[name];
+
+        if (!definition) {
+          throw new Error(`未知的 unit of work 查询范围资源：${name}`);
+        }
+        if (!resources.includes(name)) {
+          throw new Error(`查询范围资源 ${name} 必须同时包含在 resources 中`);
+        }
+
+        return [definition.filename, scope];
+      }),
+    );
 
     return fileStore.withFiles(
       lockFiles,
@@ -124,7 +143,11 @@ class UnitOfWorkRepository {
         const result = await callback(repositories);
         return { data: drafts, result };
       },
-      { writeOrder: writeFiles, skipRead: skipReadFiles },
+      {
+        writeOrder: writeFiles,
+        skipRead: skipReadFiles,
+        readScopes: readScopeFiles,
+      },
     );
   }
 }

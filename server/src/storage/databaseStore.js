@@ -1,11 +1,14 @@
 import { AppError } from '../utils/appError.js';
 import { config } from '../config.js';
 import {
+  canBatchResourceChanges,
   DATABASE_RESOURCES,
   databasePool,
   initializeDatabase,
   readResource,
+  readResources,
   replaceResource,
+  syncResourceChangeBatch,
   syncResourceChanges,
 } from './database.js';
 
@@ -112,6 +115,31 @@ export class DatabaseStore {
     });
   }
 
+  async readById(filename, id) {
+    definitionFor(filename);
+    return this.withLocks([filename], async () => {
+      const client = await databasePool.connect();
+      try {
+        if (config.useMemoryDatabase) {
+          const value = await this.readWithClient(client, filename);
+          if (!Array.isArray(value)) return cloneData(value);
+          const definition = definitionFor(filename);
+          return cloneData(
+            value.find((record) => record[definition.idField] === id) ?? null,
+          );
+        }
+        const result = await readResources(client, [{
+          filename,
+          scope: { id },
+        }]);
+        const value = result[filename];
+        return cloneData(Array.isArray(value) ? (value[0] ?? null) : value);
+      } finally {
+        client.release();
+      }
+    });
+  }
+
   async replaceWithClient(
     client,
     filename,
@@ -165,7 +193,11 @@ export class DatabaseStore {
     );
   }
 
-  async withFiles(filenames, updater, { writeOrder = [], skipRead = [] } = {}) {
+  async withFiles(
+    filenames,
+    updater,
+    { writeOrder = [], skipRead = [], readScopes = {} } = {},
+  ) {
     const resources = [...new Set(filenames)].sort();
     resources.forEach(definitionFor);
     writeOrder.forEach((filename) => {
@@ -179,6 +211,11 @@ export class DatabaseStore {
       }
       if (!definitionFor(filename).idField) {
         throw new Error(`skipRead 只支持数组型资源：${filename}`);
+      }
+    });
+    Object.keys(readScopes).forEach((filename) => {
+      if (!resources.includes(filename)) {
+        throw new Error(`readScopes 中的 ${filename} 未包含在事务资源中`);
       }
     });
 
@@ -196,22 +233,31 @@ export class DatabaseStore {
         if (writeOrder.length > 0) {
           await this.lockResourcesWithClient(client, resources);
         }
-        before = {};
-
-        for (const filename of resources) {
-          // skipRead 资源在本事务中只做追加（create），跳过全表读取，
-          // 避免随数据量增长的全表 SELECT * 和网络传输开销。
-          if (skipRead.includes(filename)) {
-            before[filename] = [];
-            continue;
+        const readableResources = resources.filter(
+          (filename) => !skipRead.includes(filename),
+        );
+        if (config.useMemoryDatabase) {
+          // pg-mem does not support the correlated JSON aggregates used by the
+          // production PostgreSQL bundle query. Keep the same logical snapshot
+          // through its regular resource reader in tests.
+          before = {};
+          for (const filename of readableResources) {
+            before[filename] = await this.readWithClient(
+              client,
+              filename,
+              { forUpdate: writeOrder.includes(filename) },
+            );
           }
-
-          before[filename] = await this.readWithClient(
+        } else {
+          before = await readResources(
             client,
-            filename,
-            { forUpdate: writeOrder.includes(filename) },
+            readableResources.map((filename) => ({
+              filename,
+              scope: readScopes[filename] ?? {},
+            })),
           );
         }
+        for (const filename of skipRead) before[filename] = [];
 
         const drafts = cloneData(before);
         const outcome = await updater(drafts);
@@ -224,16 +270,30 @@ export class DatabaseStore {
         afterSnapshot = after;
         const result = hasEnvelope ? outcome.result : outcome;
 
+        const pendingBatch = [];
+        const flushBatch = async () => {
+          if (pendingBatch.length === 0) return;
+          await syncResourceChangeBatch(client, pendingBatch.splice(0));
+        };
         for (const filename of writeOrder) {
-          if (serialize(before[filename]) !== serialize(after[filename])) {
-            await this.syncWithClient(
-              client,
+          if (serialize(before[filename]) === serialize(after[filename])) continue;
+          if (!config.useMemoryDatabase && canBatchResourceChanges(filename)) {
+            pendingBatch.push({
               filename,
-              before[filename],
-              after[filename],
-            );
+              before: before[filename],
+              after: after[filename],
+            });
+            continue;
           }
+          await flushBatch();
+          await this.syncWithClient(
+            client,
+            filename,
+            before[filename],
+            after[filename],
+          );
         }
+        await flushBatch();
 
         if (this.faultInjector) {
           await this.faultInjector({

@@ -66,8 +66,22 @@ export function summarizeStore(store, tables, timers, records, period, now, date
 }
 
 export async function getDataOverview(period, date) {
-  return unitOfWorkRepository.run({ resources: ['stores', 'tables', 'activeTimers', 'records'], writeOrder: [] }, (repos) => {
-    const now = Date.now();
+  const now = Date.now();
+  const day = 86400000;
+  const reference = period === 'date'
+    ? Date.parse(`${date}T00:00:00Z`)
+    : now;
+  const lookbackDays = period === '30d' ? 32 : period === '7d' ? 9 : 3;
+  const startTimeFrom = new Date(reference - lookbackDays * day).toISOString();
+  const startTimeTo = new Date(reference + 2 * day).toISOString();
+
+  return unitOfWorkRepository.run({
+    resources: ['stores', 'tables', 'activeTimers', 'records'],
+    writeOrder: [],
+    readScopes: {
+      records: { startTimeFrom, startTimeTo },
+    },
+  }, (repos) => {
     return {
       generatedAt: new Date(now).toISOString(), period,
       stores: repos.stores.find((store) => store.enabled).map((store) => summarizeStore(

@@ -243,6 +243,150 @@ function toApiValue(value, descriptor) {
   return value;
 }
 
+function hydrateResource(filename, rows) {
+  const definition = definitionFor(filename);
+  const values = rows.map((row) => {
+    const record = Object.fromEntries(
+      definition.columns
+        .filter(({ property }) => property !== '_id')
+        .map((descriptor) => [
+          descriptor.property,
+          toApiValue(row[descriptor.name], descriptor),
+        ]),
+    );
+
+    for (const [index, child] of (CHILD_RESOURCES[filename] ?? []).entries()) {
+      const childRows = row[`__child_${index}`] ?? [];
+      record[child.property] = child.valueColumn
+        ? childRows.map((childRow) => childRow[child.valueColumn])
+        : childRows.map((childRow) => Object.fromEntries(
+          child.columns.map((descriptor) => [
+            descriptor.property,
+            toApiValue(childRow[descriptor.name], descriptor),
+          ]),
+        ));
+    }
+
+    return record;
+  });
+
+  return definition.idField ? values : (values[0] ?? null);
+}
+
+function buildScopeClause(filename, definition, scope, parameters) {
+  const clauses = [];
+  const parameter = (value) => {
+    parameters.push(value);
+    return `$${parameters.length}`;
+  };
+  const columnFor = (property) => definition.columns.find(
+    (descriptor) => descriptor.property === property,
+  )?.name;
+
+  if (scope.none) clauses.push('FALSE');
+  if (scope.id !== undefined) {
+    clauses.push(`resource_row.${definition.keyColumn} = ${parameter(scope.id)}`);
+  }
+  if (scope.storeId !== undefined) {
+    const storeColumn = filename === 'stores.json' ? 'id' : columnFor('storeId');
+    if (!storeColumn) throw new Error(`${filename} 不支持 storeId 查询范围`);
+    clauses.push(`resource_row.${storeColumn} = ${parameter(scope.storeId)}`);
+  }
+  if (scope.userId !== undefined) {
+    const userColumn = columnFor('userId');
+    if (!userColumn) throw new Error(`${filename} 不支持 userId 查询范围`);
+    clauses.push(`resource_row.${userColumn} = ${parameter(scope.userId)}`);
+  }
+  if (scope.key !== undefined && scope.key !== null) {
+    const keyColumn = columnFor('key');
+    if (!keyColumn) throw new Error(`${filename} 不支持 key 查询范围`);
+    clauses.push(`resource_row.${keyColumn} = ${parameter(scope.key)}`);
+  }
+  if (scope.startTimeFrom !== undefined) {
+    const startColumn = columnFor('startTime');
+    if (!startColumn) throw new Error(`${filename} 不支持 startTimeFrom 查询范围`);
+    clauses.push(`resource_row.${startColumn} >= ${parameter(scope.startTimeFrom)}`);
+  }
+  if (scope.startTimeTo !== undefined) {
+    const startColumn = columnFor('startTime');
+    if (!startColumn) throw new Error(`${filename} 不支持 startTimeTo 查询范围`);
+    clauses.push(`resource_row.${startColumn} < ${parameter(scope.startTimeTo)}`);
+  }
+  if (scope.activeTimersOnly) {
+    const storePlaceholder = parameter(scope.storeId);
+    clauses.push(`EXISTS (
+      SELECT 1 FROM active_timers scoped_timer
+      WHERE scoped_timer.id = resource_row.timer_id
+        AND scoped_timer.store_id = ${storePlaceholder}
+    )`);
+  }
+  if (scope.relatedTableId !== undefined) {
+    const storePlaceholder = parameter(scope.storeId);
+    const tablePlaceholder = parameter(scope.relatedTableId);
+    clauses.push(`EXISTS (
+      SELECT 1 FROM active_timers scoped_timer
+      WHERE scoped_timer.id = resource_row.timer_id
+        AND scoped_timer.store_id = ${storePlaceholder}
+        AND (
+          scoped_timer.table_id = ${tablePlaceholder}
+          OR EXISTS (
+            SELECT 1 FROM active_timer_members scoped_member
+            WHERE scoped_member.timer_id = scoped_timer.id
+              AND scoped_member.table_id = ${tablePlaceholder}
+          )
+        )
+    )`);
+  }
+
+  return clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+}
+
+function buildResourceAggregate(filename, scope, parameters, alias) {
+  const definition = definitionFor(filename);
+  const where = buildScopeClause(filename, definition, scope, parameters);
+  const childColumns = (CHILD_RESOURCES[filename] ?? []).map((child, index) => (
+    `COALESCE((
+      SELECT jsonb_agg(child_row ORDER BY child_row.position)
+      FROM ${child.table} child_row
+      WHERE child_row.${child.parentColumn} = resource_row.${definition.keyColumn}
+    ), '[]'::jsonb) AS "__child_${index}"`
+  ));
+  const limit = Number.isInteger(scope.limit) && scope.limit > 0
+    ? ` LIMIT ${scope.limit}`
+    : '';
+  const orderDirection = scope.latest ? 'DESC' : 'ASC';
+  const orderColumn = scope.orderBy
+    ? definition.columns.find(({ property }) => property === scope.orderBy)?.name
+    : definition.keyColumn;
+  if (!orderColumn) throw new Error(`${filename} 不支持 ${scope.orderBy} 排序`);
+  const selectedColumns = ['resource_row.*', ...childColumns].join(', ');
+
+  return `(SELECT COALESCE(jsonb_agg(scoped_resource), '[]'::jsonb)
+    FROM (
+      SELECT ${selectedColumns}
+      FROM ${definition.table} resource_row
+      ${where}
+      ORDER BY resource_row.${orderColumn} ${orderDirection}${limit}
+    ) scoped_resource) AS "${alias}"`;
+}
+
+export async function readResources(client, resourceScopes) {
+  if (resourceScopes.length === 0) return {};
+
+  const parameters = [];
+  const aliases = resourceScopes.map((_, index) => `resource_${index}`);
+  const selections = resourceScopes.map(({ filename, scope = {} }, index) => (
+    buildResourceAggregate(filename, scope, parameters, aliases[index])
+  ));
+  const result = await client.query(`SELECT ${selections.join(', ')}`, parameters);
+  const row = result.rows[0];
+
+  return Object.fromEntries(resourceScopes.map(({ filename }, index) => [
+    filename,
+    hydrateResource(filename, row[aliases[index]] ?? []),
+  ]));
+}
+
 export async function readResource(client, filename, { forUpdate = false } = {}) {
   const definition = definitionFor(filename);
   const result = await client.query(`SELECT * FROM ${definition.table} ORDER BY ${definition.keyColumn}${forUpdate ? ' FOR UPDATE' : ''}`);
@@ -328,39 +472,67 @@ function recordKey(definition, record) {
   return definition.idField ? record[definition.idField] : 'singleton';
 }
 
-async function upsertResourceRecord(client, definition, record) {
+async function upsertResourceRecords(client, definition, records) {
+  if (records.length === 0) return;
   const names = definition.columns.map(({ name }) => name);
   const updates = names.filter((name) => name !== definition.keyColumn)
     .map((name) => `${name} = EXCLUDED.${name}`).join(', ');
-  const values = definition.columns.map((descriptor) => toDatabaseValue(
-    descriptor.property === '_id' ? 'singleton' : record[descriptor.property],
-    descriptor,
-  ));
+  const values = [];
+  const tuples = records.map((record) => {
+    const rowValues = definition.columns.map((descriptor) => toDatabaseValue(
+      descriptor.property === '_id' ? 'singleton' : record[descriptor.property],
+      descriptor,
+    ));
+    const offset = values.length;
+    values.push(...rowValues);
+    return `(${rowValues.map((_, index) => `$${offset + index + 1}`).join(', ')})`;
+  });
   await client.query(
     `INSERT INTO ${definition.table} (${names.join(', ')})
-     VALUES (${names.map((_, index) => `$${index + 1}`).join(', ')})
+     VALUES ${tuples.join(', ')}
      ON CONFLICT (${definition.keyColumn}) DO UPDATE SET ${updates}`,
     values,
   );
 }
 
-async function replaceRecordChildren(client, filename, definition, record) {
+async function replaceRecordChildren(
+  client,
+  filename,
+  definition,
+  record,
+  previous = null,
+) {
   const parentId = recordKey(definition, record);
   for (const child of CHILD_RESOURCES[filename] ?? []) {
-    await client.query(
-      `DELETE FROM ${child.table} WHERE ${child.parentColumn} = $1`,
-      [parentId],
-    );
-    for (const [position, item] of (record[child.property] ?? []).entries()) {
-      const descriptors = child.valueColumn
-        ? [col('_value', child.valueColumn)]
-        : child.columns;
-      const names = [
-        child.parentColumn,
-        'position',
-        ...descriptors.map(({ name }) => name),
-      ];
-      const values = [
+    const items = record[child.property] ?? [];
+    if (
+      previous
+      && JSON.stringify(previous[child.property] ?? []) === JSON.stringify(items)
+    ) {
+      continue;
+    }
+
+    if (items.length === 0) {
+      if (previous) {
+        await client.query(
+          `DELETE FROM ${child.table} WHERE ${child.parentColumn} = $1`,
+          [parentId],
+        );
+      }
+      continue;
+    }
+
+    const descriptors = child.valueColumn
+      ? [col('_value', child.valueColumn)]
+      : child.columns;
+    const names = [
+      child.parentColumn,
+      'position',
+      ...descriptors.map(({ name }) => name),
+    ];
+    const values = [];
+    const tuples = items.map((item, position) => {
+      const rowValues = [
         parentId,
         position,
         ...descriptors.map((descriptor) => toDatabaseValue(
@@ -368,12 +540,22 @@ async function replaceRecordChildren(client, filename, definition, record) {
           descriptor,
         )),
       ];
+      const offset = values.length;
+      values.push(...rowValues);
+      return `(${rowValues.map((_, index) => `$${offset + index + 1}`).join(', ')})`;
+    });
+    if (previous) {
       await client.query(
-        `INSERT INTO ${child.table} (${names.join(', ')})
-         VALUES (${names.map((_, index) => `$${index + 1}`).join(', ')})`,
-        values,
+        `DELETE FROM ${child.table} WHERE ${child.parentColumn} = $1`,
+        [parentId],
       );
     }
+
+    await client.query(
+      `INSERT INTO ${child.table} (${names.join(', ')})
+       VALUES ${tuples.join(', ')}`,
+      values,
+    );
   }
 }
 
@@ -385,6 +567,8 @@ export async function syncResourceChanges(client, filename, before, after) {
     beforeRecords.map((record) => [recordKey(definition, record), record]),
   );
   const afterIds = new Set();
+  const changedStoreIds = new Set();
+  const changedRecords = [];
 
   for (const record of afterRecords) {
     const id = recordKey(definition, record);
@@ -394,8 +578,25 @@ export async function syncResourceChanges(client, filename, before, after) {
     if (previous && JSON.stringify(previous) === JSON.stringify(record)) {
       continue;
     }
-    await upsertResourceRecord(client, definition, record);
-    await replaceRecordChildren(client, filename, definition, record);
+    if (filename === 'realtimeEvents.json' && record.storeId) {
+      changedStoreIds.add(record.storeId);
+    }
+    changedRecords.push({ record, previous: previous ?? null });
+  }
+
+  await upsertResourceRecords(
+    client,
+    definition,
+    changedRecords.map(({ record }) => record),
+  );
+  for (const { record, previous } of changedRecords) {
+    await replaceRecordChildren(
+      client,
+      filename,
+      definition,
+      record,
+      previous,
+    );
   }
 
   const deletedIds = beforeRecords
@@ -407,6 +608,146 @@ export async function syncResourceChanges(client, filename, before, after) {
        WHERE ${definition.keyColumn} IN (${deletedIds.map((_, index) => `$${index + 1}`).join(', ')})`,
       deletedIds,
     );
+  }
+  if (
+    filename === 'realtimeEvents.json'
+    && changedStoreIds.size > 0
+    && !config.useMemoryDatabase
+  ) {
+    await client.query(
+      `DELETE FROM realtime_events
+       WHERE id IN (
+         SELECT id FROM (
+           SELECT id, ROW_NUMBER() OVER (
+             PARTITION BY store_id ORDER BY version DESC
+           ) AS event_position
+           FROM realtime_events
+           WHERE store_id = ANY($1::text[])
+         ) ranked_events
+         WHERE event_position > 1000
+       )`,
+      [[...changedStoreIds]],
+    );
+  }
+}
+
+const BATCH_SAFE_RESOURCES = new Set([
+  'auditLogs.json',
+  'idempotencyKeys.json',
+  'realtimeEvents.json',
+]);
+
+export function canBatchResourceChanges(filename) {
+  return BATCH_SAFE_RESOURCES.has(filename);
+}
+
+export async function syncResourceChangeBatch(client, changes) {
+  const parameters = [];
+  const ctes = [];
+  const changedRealtimeStoreIds = new Set();
+  let cleanExpiredIdempotencyKeys = false;
+  const changedIdempotencyIds = new Set();
+  const parameter = (value) => {
+    parameters.push(value);
+    return `$${parameters.length}`;
+  };
+
+  for (const [changeIndex, { filename, before, after }] of changes.entries()) {
+    if (!canBatchResourceChanges(filename)) {
+      throw new Error(`${filename} 不支持批量资源同步`);
+    }
+    const definition = definitionFor(filename);
+    const beforeRecords = resourceRecords(definition, before);
+    const afterRecords = resourceRecords(definition, after);
+    const beforeById = new Map(
+      beforeRecords.map((record) => [recordKey(definition, record), record]),
+    );
+    const afterIds = new Set();
+    const changedRecords = [];
+
+    for (const record of afterRecords) {
+      const id = recordKey(definition, record);
+      if (!id) throw new Error(`${filename} record is missing ${definition.idField}`);
+      afterIds.add(id);
+      const previous = beforeById.get(id);
+      if (!previous || JSON.stringify(previous) !== JSON.stringify(record)) {
+        changedRecords.push(record);
+        if (filename === 'idempotencyKeys.json') {
+          cleanExpiredIdempotencyKeys = true;
+          changedIdempotencyIds.add(id);
+        }
+        if (filename === 'realtimeEvents.json' && record.storeId) {
+          changedRealtimeStoreIds.add(record.storeId);
+        }
+      }
+    }
+
+    if (changedRecords.length > 0) {
+      const names = definition.columns.map(({ name }) => name);
+      const updates = names.filter((name) => name !== definition.keyColumn)
+        .map((name) => `${name} = EXCLUDED.${name}`).join(', ');
+      const tuples = changedRecords.map((record) => {
+        const values = definition.columns.map((descriptor) => toDatabaseValue(
+          descriptor.property === '_id' ? 'singleton' : record[descriptor.property],
+          descriptor,
+        ));
+        return `(${values.map((value) => parameter(value)).join(', ')})`;
+      });
+      ctes.push(
+        `resource_${changeIndex}_upsert AS (
+          INSERT INTO ${definition.table} (${names.join(', ')})
+          VALUES ${tuples.join(', ')}
+          ON CONFLICT (${definition.keyColumn}) DO UPDATE SET ${updates}
+          RETURNING ${definition.keyColumn}
+        )`,
+      );
+    }
+
+    const deletedIds = beforeRecords
+      .map((record) => recordKey(definition, record))
+      .filter((id) => !afterIds.has(id));
+    if (deletedIds.length > 0) {
+      ctes.push(
+        `resource_${changeIndex}_delete AS (
+          DELETE FROM ${definition.table}
+          WHERE ${definition.keyColumn} = ANY(${parameter(deletedIds)}::text[])
+          RETURNING ${definition.keyColumn}
+        )`,
+      );
+    }
+  }
+
+  if (changedRealtimeStoreIds.size > 0) {
+    ctes.push(
+      `realtime_event_cleanup AS (
+        DELETE FROM realtime_events
+        WHERE id IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (
+              PARTITION BY store_id ORDER BY version DESC
+            ) AS event_position
+            FROM realtime_events
+            WHERE store_id = ANY(${parameter([...changedRealtimeStoreIds])}::text[])
+          ) ranked_events
+          WHERE event_position > 999
+        )
+        RETURNING id
+      )`,
+    );
+  }
+  if (cleanExpiredIdempotencyKeys) {
+    ctes.push(
+      `expired_idempotency_cleanup AS (
+        DELETE FROM idempotency_keys
+        WHERE expires_at <= NOW()
+          AND NOT (id = ANY(${parameter([...changedIdempotencyIds])}::text[]))
+        RETURNING id
+      )`,
+    );
+  }
+
+  if (ctes.length > 0) {
+    await client.query(`WITH ${ctes.join(', ')} SELECT 1 AS ok`, parameters);
   }
 }
 

@@ -14,8 +14,7 @@ export class BaseRepository {
   }
 
   async findById(id) {
-    const records = await fileStore.readJSON(this.filename);
-    return records.find((record) => record[this.idField] === id) ?? null;
+    return fileStore.readById(this.filename, id);
   }
 
   async create(record) {

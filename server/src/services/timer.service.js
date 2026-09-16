@@ -26,6 +26,49 @@ const TIMER_EVENT_TYPES = Object.freeze({
   'timer.acknowledge_alert': 'timer.alert_acknowledged',
 });
 
+function idempotencyReadScope(user, key) {
+  return key ? { userId: user.userId, key } : { none: true };
+}
+
+function storeTimerReadScopes(storeId, {
+  user = null,
+  idempotencyKey = null,
+  includeStores = true,
+  includeTables = true,
+  includeSettings = true,
+  includeGroups = true,
+  includeInterventions = true,
+  recordTableId = null,
+  includeActiveRecords = false,
+  realtimeLimit = 1,
+} = {}) {
+  return {
+    ...(includeStores ? { stores: { id: storeId } } : {}),
+    ...(includeTables ? { tables: { storeId } } : {}),
+    ...(includeSettings ? { settings: { id: storeId } } : {}),
+    activeTimers: { storeId },
+    ...(includeGroups ? { tableGroups: { storeId } } : {}),
+    ...(includeInterventions ? {
+      timerInterventionRecords: { storeId, activeTimersOnly: true },
+    } : {}),
+    ...(recordTableId ? {
+      records: { storeId, relatedTableId: recordTableId },
+    } : {}),
+    ...(includeActiveRecords ? {
+      records: { storeId, activeTimersOnly: true },
+    } : {}),
+    ...(user ? {
+      idempotencyKeys: idempotencyReadScope(user, idempotencyKey),
+    } : {}),
+    realtimeEvents: {
+      storeId,
+      orderBy: 'version',
+      latest: true,
+      limit: realtimeLimit,
+    },
+  };
+}
+
 function getSettings(settings, storeId) {
   const entry = settings.findById(storeId);
 
@@ -254,6 +297,12 @@ export class TimerService {
           'realtimeEvents',
         ],
         writeOrder: [],
+        readScopes: storeTimerReadScopes(storeId, {
+          includeStores: false,
+          includeTables: false,
+          includeGroups: false,
+          realtimeLimit: 1,
+        }),
       },
       ({
         settings,
@@ -314,6 +363,11 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+          includeInterventions: false,
+        }),
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -603,6 +657,10 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+        }),
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -726,6 +784,13 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+          includeSettings: false,
+          includeInterventions: false,
+          recordTableId: tableId,
+        }),
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -833,6 +898,14 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+          includeTables: false,
+          includeSettings: false,
+          includeGroups: false,
+          includeActiveRecords: true,
+        }),
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -1159,6 +1232,10 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+        }),
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,

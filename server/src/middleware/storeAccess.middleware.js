@@ -4,7 +4,9 @@ import { AppError } from '../utils/appError.js';
 export async function storeAccess(req, res, next) {
   try {
     const { storeId } = req.params;
-    const store = await storeRepository.findById(storeId);
+    const store = req.authenticatedStore?.id === storeId
+      ? req.authenticatedStore
+      : await storeRepository.findById(storeId);
 
     if (!store) {
       throw new AppError(404, 'STORE_NOT_FOUND', '门店不存在');

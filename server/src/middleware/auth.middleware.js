@@ -1,5 +1,4 @@
 import { userRepository } from '../repositories/user.repository.js';
-import { storeRepository } from '../repositories/store.repository.js';
 import { AppError } from '../utils/appError.js';
 import { verifyToken } from '../utils/jwt.js';
 
@@ -31,7 +30,8 @@ export async function authenticate(req, res, next) {
   // temporary server failure, not proof that the caller's token is invalid.
   // Misclassifying it as 401 makes every client discard an otherwise valid
   // session during a short database or connection-pool interruption.
-  const user = await userRepository.findById(payload.userId);
+  const authContext = await userRepository.findAuthContext(payload.userId);
+  const user = authContext?.user ?? null;
 
   if (
     !user
@@ -42,11 +42,12 @@ export async function authenticate(req, res, next) {
   }
 
   if (user.role !== 'system_admin') {
-    const store = await storeRepository.findById(user.storeId);
+    const store = authContext.store;
 
     if (!store || !store.enabled) {
       return next(new AppError(401, 'UNAUTHORIZED', '登录状态已失效'));
     }
+    req.authenticatedStore = store;
   }
 
   req.user = {

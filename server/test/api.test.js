@@ -99,8 +99,8 @@ test('健康检查、登录续期和 tokenVersion 失效链路可用', async (t)
   assert.equal(typeof refreshBody.data.token, 'string');
   assert.equal(refreshBody.data.user.id, loginBody.data.user.id);
 
-  const originalFindById = userRepository.findById;
-  userRepository.findById = async () => {
+  const originalFindAuthContext = userRepository.findAuthContext;
+  userRepository.findAuthContext = async () => {
     throw new Error('simulated storage interruption');
   };
   let storageFailureResponse;
@@ -109,7 +109,7 @@ test('健康检查、登录续期和 tokenVersion 失效链路可用', async (t)
       headers: { authorization: `Bearer ${refreshBody.data.token}` },
     });
   } finally {
-    userRepository.findById = originalFindById;
+    userRepository.findAuthContext = originalFindAuthContext;
   }
   const storageFailureBody = await storageFailureResponse.json();
   assert.equal(storageFailureResponse.status, 500);
