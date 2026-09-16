@@ -58,8 +58,7 @@ export function DataPage() {
       }
     }
     void load();
-    const interval = setInterval(() => { if (!document.hidden) void load(); }, 30000);
-    return () => { active = false; controller.abort(); clearInterval(interval); };
+    return () => { active = false; controller.abort(); };
   }, [period, date, refresh]);
   const stores = (payload?.stores ?? []).map((store) => ({ ...store, name: formatStoreDisplayName(store.name).replace(/^小锅快线\s*[–—-]\s*/, '') }));
   const selected = stores.find((store) => store.id === selectedId);
@@ -75,7 +74,7 @@ export function DataPage() {
   return <main className="data-page">
     <header className="data-header"><Link to="/" className="data-brand"><span>PX</span> POTXPRESS <small>经营数据</small></Link><Link to="/" className="data-back"><ArrowLeft size={15} /> 返回工作台</Link></header>
     <div className="data-content">
-      <div className="data-title-row"><div><div className="data-eyebrow">OPERATIONS OVERVIEW · 系统管理员专属</div><h1>把每家店的表现，看清楚。</h1><p>从此刻的忙闲，到每天的变化，所有门店尽在这里。</p></div><div className="data-live"><i />{payload ? `${stores.length} 家门店 · 每 30 秒更新` : '正在连接数据'}</div></div>
+      <div className="data-title-row"><div><div className="data-eyebrow">OPERATIONS OVERVIEW · 系统管理员专属</div><h1>把每家店的表现，看清楚。</h1><p>从此刻的忙闲，到每天的变化，所有门店尽在这里。</p></div><div className="data-live"><i />{payload ? `${stores.length} 家门店 · 手动刷新` : '正在连接数据'}</div></div>
       <div className="data-toolbar"><div className="data-periods" aria-label="统计周期">{periods.map(([value, label]) => <button key={value} aria-pressed={period === value} className={period === value ? 'active' : ''} onClick={() => setPeriod(value)}>{label}</button>)}</div><button className="data-refresh" disabled={loading} onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={15} className={loading ? 'data-spin' : ''} />刷新数据</button></div>
       <div className="data-date-toolbar">
         <label htmlFor="data-date">查看指定日期</label>

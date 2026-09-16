@@ -302,7 +302,6 @@ export class TimerService {
           'tables',
           'settings',
           'activeTimers',
-          'timerInterventionRecords',
           'tableGroups',
           'auditLogs',
           'idempotencyKeys',
@@ -314,6 +313,7 @@ export class TimerService {
           'idempotencyKeys',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -602,6 +602,7 @@ export class TimerService {
           'idempotencyKeys',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -724,6 +725,7 @@ export class TimerService {
           'idempotencyKeys',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -830,6 +832,7 @@ export class TimerService {
           'idempotencyKeys',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,
@@ -956,6 +959,7 @@ export class TimerService {
           'auditLogs',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => {
         const reminders = [];
@@ -1154,6 +1158,7 @@ export class TimerService {
           'idempotencyKeys',
           'realtimeEvents',
         ],
+        skipRead: ['auditLogs'],
       },
       (repositories) => runIdempotentMutation({
         idempotencyKeys: repositories.idempotencyKeys,

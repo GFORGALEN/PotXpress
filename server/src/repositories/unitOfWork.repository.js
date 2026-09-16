@@ -72,7 +72,7 @@ class TransactionRepository {
 }
 
 class UnitOfWorkRepository {
-  async run({ resources, writeOrder = [] }, callback) {
+  async run({ resources, writeOrder = [], skipRead = [] }, callback) {
     const lockFiles = resources.map((name) => {
       const definition = REPOSITORY_DEFINITIONS[name];
 
@@ -87,6 +87,19 @@ class UnitOfWorkRepository {
 
       if (!definition) {
         throw new Error(`未知的 unit of work 写资源：${name}`);
+      }
+
+      return definition.filename;
+    });
+    const skipReadFiles = skipRead.map((name) => {
+      const definition = REPOSITORY_DEFINITIONS[name];
+
+      if (!definition) {
+        throw new Error(`未知的 unit of work 跳读资源：${name}`);
+      }
+
+      if (!writeOrder.includes(name)) {
+        throw new Error(`跳读资源 ${name} 必须同时包含在 writeOrder 中`);
       }
 
       return definition.filename;
@@ -111,7 +124,7 @@ class UnitOfWorkRepository {
         const result = await callback(repositories);
         return { data: drafts, result };
       },
-      { writeOrder: writeFiles },
+      { writeOrder: writeFiles, skipRead: skipReadFiles },
     );
   }
 }

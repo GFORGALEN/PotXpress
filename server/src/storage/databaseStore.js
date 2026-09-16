@@ -76,21 +76,29 @@ export class DatabaseStore {
   }
 
   async lockResourcesWithClient(client, filenames) {
-    for (const filename of [...new Set(filenames)].sort()) {
-      await client.query(
-        `INSERT INTO resource_locks (resource_name)
-         VALUES ($1)
-         ON CONFLICT (resource_name) DO NOTHING`,
-        [filename],
-      );
-      await client.query(
-        `SELECT resource_name
-         FROM resource_locks
-         WHERE resource_name = $1
-         FOR UPDATE`,
-        [filename],
-      );
+    const resources = [...new Set(filenames)].sort();
+
+    if (resources.length === 0) {
+      return;
     }
+
+    const placeholders = resources.map((_, index) => `$${index + 1}`).join(', ');
+    const valuesTuples = resources.map((_, index) => `($${index + 1})`).join(', ');
+
+    await client.query(
+      `INSERT INTO resource_locks (resource_name)
+       VALUES ${valuesTuples}
+       ON CONFLICT (resource_name) DO NOTHING`,
+      resources,
+    );
+    await client.query(
+      `SELECT resource_name
+       FROM resource_locks
+       WHERE resource_name IN (${placeholders})
+       ORDER BY resource_name
+       FOR UPDATE`,
+      resources,
+    );
   }
 
   async readJSON(filename) {
@@ -157,7 +165,7 @@ export class DatabaseStore {
     );
   }
 
-  async withFiles(filenames, updater, { writeOrder = [] } = {}) {
+  async withFiles(filenames, updater, { writeOrder = [], skipRead = [] } = {}) {
     const resources = [...new Set(filenames)].sort();
     resources.forEach(definitionFor);
     writeOrder.forEach((filename) => {
@@ -165,10 +173,19 @@ export class DatabaseStore {
         throw new Error(`writeOrder 中的 ${filename} 未包含在事务资源中`);
       }
     });
+    skipRead.forEach((filename) => {
+      if (!writeOrder.includes(filename)) {
+        throw new Error(`skipRead 中的 ${filename} 必须同时包含在 writeOrder 中`);
+      }
+      if (!definitionFor(filename).idField) {
+        throw new Error(`skipRead 只支持数组型资源：${filename}`);
+      }
+    });
 
     return this.withLocks(resources, async () => {
       const client = await databasePool.connect();
       let before = null;
+      let afterSnapshot = null;
 
       try {
         await client.query(
@@ -182,6 +199,13 @@ export class DatabaseStore {
         before = {};
 
         for (const filename of resources) {
+          // skipRead 资源在本事务中只做追加（create），跳过全表读取，
+          // 避免随数据量增长的全表 SELECT * 和网络传输开销。
+          if (skipRead.includes(filename)) {
+            before[filename] = [];
+            continue;
+          }
+
           before[filename] = await this.readWithClient(
             client,
             filename,
@@ -197,6 +221,7 @@ export class DatabaseStore {
         const after = hasEnvelope
           ? { ...drafts, ...outcome.data }
           : drafts;
+        afterSnapshot = after;
         const result = hasEnvelope ? outcome.result : outcome;
 
         for (const filename of writeOrder) {
@@ -229,6 +254,20 @@ export class DatabaseStore {
           await client.query('BEGIN');
           try {
             for (const filename of [...writeOrder].reverse()) {
+              // skipRead 资源的 before 是空数组快照，不能用 replace 恢复
+              // （会清空整表）；改为把本事务追加的记录同步删除。
+              if (skipRead.includes(filename)) {
+                if (afterSnapshot) {
+                  await this.syncWithClient(
+                    client,
+                    filename,
+                    afterSnapshot[filename],
+                    before[filename],
+                  );
+                }
+                continue;
+              }
+
               await this.replaceWithClient(
                 client,
                 filename,
