@@ -6,8 +6,10 @@ export function WarningAlertDialog({ tables, onClose }) {
     return null;
   }
 
+  const hasOvertime = tables.some((table) => table.status === 'overtime');
+
   return (
-    <div className="fixed inset-0 z-[96] flex items-center justify-center bg-ink-950/60 p-4 backdrop-blur-sm">
+    <div className={`fixed inset-0 z-[96] flex items-center justify-center p-4 backdrop-blur-sm ${hasOvertime ? 'bg-red-950/80' : 'bg-ink-950/60'}`}>
       <div
         data-potx-touch-scroll
         className="touch-scroll-region max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-6 shadow-soft"
@@ -17,14 +19,14 @@ export function WarningAlertDialog({ tables, onClose }) {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-700">
+            <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${hasOvertime ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
               <AlertTriangle size={24} />
             </span>
             <h2
               id="warning-alert-title"
-              className="mt-4 text-xl font-black text-ink-950"
+              className={`mt-4 text-xl font-black ${hasOvertime ? 'text-red-700' : 'text-ink-950'}`}
             >
-              即将超时
+              {hasOvertime ? '桌台已超时' : '即将超时'}
             </h2>
           </div>
           <button
@@ -37,22 +39,27 @@ export function WarningAlertDialog({ tables, onClose }) {
           </button>
         </div>
         <div className="mt-4 space-y-2">
-          {tables.map((table) => (
-            <div
-              key={table.tableId}
-              className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2.5 text-sm"
-            >
-              <strong>{table.name}</strong>
-              <span className="font-mono font-black">
-                还剩 {formatTimerDuration(table.remainingSeconds)}
-              </span>
-            </div>
-          ))}
+          {tables.map((table) => {
+            const overtime = table.status === 'overtime';
+            return (
+              <div
+                key={table.tableId}
+                className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm ${overtime ? 'bg-red-50 text-red-700' : 'bg-amber-50'}`}
+              >
+                <strong>{table.name}</strong>
+                <span className="font-mono font-black">
+                  {overtime
+                    ? `已超时 ${formatTimerDuration(table.overtimeSeconds)}`
+                    : `还剩 ${formatTimerDuration(table.remainingSeconds)}`}
+                </span>
+              </div>
+            );
+          })}
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="mt-6 min-h-12 w-full rounded-2xl bg-amber-500 text-sm font-black text-white"
+          className={`mt-6 min-h-12 w-full rounded-2xl text-sm font-black text-white ${hasOvertime ? 'bg-red-600' : 'bg-amber-500'}`}
         >
           知道了
         </button>

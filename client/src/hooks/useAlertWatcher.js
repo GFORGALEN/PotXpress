@@ -44,7 +44,7 @@ export function useAlertWatcher(tables, refreshTimers) {
   } = useSound();
   const seenWarningIdsRef = useRef(new Set());
   const dismissedOvertimeIdsRef = useRef(new Set());
-  const [newWarningTables, setNewWarningTables] = useState([]);
+  const [newWarningTimerIds, setNewWarningTimerIds] = useState([]);
   const [overtimeDialogOpen, setOvertimeDialogOpen] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
   const warningTables = useMemo(
@@ -65,11 +65,17 @@ export function useAlertWatcher(tables, refreshTimers) {
     ),
     [overtimeTables],
   );
+  const newWarningTables = useMemo(() => {
+    const warningTimerIds = new Set(newWarningTimerIds);
+    return uniqueTimerTables(tables.filter(
+      (table) => table.timerId && warningTimerIds.has(table.timerId),
+    ));
+  }, [newWarningTimerIds, tables]);
 
   useEffect(() => {
     seenWarningIdsRef.current = new Set(readWarningIds(selectedStoreId));
     dismissedOvertimeIdsRef.current = new Set();
-    setNewWarningTables([]);
+    setNewWarningTimerIds([]);
     setOvertimeDialogOpen(false);
     stopOvertimeAlarm();
   }, [selectedStoreId, stopOvertimeAlarm]);
@@ -84,7 +90,7 @@ export function useAlertWatcher(tables, refreshTimers) {
       return;
     }
 
-    setNewWarningTables(nextWarnings);
+    setNewWarningTimerIds(nextWarnings.map((table) => table.timerId));
     for (const table of nextWarnings) {
       seenWarningIdsRef.current.add(table.timerId);
     }
@@ -166,7 +172,7 @@ export function useAlertWatcher(tables, refreshTimers) {
 
   return {
     newWarningTables,
-    closeWarningDialog: () => setNewWarningTables([]),
+    closeWarningDialog: () => setNewWarningTimerIds([]),
     unacknowledgedOvertime,
     overtimeDialogOpen,
     acknowledging,
