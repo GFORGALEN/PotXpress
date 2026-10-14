@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   BrickWall,
   Armchair,
+  Expand,
   DoorOpen,
   Grid3X3,
   Map,
@@ -20,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog.jsx';
+import { CanvasSizeDialog } from './CanvasSizeDialog.jsx';
 import { useLayoutEditor } from '../../contexts/LayoutEditorContext.jsx';
 import { useToast } from '../../contexts/ToastContext.jsx';
 import {
@@ -40,6 +42,7 @@ export function EditorToolbar({ onAddTable }) {
     syncSelectedResize,
     draftDecorations,
     updateCanvas,
+    resizeCanvas,
     addDecoration,
     deleteSelectedDecoration,
     updateDecoration,
@@ -60,6 +63,7 @@ export function EditorToolbar({ onAddTable }) {
   } = useLayoutEditor();
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [confirmReload, setConfirmReload] = useState(false);
+  const [canvasSizeOpen, setCanvasSizeOpen] = useState(false);
   const [overlaps, setOverlaps] = useState([]);
   const [outsideDefaultView, setOutsideDefaultView] = useState([]);
   const overlapDescription = useMemo(() => (
@@ -67,6 +71,23 @@ export function EditorToolbar({ onAddTable }) {
       .map((item) => `${item.left}×${item.right}`)
       .join('、')
   ), [overlaps]);
+
+  const applyCanvasSize = (width, height) => {
+    const result = resizeCanvas(width, height);
+    if (!result.ok || result.unchanged) return result;
+    const notes = [];
+    if (result.movedDisabled.length) {
+      notes.push(`停用桌台 ${result.movedDisabled.slice(0, 6).join('、')}${result.movedDisabled.length > 6 ? ' 等' : ''}已移回画布内`);
+    }
+    if (result.defaultViewCleared) {
+      notes.push('画布尺寸已调整，请重新设置默认展示范围');
+    }
+    showToast(
+      `画布已改为 ${width}×${height}，保存布局后生效${notes.length ? `；${notes.join('；')}` : ''}`,
+      notes.length ? 'info' : 'success',
+    );
+    return result;
+  };
 
   const requestSave = async () => {
     const nextOverlaps = findSignificantOverlaps(
@@ -209,9 +230,15 @@ export function EditorToolbar({ onAddTable }) {
                 </button>
               </>
             ) : null}
-            <span className="inline-flex min-h-11 items-center rounded-xl border border-sky-200 bg-white px-3 text-xs font-bold text-sky-900">
-              固定画布 · {draftCanvas.virtualWidth}×{draftCanvas.virtualHeight}
-            </span>
+            <button
+              type="button"
+              onClick={() => setCanvasSizeOpen(true)}
+              disabled={saving}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-sky-200 bg-white px-3 text-sm font-bold text-sky-900 disabled:opacity-50"
+            >
+              <Expand size={16} />
+              画布尺寸 · {draftCanvas.virtualWidth}×{draftCanvas.virtualHeight}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -334,6 +361,13 @@ export function EditorToolbar({ onAddTable }) {
         </div>
       </div>
 
+      <CanvasSizeDialog
+        open={canvasSizeOpen}
+        currentWidth={draftCanvas.virtualWidth}
+        currentHeight={draftCanvas.virtualHeight}
+        onApply={applyCanvasSize}
+        onClose={() => setCanvasSizeOpen(false)}
+      />
       <ConfirmDialog
         open={confirmDiscard}
         title="放弃未保存的布局？"

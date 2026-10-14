@@ -36,6 +36,7 @@ import {
   interactionPointerId,
   isImmersiveViewportReady,
   restoreImmersiveDeviceViewport,
+  upgradeImmersiveDeviceViewSnapshot,
   shouldRecoverAbortedInteraction,
   shouldDecorationAffectImmersiveFit,
   updateMarqueeSelectionIds,
@@ -505,6 +506,22 @@ export function FloorCanvas({
     readStoredDeviceView,
     viewportSize,
   ]);
+
+  useEffect(() => {
+    // 旧快照没有画布尺寸：用已保存（非草稿）画布补齐后写回，之后改尺寸
+    // 也能还原到同一世界位置。
+    if (editing || !deviceViewStorageKey || typeof window === 'undefined') return;
+    const upgraded = upgradeImmersiveDeviceViewSnapshot(
+      readStoredDeviceView(),
+      canvas,
+    );
+    if (!upgraded) return;
+    try {
+      window.localStorage.setItem(deviceViewStorageKey, JSON.stringify(upgraded));
+    } catch {
+      // Restoring still works for this session without persistence.
+    }
+  }, [canvas, deviceViewStorageKey, editing, readStoredDeviceView]);
 
   useEffect(() => {
     setHasSavedDeviceView(Boolean(restoreImmersiveDeviceViewport(

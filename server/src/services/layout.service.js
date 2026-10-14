@@ -242,6 +242,18 @@ export async function saveLayout(storeId, input, user) {
       }
 
       validateSubmittedTables(input.tables, remainingTables, nextCanvas);
+      const outOfBoundsDecoration = input.decorations.find((item) => (
+        item.xRatio + item.widthRatio > 1.000001
+        || item.yRatio + item.heightRatio > 1.000001
+      ));
+      if (outOfBoundsDecoration) {
+        throw new AppError(
+          400,
+          'VALIDATION_ERROR',
+          '装饰元素不能超出画布边界',
+          { decorationId: outOfBoundsDecoration.id },
+        );
+      }
       const submittedById = new Map(
         input.tables.map((item) => [item.tableId, item.layout]),
       );

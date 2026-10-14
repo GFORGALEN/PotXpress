@@ -104,6 +104,39 @@ export function createImmersiveDeviceViewSnapshot(
       (viewportSize.height / 2 - viewport.y) / viewport.zoom
     ) / canvas.virtualHeight,
     zoom: viewport.zoom,
+    // 中心以比例保存；记录当时的画布尺寸，画布改尺寸后仍能换算回
+    // 原来的世界坐标（桌台世界坐标不随画布尺寸变化）。
+    canvasWidth: canvas.virtualWidth,
+    canvasHeight: canvas.virtualHeight,
+  };
+}
+
+function snapshotCanvasSize(snapshot, canvas) {
+  const hasSize = Number.isFinite(snapshot?.canvasWidth)
+    && snapshot.canvasWidth > 0
+    && Number.isFinite(snapshot?.canvasHeight)
+    && snapshot.canvasHeight > 0;
+  return hasSize
+    ? { width: snapshot.canvasWidth, height: snapshot.canvasHeight }
+    : { width: canvas.virtualWidth, height: canvas.virtualHeight };
+}
+
+/**
+ * 旧版快照没有画布尺寸：按当前已保存画布补齐，供写回 localStorage。
+ * 已带尺寸或无效的快照返回 null。
+ */
+export function upgradeImmersiveDeviceViewSnapshot(snapshot, canvas) {
+  if (snapshot?.version !== 1
+    || !Number.isFinite(snapshot.centerXRatio)
+    || !Number.isFinite(snapshot.centerYRatio)
+    || !Number.isFinite(canvas?.virtualWidth)
+    || !Number.isFinite(canvas?.virtualHeight)) return null;
+  if (Number.isFinite(snapshot.canvasWidth)
+    && Number.isFinite(snapshot.canvasHeight)) return null;
+  return {
+    ...snapshot,
+    canvasWidth: canvas.virtualWidth,
+    canvasHeight: canvas.virtualHeight,
   };
 }
 
@@ -129,8 +162,15 @@ export function restoreImmersiveDeviceViewport(
   const centerXRatio = Math.max(0, Math.min(1, snapshot.centerXRatio));
   const centerYRatio = Math.max(0, Math.min(1, snapshot.centerYRatio));
   const zoom = Math.max(minZoom, Math.min(maxZoom, snapshot.zoom));
-  const centerX = centerXRatio * canvas.virtualWidth;
-  const centerY = centerYRatio * canvas.virtualHeight;
+  const savedSize = snapshotCanvasSize(snapshot, canvas);
+  const centerX = Math.min(
+    centerXRatio * savedSize.width,
+    canvas.virtualWidth,
+  );
+  const centerY = Math.min(
+    centerYRatio * savedSize.height,
+    canvas.virtualHeight,
+  );
   return {
     x: viewportSize.width / 2 - centerX * zoom,
     y: viewportSize.height / 2 - centerY * zoom,

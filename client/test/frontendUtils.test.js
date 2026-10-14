@@ -16,8 +16,11 @@ import {
   arrangeTableSelection,
   buildLayoutSavePayload,
   findSignificantOverlaps,
+  layoutFarEdges,
+  planCanvasResize,
   scaleTableSelection,
   serializeLayout,
+  validateCanvasSizeInput,
 } from '../src/utils/layoutEditor.js';
 import {
   decorationIdFromNode,
@@ -51,6 +54,7 @@ import {
   interactionPointerId,
   isImmersiveViewportReady,
   restoreImmersiveDeviceViewport,
+  upgradeImmersiveDeviceViewSnapshot,
   shouldDecorationAffectImmersiveFit,
   shouldExitCanvasFocusAfterFullscreenChange,
   shouldLockCanvasPan,
@@ -1009,4 +1013,122 @@ test('default display range reports tables outside it', () => {
   assert.equal(isLayoutInsideBounds({
     x: 850, y: 200, width: 120, height: 90,
   }, bounds), false);
+});
+
+test('canvas resize keeps world geometry and re-encodes the default view', () => {
+  const canvas = {
+    aspectRatio: '16:9',
+    virtualWidth: 4000,
+    virtualHeight: 2550,
+    snapToGrid: false,
+    gridSize: 15,
+    defaultViewBounds: { xRatio: 0.1, yRatio: 0.2, widthRatio: 0.5, heightRatio: 0.4 },
+  };
+  const layoutMap = new Map([
+    ['a', { x: 500, y: 400, width: 180, height: 120, rotation: 0, zIndex: 1 }],
+  ]);
+  const result = planCanvasResize({
+    canvas,
+    layoutMap,
+    decorations: [],
+    tables: [{ tableId: 'a', name: 'A1', enabled: true }],
+    width: 6000,
+    height: 3500,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.nextCanvas.virtualWidth, 6000);
+  assert.equal(result.nextCanvas.aspectRatio, 'auto');
+  assert.deepEqual(result.nextLayoutMap.get('a'), layoutMap.get('a'));
+  const before = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
+  const after = ratioBoundsToWorld(result.nextCanvas.defaultViewBounds, result.nextCanvas);
+  for (const key of ['x', 'y', 'width', 'height']) {
+    assert.ok(Math.abs(before[key] - after[key]) < 0.01, key);
+  }
+  const saved = buildLayoutSavePayload({
+    layoutVersion: 1,
+    canvas: result.nextCanvas,
+    tables: [{ tableId: 'a' }],
+    layoutMap: result.nextLayoutMap,
+  });
+  assert.equal(saved.canvas.virtualWidth, 6000);
+  assert.ok(Math.abs(saved.tables[0].layout.xRatio * 6000 - 500) < 0.01);
+});
+
+test('canvas shrink rejects out-of-bounds items and moves hidden disabled tables', () => {
+  const canvas = { virtualWidth: 4000, virtualHeight: 2550, defaultViewBounds: null };
+  const layoutMap = new Map([
+    ['a8', { x: 2600, y: 100, width: 200, height: 120 }],
+    ['off', { x: 3500, y: 2000, width: 200, height: 120 }],
+  ]);
+  const tables = [
+    { tableId: 'a8', name: 'A8', enabled: true },
+    { tableId: 'off', name: '停用1', enabled: false },
+  ];
+  const decorations = [{
+    id: 'door', type: 'entrance', label: '入口',
+    x: 1000, y: 1600, width: 300, height: 100, rotation: 90,
+  }];
+  const rejected = planCanvasResize({
+    canvas, layoutMap, decorations, tables, width: 2000, height: 1200,
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.requiredWidth, 2800);
+  // The 90° entrance is visibly 100×300 around its centre (y 1500–1800).
+  assert.equal(rejected.requiredHeight, 1800);
+  assert.deepEqual(rejected.blockers, ['A8', '入口']);
+  assert.match(rejected.message, /2800×1800/);
+
+  const accepted = planCanvasResize({
+    canvas, layoutMap, decorations, tables, width: 2800, height: 1800,
+  });
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.movedDisabled, ['停用1']);
+  const moved = accepted.nextLayoutMap.get('off');
+  assert.equal(moved.width, 200);
+  assert.ok(moved.x + moved.width <= 2800 && moved.y + moved.height <= 1800);
+  assert.deepEqual(accepted.nextLayoutMap.get('a8'), layoutMap.get('a8'));
+});
+
+test('canvas shrink clears a default view that no longer fits', () => {
+  const canvas = {
+    virtualWidth: 4000,
+    virtualHeight: 2550,
+    defaultViewBounds: { xRatio: 0.5, yRatio: 0, widthRatio: 0.5, heightRatio: 1 },
+  };
+  const result = planCanvasResize({
+    canvas, layoutMap: new Map(), decorations: [], tables: [], width: 3000, height: 2550,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.defaultViewCleared, true);
+  assert.equal(result.nextCanvas.defaultViewBounds, null);
+});
+
+test('canvas size input is limited to integers within the safe range', () => {
+  assert.deepEqual(validateCanvasSizeInput(1600, 900), []);
+  assert.equal(validateCanvasSizeInput(799, 900).length, 1);
+  assert.equal(validateCanvasSizeInput(20001, 20001).length, 2);
+  assert.equal(validateCanvasSizeInput(1600.5, 900).length, 1);
+  assert.deepEqual(
+    layoutFarEdges({ x: 0, y: 0, width: 200, height: 100, rotation: 90 }),
+    { right: 200, bottom: 150 },
+  );
+});
+
+test('immersive camera survives canvas resize via the stored canvas size', () => {
+  const viewportSize = { width: 1600, height: 900 };
+  const viewport = { x: -600, y: -330, zoom: 0.8 };
+  const oldCanvas = { virtualWidth: 4000, virtualHeight: 2550 };
+  const newCanvas = { virtualWidth: 6000, virtualHeight: 3500 };
+  const snapshot = createImmersiveDeviceViewSnapshot(viewport, viewportSize, oldCanvas);
+  const restored = restoreImmersiveDeviceViewport(snapshot, viewportSize, newCanvas);
+  for (const key of ['x', 'y', 'zoom']) {
+    assert.ok(Math.abs(restored[key] - viewport[key]) < 1e-9, key);
+  }
+  const legacy = { version: 1, centerXRatio: 0.5, centerYRatio: 0.5, zoom: 1 };
+  assert.deepEqual(upgradeImmersiveDeviceViewSnapshot(legacy, oldCanvas), {
+    ...legacy,
+    canvasWidth: 4000,
+    canvasHeight: 2550,
+  });
+  assert.equal(upgradeImmersiveDeviceViewSnapshot(snapshot, newCanvas), null);
 });

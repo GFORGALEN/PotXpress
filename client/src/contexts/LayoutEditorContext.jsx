@@ -14,6 +14,7 @@ import { useToast } from './ToastContext.jsx';
 import {
   arrangeTableSelection,
   buildLayoutSavePayload,
+  planCanvasResize,
   readLayoutIntoWorld,
   serializeLayout,
 } from '../utils/layoutEditor.js';
@@ -274,6 +275,30 @@ export function LayoutEditorProvider({ children }) {
     setDraftCanvas((current) => ({ ...current, ...patch }));
   }, [draftCanvas, rememberCurrent]);
 
+  /**
+   * 修改画布宽高：桌台和装饰保持世界坐标与尺寸，默认展示范围按新尺寸
+   * 重新编码。画布、范围和被移回的停用桌台作为一次编辑进入撤回历史。
+   */
+  const resizeCanvas = useCallback((width, height) => {
+    if (!draftCanvas) return { ok: false, message: '当前不在布局编辑中' };
+    if (width === draftCanvas.virtualWidth && height === draftCanvas.virtualHeight) {
+      return { ok: true, unchanged: true };
+    }
+    const result = planCanvasResize({
+      canvas: draftCanvas,
+      layoutMap: draftLayout,
+      decorations: draftDecorations,
+      tables: tablesRef.current,
+      width,
+      height,
+    });
+    if (!result.ok) return result;
+    rememberCurrent();
+    setDraftCanvas(result.nextCanvas);
+    if (result.movedDisabled.length) setDraftLayout(result.nextLayoutMap);
+    return result;
+  }, [draftCanvas, draftDecorations, draftLayout, rememberCurrent]);
+
   const addDecoration = useCallback((type) => {
     rememberCurrent();
     const id = `decoration_${crypto.randomUUID()}`;
@@ -519,6 +544,7 @@ export function LayoutEditorProvider({ children }) {
     resizeSelectedTables,
     arrangeSelectedTables,
     updateCanvas,
+    resizeCanvas,
     addDecoration,
     updateDecoration,
     deleteSelectedDecoration,
@@ -563,6 +589,7 @@ export function LayoutEditorProvider({ children }) {
     tablesOutsideDefaultView,
     history,
     updateCanvas,
+    resizeCanvas,
     updateTableLayout,
     moveSelectedTables,
     resizeSelectedTables,

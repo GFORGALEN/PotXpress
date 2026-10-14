@@ -1,9 +1,172 @@
 import {
   apiDecorationToWorld,
   apiLayoutToWorld,
+  clampWorldLayout,
+  ratioBoundsToWorld,
+  worldBoundsToRatios,
   worldDecorationToApi,
   worldLayoutToApi,
 } from './layoutCoordinates.js';
+
+export const CANVAS_SIZE_PRESETS = Object.freeze([
+  { id: 'small', label: '小型', width: 1600, height: 900 },
+  { id: 'medium', label: '中型', width: 2400, height: 1350 },
+  { id: 'large', label: '大型', width: 3200, height: 1800 },
+  { id: 'xlarge', label: '超大型', width: 4800, height: 2700 },
+  { id: 'square', label: '方形', width: 2000, height: 2000 },
+  { id: 'strip', label: '长条形', width: 3000, height: 1200 },
+]);
+
+// 契约允许到 50000，但比例只保留 6 位小数：超过 20000 时保存往返误差会
+// 超出最小桌台尺寸与网格还原的 0.01 容差，因此界面只开放到 20000。
+export const CANVAS_SIZE_LIMITS = Object.freeze({
+  minWidth: 800,
+  minHeight: 600,
+  maxWidth: 20000,
+  maxHeight: 20000,
+});
+
+const RESIZE_EPSILON = 0.000001;
+
+export function validateCanvasSizeInput(width, height) {
+  const errors = [];
+  if (!Number.isInteger(width)
+    || width < CANVAS_SIZE_LIMITS.minWidth
+    || width > CANVAS_SIZE_LIMITS.maxWidth) {
+    errors.push(`宽度需为 ${CANVAS_SIZE_LIMITS.minWidth}–${CANVAS_SIZE_LIMITS.maxWidth} 的整数`);
+  }
+  if (!Number.isInteger(height)
+    || height < CANVAS_SIZE_LIMITS.minHeight
+    || height > CANVAS_SIZE_LIMITS.maxHeight) {
+    errors.push(`高度需为 ${CANVAS_SIZE_LIMITS.minHeight}–${CANVAS_SIZE_LIMITS.maxHeight} 的整数`);
+  }
+  return errors;
+}
+
+/**
+ * 元素在画布上占用的右/下边缘：取保存用的未旋转矩形与绕中心旋转后的
+ * 可见包围盒中较远的一侧。左/上方向的越界与画布宽高无关，不在此计算。
+ */
+export function layoutFarEdges(item) {
+  const radians = ((Number(item.rotation) || 0) % 360) * Math.PI / 180;
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+  const visibleWidth = item.width * cos + item.height * sin;
+  const visibleHeight = item.width * sin + item.height * cos;
+  const centerX = item.x + item.width / 2;
+  const centerY = item.y + item.height / 2;
+  return {
+    right: Math.max(item.x + item.width, centerX + visibleWidth / 2),
+    bottom: Math.max(item.y + item.height, centerY + visibleHeight / 2),
+  };
+}
+
+const DECORATION_LABELS = Object.freeze({
+  wall: '墙体',
+  entrance: '入口',
+  cashier: '收银台',
+  area: '区域',
+  seat: '座位',
+});
+
+/**
+ * 计算把画布改为 width×height 后的草稿。元素世界坐标和尺寸保持不变；
+ * 越界的启用桌台或装饰会让本次修改被拒绝。停用桌台在画布上不可见、
+ * 无法拖动，越界时移回新画布内并在结果中列出（随尺寸一起可撤回）。
+ */
+export function planCanvasResize({
+  canvas,
+  layoutMap,
+  decorations,
+  tables,
+  width,
+  height,
+}) {
+  const inputErrors = validateCanvasSizeInput(width, height);
+  if (inputErrors.length) {
+    return { ok: false, reason: 'invalid', message: inputErrors.join('；') };
+  }
+
+  const nextCanvas = {
+    ...canvas,
+    aspectRatio: 'auto',
+    virtualWidth: width,
+    virtualHeight: height,
+  };
+  const tableById = new Map(tables.map((table) => [table.tableId, table]));
+  const blockers = [];
+  const movedDisabled = [];
+  const nextLayoutMap = new Map(layoutMap);
+  let requiredWidth = CANVAS_SIZE_LIMITS.minWidth;
+  let requiredHeight = CANVAS_SIZE_LIMITS.minHeight;
+  const exceeds = (edges) => edges.right > width + RESIZE_EPSILON
+    || edges.bottom > height + RESIZE_EPSILON;
+  const track = (edges, name) => {
+    requiredWidth = Math.max(requiredWidth, Math.ceil(edges.right - RESIZE_EPSILON));
+    requiredHeight = Math.max(requiredHeight, Math.ceil(edges.bottom - RESIZE_EPSILON));
+    if (exceeds(edges)) blockers.push(name);
+  };
+
+  for (const [tableId, layout] of layoutMap) {
+    const table = tableById.get(tableId);
+    const name = table?.name ?? '桌台';
+    const edges = layoutFarEdges(layout);
+    if (table && table.enabled === false) {
+      if (!exceeds(edges)) continue;
+      if (layout.width > width + RESIZE_EPSILON
+        || layout.height > height + RESIZE_EPSILON) {
+        track(edges, `停用桌台 ${name}`);
+        continue;
+      }
+      nextLayoutMap.set(tableId, clampWorldLayout(layout, nextCanvas));
+      movedDisabled.push(name);
+      continue;
+    }
+    track(edges, name);
+  }
+  for (const item of decorations) {
+    track(layoutFarEdges(item), item.label || DECORATION_LABELS[item.type] || '装饰');
+  }
+
+  if (blockers.length) {
+    const listed = blockers.slice(0, 6).join('、');
+    return {
+      ok: false,
+      reason: 'out_of_bounds',
+      requiredWidth,
+      requiredHeight,
+      blockers,
+      message: `当前布局至少需要 ${requiredWidth}×${requiredHeight}，请先移动 ${listed}${blockers.length > 6 ? ` 等 ${blockers.length} 项` : ''}再缩小`,
+    };
+  }
+
+  // 默认展示范围存的是比例：先按旧画布还原世界范围，再按新尺寸编码。
+  let defaultViewCleared = false;
+  if (canvas.defaultViewBounds) {
+    const world = ratioBoundsToWorld(canvas.defaultViewBounds, canvas);
+    const tolerance = Math.max(width, height) * RESIZE_EPSILON;
+    if (world.x + world.width <= width + tolerance
+      && world.y + world.height <= height + tolerance) {
+      nextCanvas.defaultViewBounds = worldBoundsToRatios({
+        x: world.x,
+        y: world.y,
+        width: Math.min(world.width, width - world.x),
+        height: Math.min(world.height, height - world.y),
+      }, nextCanvas);
+    } else {
+      nextCanvas.defaultViewBounds = null;
+      defaultViewCleared = true;
+    }
+  }
+
+  return {
+    ok: true,
+    nextCanvas,
+    nextLayoutMap,
+    movedDisabled,
+    defaultViewCleared,
+  };
+}
 
 const CANVAS_FIELDS = [
   'aspectRatio',
