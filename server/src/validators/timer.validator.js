@@ -21,5 +21,6 @@ export const resetBatchTimersBodySchema = z.object({
     .min(1)
     .max(MAX_BATCH_RESET_TIMERS)
     .transform((ids) => [...new Set(ids)].sort()),
-  onlyOverdue: z.literal(true).default(true),
+  // true：只结束仍已到时的计时；false：按名单结束仍在进行的计时（提前清台）。
+  onlyOverdue: z.boolean().default(true),
 }).strict();

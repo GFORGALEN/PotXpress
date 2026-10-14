@@ -9,7 +9,7 @@ export const AUDIT_ACTION_LABELS = Object.freeze({
   'timer.transfer': '更换桌台',
   'timer.reset': '重置清台',
   'timer.reset_all': '一键清台',
-  'timer.batch_reset': '批量清台（已到时）',
+  'timer.batch_reset': '批量清台',
   'timer.auto_reset': '超时自动清台',
   'timer.overdue_reminder': '超时 20 分钟提醒',
   'timer.acknowledge_alert': '确认超时',

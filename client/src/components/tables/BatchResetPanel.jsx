@@ -4,6 +4,40 @@ import clsx from 'clsx';
 import { STORE_CHANGING_EVENT } from '../../contexts/StoreContext.jsx';
 import { formatTimerDuration } from '../../utils/timerDisplay.js';
 
+export const BATCH_RESET_STATUSES = Object.freeze([
+  {
+    value: 'overtime',
+    label: '已超时',
+    active: 'border-red-400 bg-red-600 text-white',
+    tone: 'text-red-700',
+  },
+  {
+    value: 'warning',
+    label: '即将超时',
+    active: 'border-amber-400 bg-amber-500 text-white',
+    tone: 'text-amber-700',
+  },
+  {
+    value: 'running',
+    label: '计时中',
+    active: 'border-emerald-500 bg-emerald-600 text-white',
+    tone: 'text-emerald-700',
+  },
+]);
+const STATUS_BY_VALUE = new Map(
+  BATCH_RESET_STATUSES.map((status) => [status.value, status]),
+);
+const DEFAULT_STATUSES = ['overtime'];
+
+function itemTimeLabel(item) {
+  if (item.status === 'overtime') {
+    return item.overtimeSeconds > 0
+      ? `超时 ${formatTimerDuration(item.overtimeSeconds, { overtime: true })}`
+      : '已到时';
+  }
+  return `剩余 ${formatTimerDuration(item.remainingSeconds)}`;
+}
+
 function itemNameLabel(item) {
   return item.memberNames.length > 1
     ? item.memberNames.join('+')
@@ -11,9 +45,10 @@ function itemNameLabel(item) {
 }
 
 /**
- * 运营批量清台面板：只列出当前范围内已到时的计时（按 timerId 去重）。
- * 打开时默认勾选当时的清单；之后实时新到时的项目只出现在列表中，
- * 不会自动加入已选名单。确认时冻结名单，提交只针对冻结名单。
+ * 运营批量清台面板：按状态（已超时 / 即将超时 / 计时中）列出当前范围内
+ * 的计时（按 timerId 去重）。默认只显示并勾选已超时；打开其他状态时勾选
+ * 该状态当时的清单。之后实时变化的项目只更新列表，不会自动加入已选名单。
+ * 确认时冻结名单，提交只针对冻结名单。
  */
 export function BatchResetPanel({
   open,
@@ -25,6 +60,7 @@ export function BatchResetPanel({
   onClose,
 }) {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [statuses, setStatuses] = useState(() => new Set(DEFAULT_STATUSES));
   const [confirmItems, setConfirmItems] = useState(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -34,7 +70,10 @@ export function BatchResetPanel({
       setConfirmItems(null);
       return;
     }
-    setSelectedIds(new Set(itemsRef.current.map((item) => item.timerId)));
+    setStatuses(new Set(DEFAULT_STATUSES));
+    setSelectedIds(new Set(itemsRef.current
+      .filter((item) => DEFAULT_STATUSES.includes(item.status))
+      .map((item) => item.timerId)));
     setConfirmItems(null);
   }, [open]);
 
@@ -54,16 +93,27 @@ export function BatchResetPanel({
     };
   }, [busy, confirmItems, onClose, open]);
 
+  const visibleItems = useMemo(
+    () => items.filter((item) => statuses.has(item.status)),
+    [items, statuses],
+  );
+  const statusCounts = useMemo(() => {
+    const counts = new Map();
+    for (const item of items) {
+      counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
   const selectedItems = useMemo(
-    () => items.filter((item) => selectedIds.has(item.timerId)),
-    [items, selectedIds],
+    () => visibleItems.filter((item) => selectedIds.has(item.timerId)),
+    [selectedIds, visibleItems],
   );
   const selectedTableCount = selectedItems.reduce(
     (sum, item) => sum + item.tableCount,
     0,
   );
-  const allSelected = items.length > 0
-    && items.every((item) => selectedIds.has(item.timerId));
+  const allSelected = visibleItems.length > 0
+    && visibleItems.every((item) => selectedIds.has(item.timerId));
 
   if (!open) return null;
 
@@ -75,10 +125,33 @@ export function BatchResetPanel({
       return next;
     });
   };
+  const toggleStatus = (status) => {
+    const enabling = !statuses.has(status);
+    const statusIds = items
+      .filter((item) => item.status === status)
+      .map((item) => item.timerId);
+    setStatuses((current) => {
+      const next = new Set(current);
+      if (enabling) next.add(status);
+      else next.delete(status);
+      return next;
+    });
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const id of statusIds) {
+        if (enabling) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  };
   const confirmTableCount = (confirmItems ?? []).reduce(
     (sum, item) => sum + item.tableCount,
     0,
   );
+  const earlyCount = (confirmItems ?? [])
+    .filter((item) => item.status !== 'overtime')
+    .length;
 
   return (
     <div
@@ -120,6 +193,11 @@ export function BatchResetPanel({
               <p className="font-black text-ink-950">
                 确认结束{confirmScope}选中的 {confirmItems.length} 个计时，共 {confirmTableCount} 张桌？
               </p>
+              {earlyCount > 0 ? (
+                <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-black text-amber-900">
+                  其中 {earlyCount} 个计时尚未到时（即将超时或计时中），确认后会提前结束。
+                </p>
+              ) : null}
               <p className="mt-1 text-xs text-stone-500">
                 清台后桌台恢复空闲，本次计时写入历史记录；拼桌绑定保留。
               </p>
@@ -155,14 +233,38 @@ export function BatchResetPanel({
           </>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-2 px-5 pt-3">
+            <div className="flex flex-wrap items-center gap-2 px-5 pt-3" aria-label="清台状态">
+              {BATCH_RESET_STATUSES.map((status) => {
+                const active = statuses.has(status.value);
+                return (
+                  <button
+                    key={status.value}
+                    type="button"
+                    onClick={() => toggleStatus(status.value)}
+                    aria-pressed={active}
+                    className={clsx(
+                      'min-h-10 rounded-full border px-3 text-xs font-black transition',
+                      active
+                        ? status.active
+                        : `border-stone-200 bg-white ${status.tone} hover:bg-stone-50`,
+                    )}
+                  >
+                    {status.label}（{statusCounts.get(status.value) ?? 0}）
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 px-5 pt-2">
               <button
                 type="button"
-                onClick={() => setSelectedIds(new Set(items.map((item) => item.timerId)))}
-                disabled={!items.length || allSelected}
+                onClick={() => setSelectedIds((current) => new Set([
+                  ...current,
+                  ...visibleItems.map((item) => item.timerId),
+                ]))}
+                disabled={!visibleItems.length || allSelected}
                 className="min-h-10 rounded-xl border border-stone-200 bg-white px-3 text-xs font-black text-ink-900 disabled:opacity-40"
               >
-                全选当前已到时
+                全选当前列表
               </button>
               <button
                 type="button"
@@ -177,13 +279,15 @@ export function BatchResetPanel({
               data-potx-touch-scroll
               className="touch-scroll-region mx-5 my-3 min-h-0 flex-1 overflow-y-auto"
             >
-              {items.length === 0 ? (
+              {visibleItems.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-stone-200 px-4 py-8 text-center text-sm font-bold text-stone-500">
-                  当前范围没有已到时的计时
+                  {statuses.size
+                    ? `当前范围没有${[...statuses].map((value) => STATUS_BY_VALUE.get(value)?.label).join('、')}的计时`
+                    : '请选择要清台的状态'}
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {items.map((item) => {
+                  {visibleItems.map((item) => {
                     const checked = selectedIds.has(item.timerId);
                     return (
                       <li key={item.timerId}>
@@ -212,10 +316,11 @@ export function BatchResetPanel({
                               </span>
                             ) : null}
                           </span>
-                          <span className="shrink-0 font-mono text-sm font-black tabular-nums text-red-700">
-                            {item.overtimeSeconds > 0
-                              ? `超时 ${formatTimerDuration(item.overtimeSeconds, { overtime: true })}`
-                              : '已到时'}
+                          <span className={clsx(
+                            'shrink-0 font-mono text-sm font-black tabular-nums',
+                            STATUS_BY_VALUE.get(item.status)?.tone,
+                          )}>
+                            {itemTimeLabel(item)}
                           </span>
                         </button>
                       </li>

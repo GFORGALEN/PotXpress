@@ -29,7 +29,7 @@ import { getLayout } from '../api/layout.ts';
 import {
   listTimers,
   resetAllTimers,
-  resetOverdueTimers,
+  resetTimerBatch,
   startTimer,
 } from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
@@ -88,6 +88,11 @@ const FAST_POLL_WINDOW = 2 * 60 * 1000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
 const CLOCK_RECALIBRATION_POLLS = 30;
 const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
+const BATCH_RESET_STATUS_ORDER = new Map([
+  ['overtime', 0],
+  ['warning', 1],
+  ['running', 2],
+]);
 const TABLE_DOUBLE_CLICK_DELAY = 320;
 
 export function DashboardPage() {
@@ -548,17 +553,20 @@ export function DashboardPage() {
     ).values()],
     [allTables],
   );
-  // 批量清台使用自己的“已到时”筛选，只沿用首页的区域与搜索条件，
-  // 避免状态筛选把到时桌台隐藏。拼桌共享一个计时，按 timerId 去重。
+  // 批量清台使用自己的状态筛选（已超时 / 即将超时 / 计时中），只沿用首页
+  // 的区域与搜索条件，避免首页状态筛选隐藏桌台。拼桌共享一个计时，按
+  // timerId 去重。已暂停的计时不在批量清台范围内。
   const batchResetItems = useMemo(() => {
     const byTimerId = new Map();
     for (const table of allTables) {
-      if (table.status !== 'overtime' || !table.timerId) continue;
+      if (!BATCH_RESET_STATUS_ORDER.has(table.status) || !table.timerId) continue;
       const entry = byTimerId.get(table.timerId) ?? {
         timerId: table.timerId,
+        status: table.status,
         groupName: table.groupName ?? null,
         members: [],
         overtimeSeconds: table.overtimeSeconds,
+        remainingSeconds: table.remainingSeconds,
         inScope: false,
       };
       entry.members.push(table);
@@ -584,16 +592,21 @@ export function DashboardPage() {
         };
       })
       .sort((left, right) => (
-        right.overtimeSeconds - left.overtimeSeconds
+        BATCH_RESET_STATUS_ORDER.get(left.status)
+          - BATCH_RESET_STATUS_ORDER.get(right.status)
+        || right.overtimeSeconds - left.overtimeSeconds
+        || left.remainingSeconds - right.remainingSeconds
         || left.sortNumber - right.sortNumber
       ));
   }, [allTables, areaFilter, normalizedSearch]);
+  const overdueBatchResetCount = batchResetItems
+    .filter((item) => item.status === 'overtime')
+    .length;
   const batchResetConfirmScope = areaFilter === 'all' ? '全部区域' : areaFilter;
   const batchResetScopeLabel = [
     '当前门店',
     batchResetConfirmScope,
     search.trim() ? `搜索“${search.trim()}”` : null,
-    '已到时',
   ].filter(Boolean).join(' · ');
   const selectedTable = useMemo(
     () => allTables.find((table) => table.tableId === selectedTableId) ?? null,
@@ -768,9 +781,14 @@ export function DashboardPage() {
     setBatchResetBusy(true);
 
     try {
-      const result = await resetOverdueTimers(
+      // 名单全部是已超时时按“只清已到时”提交，服务端会跳过确认期间被
+      // 加时或暂停的计时；包含未到时项目时按用户确认的名单提前结束。
+      const result = await resetTimerBatch(
         selectedStoreId,
         confirmedItems.map((item) => item.timerId),
+        {
+          onlyOverdue: confirmedItems.every((item) => item.status === 'overtime'),
+        },
       );
       // 只移除服务端确认结束的计时；跳过项由随后刷新的快照决定。
       const resetIds = new Set(result.records.map((record) => record.timerId));
@@ -1123,7 +1141,7 @@ export function DashboardPage() {
               className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-300 bg-white/80 px-3 text-sm font-bold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ListChecks size={16} />
-              批量清台（已到时 {batchResetItems.length}）
+              批量清台{overdueBatchResetCount > 0 ? `（已超时 ${overdueBatchResetCount}）` : ''}
             </button>
           ) : null}
           {['system_admin', 'store_admin'].includes(user.role)
@@ -1290,12 +1308,12 @@ export function DashboardPage() {
                             openBatchReset();
                           }}
                           disabled={Boolean(tableTransfer)}
-                          className={`inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black transition disabled:opacity-40 ${batchResetItems.length > 0
+                          className={`inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black transition disabled:opacity-40 ${overdueBatchResetCount > 0
                             ? 'bg-red-600 text-white hover:bg-red-700'
                             : 'text-stone-700 hover:bg-stone-100'}`}
-                          aria-label="批量清台已到时计时"
+                          aria-label="批量清台"
                         >
-                          <ListChecks size={16} />批量清台{batchResetItems.length > 0 ? `（${batchResetItems.length}）` : ''}
+                          <ListChecks size={16} />批量清台{overdueBatchResetCount > 0 ? `（${overdueBatchResetCount}）` : ''}
                         </button>
                         <span className="h-6 w-px bg-stone-200" />
                       </>
@@ -1454,7 +1472,7 @@ export function DashboardPage() {
       <ConfirmDialog
         open={bulkResetOpen}
         title={`确认整店一键清台 ${timers.length} 个计时？`}
-        description="这会结束当前门店全部活动计时，包括进行中、暂停中和已超时的计时；每一桌都会写入计时记录和异常处理记录。只处理已到时的桌台请改用“批量清台”。"
+        description="这会结束当前门店全部活动计时，包括进行中、暂停中和已超时的计时；每一桌都会写入计时记录和异常处理记录。只处理部分桌台请改用“批量清台”。"
         confirmText={bulkResetBusy ? '正在清台…' : '确认全部清台'}
         danger
         onConfirm={confirmBulkReset}

@@ -130,12 +130,12 @@ test('批量清台只结束名单中仍已到时的计时，拼桌按计时去�
     body: { timerIds: [], onlyOverdue: true },
   });
   assert.equal(invalid.status, 400);
-  const earlyReset = await request(baseUrl, BATCH_PATH, {
+  const invalidMode = await request(baseUrl, BATCH_PATH, {
     method: 'POST',
     token: storeAdmin.token,
-    body: { timerIds: [timerIdByTable.table_demo_06], onlyOverdue: false },
+    body: { timerIds: [timerIdByTable.table_demo_06], onlyOverdue: 'yes' },
   });
-  assert.equal(earlyReset.status, 400);
+  assert.equal(invalidMode.status, 400);
 
   const idempotencyKey = 'admin-batch-reset-demo';
   const result = await request(baseUrl, BATCH_PATH, {
@@ -224,10 +224,31 @@ test('批量清台只结束名单中仍已到时的计时，拼桌按计时去�
   const auditLogs = await databaseStore.readWhere('auditLogs.json', { limit: 10_000 });
   const batchAudits = auditLogs.filter((entry) => entry.action === 'timer.batch_reset');
   assert.equal(batchAudits.length, 2);
+
+  // 名单包含未到时的计时时按 onlyOverdue=false 提前结束。
+  const earlyReset = await request(baseUrl, BATCH_PATH, {
+    method: 'POST',
+    token: storeAdmin.token,
+    body: {
+      timerIds: [timerIdByTable.table_demo_06, timerIdByTable.table_demo_04],
+      onlyOverdue: false,
+    },
+  });
+  assert.equal(earlyReset.status, 200);
+  assert.equal(earlyReset.body.data.resetCount, 2);
+  assert.deepEqual(earlyReset.body.data.skipped, []);
+  assert.equal(
+    (await databaseStore.readJSON('activeTimers.json'))
+      .some((timer) => [
+        timerIdByTable.table_demo_04,
+        timerIdByTable.table_demo_06,
+      ].includes(timer.id)),
+    false,
+  );
   const interventions = await request(
     baseUrl,
     '/api/stores/store_demo/timer-interventions?date=2026-01-15&action=admin_bulk_reset',
     { token: storeAdmin.token },
   );
-  assert.equal(interventions.body.data.records.length, 2);
+  assert.equal(interventions.body.data.records.length, 4);
 });

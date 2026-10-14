@@ -137,18 +137,20 @@ export async function resetAllTimers(
 }
 
 /**
- * 按计时 ID 批量清台已到时的计时。名单使用 timerId，避免结束确认期间
- * 被别人清台后重新开台的新计时；网络重试沿用同一个幂等键。
+ * 按计时 ID 批量清台。名单使用 timerId，避免结束确认期间被别人清台后
+ * 重新开台的新计时；网络重试沿用同一个幂等键。onlyOverdue 为 true 时
+ * 服务端只结束仍已到时的计时，为 false 时按名单提前结束仍在进行的计时。
  */
-export async function resetOverdueTimers(
+export async function resetTimerBatch(
   storeId: string,
   timerIds: string[],
+  { onlyOverdue = true }: { onlyOverdue?: boolean } = {},
 ): Promise<TimerBatchResetResult> {
   return sendIdempotentApiData(
     {
       method: 'post',
       url: `/stores/${storeId}/timers/reset-batch`,
-      data: { timerIds, onlyOverdue: true },
+      data: { timerIds, onlyOverdue },
     },
     timerBatchResetResultSchema,
   );
