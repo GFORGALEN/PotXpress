@@ -1281,6 +1281,25 @@ export function DashboardPage() {
                             : '重连中'}
                     </span>
                     <span className="h-6 w-px bg-stone-200" />
+                    {canManageTables ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImmersiveControlsOpen(false);
+                            openBatchReset();
+                          }}
+                          disabled={Boolean(tableTransfer)}
+                          className={`inline-flex min-h-10 items-center gap-2 rounded-full px-3 text-xs font-black transition disabled:opacity-40 ${batchResetItems.length > 0
+                            ? 'bg-red-600 text-white hover:bg-red-700'
+                            : 'text-stone-700 hover:bg-stone-100'}`}
+                          aria-label="批量清台已到时计时"
+                        >
+                          <ListChecks size={16} />批量清台{batchResetItems.length > 0 ? `（${batchResetItems.length}）` : ''}
+                        </button>
+                        <span className="h-6 w-px bg-stone-200" />
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => setImmersiveControlsOpen((open) => !open)}
