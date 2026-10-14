@@ -14,6 +14,7 @@ export const createUserBodySchema = z.object({
 }).strict();
 
 export const updateUserBodySchema = z.object({
+  username: usernameSchema.optional(),
   displayName: displayNameSchema.optional(),
   password: passwordSchema.optional(),
   role: userRoleSchema.optional(),

@@ -504,7 +504,7 @@ export function UsersAdminPage() {
   if (resource.error) return <ErrorMessage message={resource.error.message} onRetry={resource.refresh} />;
   if (!resource.data) return <LoadingSpinner label="正在读取用户" />;
   return (
-    <Page title="用户管理" description="创建账号、分配角色和门店，并可立即使旧登录失效。">
+    <Page title="用户管理" description="创建账号、修改登录用户名、分配角色和门店；修改用户名后该账号需要重新登录。">
       <Card>
         <form className="grid gap-3 md:grid-cols-6" onSubmit={(e) => {
           e.preventDefault();
@@ -522,7 +522,17 @@ export function UsersAdminPage() {
       <div className="mt-5 grid gap-3">{resource.data.map((user) => (
         <Card key={user.id} className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div><p className="font-black">{user.displayName} <span className="font-mono text-xs text-stone-400">@{user.username}</span></p><p className="mt-1 text-xs text-stone-500">{user.role} · {stores.find((store) => store.id === user.storeId)?.name || '全部门店'} · {user.enabled ? '启用' : '停用'}</p></div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button className={secondaryButtonClass} onClick={() => {
+              const username = window.prompt('修改登录用户名（1–32 位，仅字母、数字、点、下划线和连字符）。修改后该账号的旧登录将失效，请使用新用户名和原密码重新登录。', user.username);
+              if (username === null || username.trim() === user.username) return;
+              const nextUsername = username.trim();
+              if (!/^[A-Za-z0-9._-]{1,32}$/.test(nextUsername)) {
+                showToast('用户名须为 1–32 位，只能包含字母、数字、点、下划线和连字符', 'error');
+                return;
+              }
+              run(() => updateUser(user.id, { username: nextUsername }), '用户名已修改，请使用新用户名和原密码重新登录；旧登录已失效');
+            }}>改用户名</button>
             <button className={secondaryButtonClass} onClick={() => {
               const displayName = window.prompt('显示名称', user.displayName);
               if (!displayName?.trim()) return;

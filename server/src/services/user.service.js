@@ -95,6 +95,13 @@ export async function updateUser(userId, input, actor) {
     ({ users, stores }) => {
       const current = users.findById(userId);
       if (!current) throw new AppError(404, 'USER_NOT_FOUND', '用户不存在');
+      const nextUsername = input.username !== undefined ? input.username.trim() : current.username;
+      const normalizedUsername = normalizeUsername(nextUsername);
+      if (users.findOne((user) => (
+        user.id !== current.id && user.normalizedUsername === normalizedUsername
+      ))) {
+        throw new AppError(409, 'USERNAME_TAKEN', '用户名已存在');
+      }
       const nextRole = input.role ?? current.role;
       const requestedStoreId = input.storeId !== undefined ? input.storeId : current.storeId;
       const nextStoreId = assertRoleStore(stores, nextRole, requestedStoreId);
@@ -113,12 +120,15 @@ export async function updateUser(userId, input, actor) {
       before = structuredClone(current);
       const invalidatesSessions = Boolean(
         passwordHash
+        || nextUsername !== current.username
         || nextRole !== current.role
         || nextStoreId !== current.storeId
         || nextEnabled !== current.enabled,
       );
       updated = users.update(userId, {
         ...current,
+        username: nextUsername,
+        normalizedUsername,
         ...(input.displayName !== undefined ? { displayName: input.displayName.trim() } : {}),
         ...(passwordHash ? { passwordHash } : {}),
         role: nextRole,
