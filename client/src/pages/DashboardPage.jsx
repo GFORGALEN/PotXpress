@@ -9,6 +9,7 @@ import { Link, useLocation } from 'react-router';
 import {
   ArrowUpRight,
   Clock3,
+  ListChecks,
   LayoutGrid,
   List,
   Maximize2,
@@ -25,7 +26,12 @@ import {
   updateTable,
 } from '../api/admin.js';
 import { getLayout } from '../api/layout.ts';
-import { listTimers, resetAllTimers, startTimer } from '../api/timers.ts';
+import {
+  listTimers,
+  resetAllTimers,
+  resetOverdueTimers,
+  startTimer,
+} from '../api/timers.ts';
 import { getSettings } from '../api/settings.js';
 import {
   OvertimeAlertDialog,
@@ -41,6 +47,7 @@ import { FloorCanvas } from '../components/layout/FloorCanvas.jsx';
 import { EditorToolbar } from '../components/layout/EditorToolbar.jsx';
 import { LayoutConflictDialog } from '../components/layout/LayoutConflictDialog.jsx';
 import { TableActionDialog } from '../components/tables/TableActionDialog.jsx';
+import { BatchResetPanel } from '../components/tables/BatchResetPanel.jsx';
 import { CanvasContextMenu } from '../components/tables/CanvasContextMenu.jsx';
 import { CanvasTableDialog } from '../components/tables/CanvasTableDialog.jsx';
 import { TableFilter } from '../components/tables/TableFilter.jsx';
@@ -123,6 +130,8 @@ export function DashboardPage() {
   const [tableMutationBusy, setTableMutationBusy] = useState(false);
   const [bulkResetOpen, setBulkResetOpen] = useState(false);
   const [bulkResetBusy, setBulkResetBusy] = useState(false);
+  const [batchResetOpen, setBatchResetOpen] = useState(false);
+  const [batchResetBusy, setBatchResetBusy] = useState(false);
   const [soundDialogOpen, setSoundDialogOpen] = useState(false);
   const [settings, setSettings] = useState(null);
   const [timerEventVersion, setTimerEventVersion] = useState(0);
@@ -184,6 +193,8 @@ export function DashboardPage() {
     setTableMutation(null);
     setBulkResetOpen(false);
     setBulkResetBusy(false);
+    setBatchResetOpen(false);
+    setBatchResetBusy(false);
     setSoundDialogOpen(false);
     setAreaFilter('all');
     setSettings(null);
@@ -537,6 +548,53 @@ export function DashboardPage() {
     ).values()],
     [allTables],
   );
+  // 批量清台使用自己的“已到时”筛选，只沿用首页的区域与搜索条件，
+  // 避免状态筛选把到时桌台隐藏。拼桌共享一个计时，按 timerId 去重。
+  const batchResetItems = useMemo(() => {
+    const byTimerId = new Map();
+    for (const table of allTables) {
+      if (table.status !== 'overtime' || !table.timerId) continue;
+      const entry = byTimerId.get(table.timerId) ?? {
+        timerId: table.timerId,
+        groupName: table.groupName ?? null,
+        members: [],
+        overtimeSeconds: table.overtimeSeconds,
+        inScope: false,
+      };
+      entry.members.push(table);
+      entry.inScope ||= (areaFilter === 'all' || table.area === areaFilter)
+        && (!normalizedSearch
+          || table.name.toLocaleLowerCase('zh-CN').includes(normalizedSearch));
+      byTimerId.set(table.timerId, entry);
+    }
+    return [...byTimerId.values()]
+      .filter((entry) => entry.inScope)
+      .map(({ members, inScope: _inScope, groupName, ...entry }) => {
+        const sortedMembers = [...members].sort(
+          (left, right) => left.number - right.number,
+        );
+        return {
+          ...entry,
+          label: members.length > 1
+            ? (groupName ?? sortedMembers.map((table) => table.name).join('+'))
+            : sortedMembers[0].name,
+          memberNames: sortedMembers.map((table) => table.name),
+          tableCount: members.length,
+          sortNumber: sortedMembers[0].number,
+        };
+      })
+      .sort((left, right) => (
+        right.overtimeSeconds - left.overtimeSeconds
+        || left.sortNumber - right.sortNumber
+      ));
+  }, [allTables, areaFilter, normalizedSearch]);
+  const batchResetConfirmScope = areaFilter === 'all' ? '全部区域' : areaFilter;
+  const batchResetScopeLabel = [
+    '当前门店',
+    batchResetConfirmScope,
+    search.trim() ? `搜索“${search.trim()}”` : null,
+    '已到时',
+  ].filter(Boolean).join(' · ');
   const selectedTable = useMemo(
     () => allTables.find((table) => table.tableId === selectedTableId) ?? null,
     [allTables, selectedTableId],
@@ -697,6 +755,48 @@ export function DashboardPage() {
       setBulkResetBusy(false);
     }
   }, [bulkResetBusy, refreshTimers, selectedStoreId, showToast]);
+  const openBatchReset = useCallback(() => {
+    if (layoutEditor.mode !== 'view' || tableTransfer) return;
+    clearTimeout(pendingTableClickRef.current);
+    pendingTableClickRef.current = null;
+    setSelectedTableId(null);
+    setCustomDurationTableId(null);
+    setBatchResetOpen(true);
+  }, [layoutEditor.mode, tableTransfer]);
+  const confirmBatchReset = useCallback(async (confirmedItems) => {
+    if (batchResetBusy || !confirmedItems.length) return false;
+    setBatchResetBusy(true);
+
+    try {
+      const result = await resetOverdueTimers(
+        selectedStoreId,
+        confirmedItems.map((item) => item.timerId),
+      );
+      // 只移除服务端确认结束的计时；跳过项由随后刷新的快照决定。
+      const resetIds = new Set(result.records.map((record) => record.timerId));
+      setTimers((current) => current.filter((timer) => !resetIds.has(timer.id)));
+      setLastServerContactAt(Date.now());
+      if (result.resetCount > 0) {
+        setBatchResetOpen(false);
+        showToast(
+          `已清台 ${result.resetCount} 个计时，共 ${result.resetTableCount} 张桌`
+            + (result.skipped.length
+              ? `；${result.skipped.length} 项因状态变化跳过。`
+              : '。'),
+          'success',
+        );
+        return true;
+      }
+      showToast('所选计时状态已变化，已刷新清单', 'info');
+      return false;
+    } catch (error) {
+      showToast(error.message, 'error');
+      return false;
+    } finally {
+      setBatchResetBusy(false);
+      refreshTimers();
+    }
+  }, [batchResetBusy, refreshTimers, selectedStoreId, showToast]);
   const toggleCanvasFocus = useCallback(async () => {
     if (layoutEditor.mode !== 'view') {
       setCanvasFocused((value) => !value);
@@ -755,11 +855,17 @@ export function DashboardPage() {
       showToast('请先保存当前布局，再新增桌台', 'info');
       return;
     }
+    // 新桌默认约 400×280.5 画布单位（与服务端落位一致），以点击处为中心。
+    const activeCanvas = layoutEditor.mode === 'view'
+      ? layout?.canvas
+      : layoutEditor.draftCanvas;
+    const halfWidthRatio = activeCanvas ? 200 / activeCanvas.virtualWidth : 0.05;
+    const halfHeightRatio = activeCanvas ? 140.25 / activeCanvas.virtualHeight : 0.055;
     setTableDialog({
       mode: 'create',
       position: {
-        xRatio: Math.max(0, position.xRatio - 0.05),
-        yRatio: Math.max(0, position.yRatio - 0.055),
+        xRatio: Math.max(0, position.xRatio - halfWidthRatio),
+        yRatio: Math.max(0, position.yRatio - halfHeightRatio),
       },
       table: {
         name: `${nextTableNumber}号桌`,
@@ -771,7 +877,14 @@ export function DashboardPage() {
         defaultDurationMinutes: null,
       },
     });
-  }, [layoutEditor.isDirty, layoutEditor.mode, nextTableNumber, showToast]);
+  }, [
+    layout?.canvas,
+    layoutEditor.draftCanvas,
+    layoutEditor.isDirty,
+    layoutEditor.mode,
+    nextTableNumber,
+    showToast,
+  ]);
 
   const handleCanvasMenuAction = useCallback((action, menu) => {
     setCanvasMenu(null);
@@ -999,7 +1112,18 @@ export function DashboardPage() {
               className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-300 bg-red-50 px-3 text-sm font-bold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RotateCcw size={16} />
-              一键清台（{timers.length}）
+              整店一键清台（{timers.length}）
+            </button>
+          ) : null}
+          {canManageTables && layoutEditor.mode === 'view' ? (
+            <button
+              type="button"
+              disabled={Boolean(tableTransfer)}
+              onClick={openBatchReset}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-300 bg-white/80 px-3 text-sm font-bold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ListChecks size={16} />
+              批量清台（已到时 {batchResetItems.length}）
             </button>
           ) : null}
           {['system_admin', 'store_admin'].includes(user.role)
@@ -1310,13 +1434,24 @@ export function DashboardPage() {
       />
       <ConfirmDialog
         open={bulkResetOpen}
-        title={`确认一键清台 ${timers.length} 个计时？`}
-        description="当前门店所有进行中、暂停中和已超时计时都会立即结束；每一桌都会写入计时记录和异常处理记录。"
+        title={`确认整店一键清台 ${timers.length} 个计时？`}
+        description="这会结束当前门店全部活动计时，包括进行中、暂停中和已超时的计时；每一桌都会写入计时记录和异常处理记录。只处理已到时的桌台请改用“批量清台”。"
         confirmText={bulkResetBusy ? '正在清台…' : '确认全部清台'}
         danger
         onConfirm={confirmBulkReset}
         onCancel={() => {
           if (!bulkResetBusy) setBulkResetOpen(false);
+        }}
+      />
+      <BatchResetPanel
+        open={batchResetOpen && layoutEditor.mode === 'view'}
+        scopeLabel={batchResetScopeLabel}
+        confirmScope={batchResetConfirmScope}
+        items={batchResetItems}
+        busy={batchResetBusy}
+        onSubmit={confirmBatchReset}
+        onClose={() => {
+          if (!batchResetBusy) setBatchResetOpen(false);
         }}
       />
       <ConfirmDialog

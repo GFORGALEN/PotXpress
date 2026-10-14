@@ -5,6 +5,7 @@ import {
   listTimersController,
   pauseTimerController,
   resetAllTimersController,
+  resetBatchTimersController,
   resetTimerController,
   resumeTimerController,
   startTimerController,
@@ -23,6 +24,7 @@ import {
 } from '../validators/common.validator.js';
 import {
   adjustTimerBodySchema,
+  resetBatchTimersBodySchema,
   startTimerBodySchema,
   transferTimerBodySchema,
 } from '../validators/timer.validator.js';
@@ -51,6 +53,18 @@ timerListRouter.post(
   }),
   asyncHandler(storeAccess),
   asyncHandler(resetAllTimersController),
+);
+timerListRouter.post(
+  '/reset-batch',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    query: emptyQuerySchema,
+    body: resetBatchTimersBodySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(resetBatchTimersController),
 );
 
 tableTimerRouter.post(

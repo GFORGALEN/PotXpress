@@ -1160,6 +1160,190 @@ export class TimerService {
     return outcome;
   }
 
+  /**
+   * 按计时 ID 批量清台（首版只处理已到时计时）。
+   * 名单以 timerId 为准：确认期间被清台后重新开台的新计时 ID 不同，
+   * 不会被本次请求结束；状态变化导致不再到时的计时作为跳过项返回。
+   */
+  async resetBatch({
+    storeId,
+    timerIds,
+    onlyOverdue = true,
+    idempotencyKey,
+    user,
+  }) {
+    const now = this.nowProvider();
+    const timestamp = new Date(now).toISOString();
+    const requestedIds = [...new Set(timerIds)].sort();
+    let committedEvent = null;
+
+    const outcome = await unitOfWorkRepository.run(
+      {
+        resources: [
+          'stores',
+          'activeTimers',
+          'records',
+          'timerInterventionRecords',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+        writeOrder: [
+          'records',
+          'timerInterventionRecords',
+          'activeTimers',
+          'auditLogs',
+          'idempotencyKeys',
+          'realtimeEvents',
+        ],
+        skipRead: ['auditLogs'],
+        storeId,
+        readScopes: storeTimerReadScopes(storeId, {
+          user,
+          idempotencyKey,
+          includeTables: false,
+          includeSettings: false,
+          includeGroups: false,
+          includeActiveRecords: true,
+        }),
+      },
+      (repositories) => runIdempotentMutation({
+        idempotencyKeys: repositories.idempotencyKeys,
+        key: idempotencyKey,
+        user,
+        storeId,
+        operation: 'timer.reset_batch',
+        request: { timerIds: requestedIds, onlyOverdue },
+        now,
+        execute: () => {
+          const store = repositories.stores.findById(storeId);
+          if (!store) {
+            throw new AppError(404, 'STORE_NOT_FOUND', '门店不存在');
+          }
+          if (!store.enabled && user.role !== 'system_admin') {
+            throw new AppError(403, 'STORE_DISABLED', '门店已停用');
+          }
+
+          const timerById = new Map(
+            repositories.activeTimers
+              .findByStoreId(storeId)
+              .map((timer) => [timer.id, timer]),
+          );
+          const skipped = [];
+          const targets = [];
+
+          for (const timerId of requestedIds) {
+            const timer = timerById.get(timerId);
+            if (!timer) {
+              skipped.push({ timerId, reason: 'not_active' });
+              continue;
+            }
+            const { rawRemainingSeconds } = computeRawRemainingSeconds(
+              timer,
+              now,
+            );
+            // 存储状态只有 running/paused；“已到时”是同一 now 下的计算结果。
+            if (
+              onlyOverdue
+              && (timer.status === 'paused' || rawRemainingSeconds > 0)
+            ) {
+              skipped.push({ timerId, reason: 'no_longer_overdue' });
+              continue;
+            }
+            targets.push({ timer, rawRemainingSeconds });
+          }
+
+          targets.sort((left, right) => (
+            left.timer.tableNumberSnapshot - right.timer.tableNumberSnapshot
+          ));
+          const records = targets.map(({ timer, rawRemainingSeconds }) => {
+            const record = resetTimerInRepositories(
+              repositories,
+              timer,
+              now,
+              timestamp,
+              user,
+            );
+            repositories.timerInterventionRecords.create(
+              buildInterventionRecord({
+                timer,
+                action: 'admin_bulk_reset',
+                reminderNumber: null,
+                overtimeSeconds: Math.max(
+                  0,
+                  Math.floor(-rawRemainingSeconds),
+                ),
+                timerRecordId: record.id,
+                actor: user,
+                timestamp,
+              }),
+            );
+            return record;
+          });
+          const resetTableIds = [...new Set(records.flatMap((record) => (
+            record.memberTableIds?.length
+              ? record.memberTableIds
+              : [record.tableId]
+          )))];
+
+          appendAuditLog(repositories.auditLogs, {
+            userId: user.userId,
+            userNameSnapshot: user.displayName,
+            storeId,
+            action: 'timer.batch_reset',
+            targetType: 'timer_batch',
+            targetId: null,
+            dataBefore: {
+              onlyOverdue,
+              requestedTimerIds: requestedIds,
+            },
+            dataAfter: {
+              count: records.length,
+              timerIds: records.map((record) => record.timerId),
+              recordIds: records.map((record) => record.id),
+              tableIds: resetTableIds,
+              skipped,
+            },
+          }, { timestamp });
+
+          if (records.length > 0) {
+            committedEvent = appendRealtimeEvent(
+              repositories.realtimeEvents,
+              {
+                storeId,
+                type: 'timer.bulk_reset',
+                entityType: 'timer',
+                entityId: null,
+                payload: {
+                  resetCount: records.length,
+                  timerIds: records.map((record) => record.timerId),
+                  tableIds: records.map((record) => record.tableId),
+                  memberTableIds: resetTableIds,
+                  tableNames: records.map(
+                    (record) => record.tableNameSnapshot,
+                  ),
+                },
+                timestamp,
+              },
+            );
+          }
+
+          return {
+            records,
+            resetCount: records.length,
+            resetTableCount: resetTableIds.length,
+            skipped,
+          };
+        },
+      }),
+    );
+
+    if (!outcome.replayed && committedEvent) {
+      realtimeHub.publish(committedEvent);
+    }
+    return outcome;
+  }
+
   async processOverdueTimers({ storeId = null, now = this.nowProvider() } = {}) {
     if (!storeId) {
       // 逐门店结算：每个门店独立加锁、独立提交，一家店的结算不阻塞其他门店。

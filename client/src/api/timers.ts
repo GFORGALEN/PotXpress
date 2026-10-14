@@ -1,9 +1,11 @@
 import {
   timerActionResultSchema,
+  timerBatchResetResultSchema,
   timerBulkResetResultSchema,
   timerListSnapshotSchema,
   timerResetResultSchema,
   type TimerActionResult,
+  type TimerBatchResetResult,
   type TimerBulkResetResult,
   type TimerListSnapshot,
   type TimerResetResult,
@@ -131,6 +133,24 @@ export async function resetAllTimers(
       url: `/stores/${storeId}/timers/reset-all`,
     },
     timerBulkResetResultSchema,
+  );
+}
+
+/**
+ * 按计时 ID 批量清台已到时的计时。名单使用 timerId，避免结束确认期间
+ * 被别人清台后重新开台的新计时；网络重试沿用同一个幂等键。
+ */
+export async function resetOverdueTimers(
+  storeId: string,
+  timerIds: string[],
+): Promise<TimerBatchResetResult> {
+  return sendIdempotentApiData(
+    {
+      method: 'post',
+      url: `/stores/${storeId}/timers/reset-batch`,
+      data: { timerIds, onlyOverdue: true },
+    },
+    timerBatchResetResultSchema,
   );
 }
 

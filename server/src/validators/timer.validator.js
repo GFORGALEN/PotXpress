@@ -13,3 +13,13 @@ export const adjustTimerBodySchema = z.object({
 export const transferTimerBodySchema = z.object({
   targetTableId: z.string().min(1).max(100),
 }).strict();
+
+export const MAX_BATCH_RESET_TIMERS = 200;
+
+export const resetBatchTimersBodySchema = z.object({
+  timerIds: z.array(z.string().min(1).max(100))
+    .min(1)
+    .max(MAX_BATCH_RESET_TIMERS)
+    .transform((ids) => [...new Set(ids)].sort()),
+  onlyOverdue: z.literal(true).default(true),
+}).strict();

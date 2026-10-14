@@ -71,6 +71,26 @@ export const timerBulkResetResultSchema = z.object({
   resetCount: z.number().int().nonnegative(),
 }).strict();
 
+export const timerBatchResetSkipReasonSchema = z.enum([
+  'not_active',
+  'no_longer_overdue',
+]);
+
+export const timerBatchResetResultSchema = z.object({
+  records: z.array(z.object({
+    id: identifierSchema,
+    timerId: identifierSchema,
+    tableId: identifierSchema,
+    tableNameSnapshot: z.string().min(1).max(100),
+  }).passthrough()),
+  resetCount: z.number().int().nonnegative(),
+  resetTableCount: z.number().int().nonnegative(),
+  skipped: z.array(z.object({
+    timerId: identifierSchema,
+    reason: timerBatchResetSkipReasonSchema,
+  }).strict()),
+}).strict();
+
 export type TimerAdjustment = z.infer<typeof timerAdjustmentSchema>;
 export type ActiveTimer = z.infer<typeof activeTimerSchema>;
 export type TimerStatus = z.infer<typeof timerStatusSchema>;
@@ -78,3 +98,7 @@ export type Timer = z.infer<typeof timerSchema>;
 export type TimerListSnapshot = z.infer<typeof timerListSnapshotSchema>;
 export type TimerActionResult = z.infer<typeof timerActionResultSchema>;
 export type TimerBulkResetResult = z.infer<typeof timerBulkResetResultSchema>;
+export type TimerBatchResetSkipReason = z.infer<
+  typeof timerBatchResetSkipReasonSchema
+>;
+export type TimerBatchResetResult = z.infer<typeof timerBatchResetResultSchema>;

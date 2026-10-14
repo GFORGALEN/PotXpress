@@ -99,6 +99,24 @@ export async function resetAllTimersController(req, res) {
   );
 }
 
+export async function resetBatchTimersController(req, res) {
+  const { value: result, replayed } = await timerService.resetBatch({
+    storeId: req.params.storeId,
+    timerIds: req.body.timerIds,
+    onlyOverdue: req.body.onlyOverdue,
+    idempotencyKey: readIdempotencyKey(req),
+    user: req.user,
+  });
+  markIdempotencyReplay(res, replayed);
+  return ok(
+    res,
+    result,
+    result.resetCount > 0
+      ? `已清台 ${result.resetCount} 个计时`
+      : '所选计时状态已变化，未清台',
+  );
+}
+
 export async function acknowledgeTimerAlertController(req, res) {
   const { value: timer, replayed } = await timerService.acknowledgeAlert({
     storeId: req.params.storeId,
