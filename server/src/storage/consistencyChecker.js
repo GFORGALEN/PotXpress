@@ -1,8 +1,14 @@
 import { fileDataSchemas } from './dataSchemas.js';
-import { fileStore } from './fileStore.js';
+import { databasePool, GROWING_RESOURCES } from './database.js';
+import { databaseStore } from './databaseStore.js';
 import { normalizeStoreCode, normalizeUsername } from '../utils/normalization.js';
 
-const ALL_FILES = Object.freeze(Object.keys(fileDataSchemas));
+// 启动检查只覆盖规模有上限的配置类资源。历史表（计时记录、审计、干预、
+// 幂等键、实时事件）的引用与唯一性由数据库外键和唯一约束保证，不在每次
+// 启动时整表读入内存——否则数据越多，重启恢复越慢。
+const BOUNDED_FILES = Object.freeze(
+  Object.keys(fileDataSchemas).filter((filename) => !GROWING_RESOURCES.has(filename)),
+);
 
 function assertUnique(items, keySelector, label) {
   const seen = new Map();
@@ -26,32 +32,25 @@ function assertValidTimezone(timezone, storeId) {
 }
 
 async function repairCompletedResetTransactions() {
-  await fileStore.withFiles(
-    ['activeTimers.json', 'records.json'],
-    (drafts) => {
-      const completedTimerIds = new Set(
-        drafts['records.json'].map((record) => record.timerId).filter(Boolean),
-      );
-      drafts['activeTimers.json'] = drafts['activeTimers.json'].filter(
-        (timer) => !completedTimerIds.has(timer.id),
-      );
-    },
-    {
-      writeOrder: ['activeTimers.json'],
-    },
+  // 已生成历史记录的计时器不应仍处于活动状态（文件存储时代的半完成事务）。
+  await databasePool.query(
+    `DELETE FROM active_timers
+     WHERE EXISTS (
+       SELECT 1 FROM timer_records WHERE timer_records.timer_id = active_timers.id
+     )`,
   );
 }
 
 export async function checkDataConsistency() {
   await repairCompletedResetTransactions();
 
-  const data = await fileStore.withFiles(
-    ALL_FILES,
+  const data = await databaseStore.withFiles(
+    BOUNDED_FILES,
     (drafts) => drafts,
-    { writeOrder: [] },
   );
 
-  for (const [filename, schema] of Object.entries(fileDataSchemas)) {
+  for (const filename of BOUNDED_FILES) {
+    const schema = fileDataSchemas[filename];
     const result = schema.safeParse(data[filename]);
 
     if (!result.success) {
@@ -67,12 +66,8 @@ export async function checkDataConsistency() {
   const tables = data['tables.json'];
   const tableGroups = data['tableGroups.json'];
   const timers = data['activeTimers.json'];
-  const records = data['records.json'];
-  const timerInterventionRecords = data['timerInterventionRecords.json'];
   const settings = data['settings.json'];
   const layouts = data['layouts.json'];
-  const idempotencyKeys = data['idempotencyKeys.json'];
-  const realtimeEvents = data['realtimeEvents.json'];
   const storeById = new Map(stores.map((store) => [store.id, store]));
   const tableById = new Map(tables.map((table) => [table.id, table]));
   const canvasByStoreId = new Map(
@@ -87,23 +82,8 @@ export async function checkDataConsistency() {
   assertUnique(tableGroups, (group) => group.id, '拼桌组 id');
   assertUnique(timers, (timer) => timer.id, '计时器 id');
   assertUnique(timers, (timer) => timer.tableId, '活动计时桌台');
-  assertUnique(records, (record) => record.id, '记录 id');
-  assertUnique(records, (record) => record.timerId, '记录 timerId');
-  assertUnique(timerInterventionRecords, (record) => record.id, '异常处理记录 id');
   assertUnique(settings, (entry) => entry.storeId, '门店设置');
   assertUnique(layouts, (entry) => entry.storeId, '门店布局');
-  assertUnique(idempotencyKeys, (entry) => entry.id, '幂等记录 id');
-  assertUnique(
-    idempotencyKeys,
-    (entry) => `${entry.userId}:${entry.key}`,
-    '用户幂等键',
-  );
-  assertUnique(realtimeEvents, (entry) => entry.id, '实时事件 id');
-  assertUnique(
-    realtimeEvents,
-    (entry) => `${entry.storeId}:${entry.version}`,
-    '门店实时事件版本',
-  );
 
   for (const store of stores) {
     assertValidTimezone(store.timezone, store.id);
@@ -248,20 +228,6 @@ export async function checkDataConsistency() {
     }
   }
 
-  for (const record of records) {
-    const table = tableById.get(record.tableId);
-
-    if (!storeById.has(record.storeId) || !table || table.storeId !== record.storeId) {
-      throw new Error(`记录 ${record.id} 的门店或桌台引用无效`);
-    }
-  }
-
-  for (const record of timerInterventionRecords) {
-    if (!storeById.has(record.storeId)) {
-      throw new Error(`异常处理记录 ${record.id} 的门店引用无效`);
-    }
-  }
-
   for (const entry of settings) {
     const store = storeById.get(entry.storeId);
 
@@ -277,12 +243,6 @@ export async function checkDataConsistency() {
   for (const entry of layouts) {
     if (!storeById.has(entry.storeId)) {
       throw new Error(`layouts 引用了不存在的门店 ${entry.storeId}`);
-    }
-  }
-
-  for (const event of realtimeEvents) {
-    if (!storeById.has(event.storeId)) {
-      throw new Error(`实时事件 ${event.id} 引用了不存在的门店 ${event.storeId}`);
     }
   }
 }

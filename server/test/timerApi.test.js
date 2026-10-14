@@ -56,7 +56,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   process.env.CORS_ORIGIN = 'http://localhost:5173';
 
   const { startServer, stopServer } = await import('../server.js');
-  const { fileStore } = await import('../src/storage/fileStore.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
   const { timerService } = await import('../src/services/timer.service.js');
   const { recordService } = await import('../src/services/record.service.js');
   let now = Date.parse('2026-01-15T00:00:00.000Z');
@@ -145,7 +145,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   assert.equal(transferredBack.status, 200);
   assert.equal(transferredBack.body.data.timer.tableId, 'table_demo_01');
 
-  const beforeReads = await fileStore.readJSON('activeTimers.json');
+  const beforeReads = await databaseStore.readJSON('activeTimers.json');
   const firstRead = await request(
     baseUrl,
     '/api/stores/store_demo/timers',
@@ -158,7 +158,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   );
   assert.equal(firstRead.body.data.serverTime, new Date(now).toISOString());
   assert.equal(secondRead.status, 200);
-  assert.deepEqual(await fileStore.readJSON('activeTimers.json'), beforeReads);
+  assert.deepEqual(await databaseStore.readJSON('activeTimers.json'), beforeReads);
 
   now += 30_000;
   const paused = await request(
@@ -540,8 +540,8 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     pauseResetRace.some((response) => response.status === 200),
     true,
   );
-  const timersAfterRace = await fileStore.readJSON('activeTimers.json');
-  const recordsAfterRace = await fileStore.readJSON('records.json');
+  const timersAfterRace = await databaseStore.readJSON('activeTimers.json');
+  const recordsAfterRace = await databaseStore.readWhere('records.json', { limit: 10_000 });
   assert.equal(
     timersAfterRace.some((timer) => timer.tableId === 'table_demo_05'),
     false,
@@ -607,7 +607,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     1,
   );
   assert.equal(
-    (await fileStore.readJSON('auditLogs.json')).filter(
+    (await databaseStore.readWhere('auditLogs.json', { limit: 10_000 })).filter(
       (entry) => (
         entry.action === 'timer.reset'
         && entry.targetId === idempotentResets[0].body.data.record.timerId
@@ -688,7 +688,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   assert.equal(replayedGroup.headers.get('idempotency-replayed'), 'true');
   assert.equal(replayedGroup.body.data.group.id, groupId);
   assert.equal(
-    (await fileStore.readJSON('auditLogs.json')).filter(
+    (await databaseStore.readWhere('auditLogs.json', { limit: 10_000 })).filter(
       (entry) => (
         entry.action === 'table_group.create'
         && entry.targetId === groupId
@@ -757,7 +757,7 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   assert.equal(replayedUngroup.status, 200);
   assert.equal(replayedUngroup.headers.get('idempotency-replayed'), 'true');
   assert.equal(
-    (await fileStore.readJSON('auditLogs.json')).filter(
+    (await databaseStore.readWhere('auditLogs.json', { limit: 10_000 })).filter(
       (entry) => (
         entry.action === 'table_group.delete'
         && entry.targetId === groupId
@@ -780,18 +780,18 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
   assert.equal(adminAudit.status, 200);
   assert.equal(adminAudit.body.data.logs.length >= 7, true);
 
-  const activeTimers = await fileStore.readJSON('activeTimers.json');
-  const records = await fileStore.readJSON('records.json');
+  const activeTimers = await databaseStore.readJSON('activeTimers.json');
+  const records = await databaseStore.readWhere('records.json', { limit: 10_000 });
   assert.equal(activeTimers.length, 0);
   assert.equal(
     new Set(records.map((record) => record.timerId)).size,
     records.length,
   );
 
-  const auditsBeforeRollback = await fileStore.readJSON('auditLogs.json');
-  fileStore.setFaultInjector(({ stage, filename }) => {
+  const auditsBeforeRollback = await databaseStore.readWhere('auditLogs.json', { limit: 10_000 });
+  databaseStore.setFaultInjector(({ stage, filename }) => {
     if (stage === 'before_replace' && filename === 'auditLogs.json') {
-      fileStore.setFaultInjector(null);
+      databaseStore.setFaultInjector(null);
       throw new Error('injected atomic audit failure');
     }
   });
@@ -813,13 +813,13 @@ test('计时状态机、记录、CSV、并发和重启恢复链路可用', async
     console.error = originalConsoleError;
   }
   assert.equal(failedAtomicStart.status, 500);
-  assert.deepEqual(await fileStore.readJSON('activeTimers.json'), []);
+  assert.deepEqual(await databaseStore.readJSON('activeTimers.json'), []);
   assert.deepEqual(
-    await fileStore.readJSON('auditLogs.json'),
+    await databaseStore.readWhere('auditLogs.json', { limit: 10_000 }),
     auditsBeforeRollback,
   );
   assert.equal(
-    (await fileStore.readJSON('idempotencyKeys.json')).some(
+    (await databaseStore.readWhere('idempotencyKeys.json', { limit: 10_000 })).some(
       (entry) => entry.key === 'atomic-start-rollback-01',
     ),
     false,

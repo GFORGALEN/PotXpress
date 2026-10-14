@@ -1,3 +1,4 @@
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -44,7 +45,11 @@ function corsOptions(req, callback) {
   const origin = req.get('Origin');
   const allowed = !origin
     || origin === requestOrigin(req)
-    || config.corsOrigins.includes(origin);
+    || config.corsOrigins.includes(origin)
+    || (
+      !config.isProduction
+      && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    );
 
   if (!allowed) {
     callback(new AppError(403, 'CORS_FORBIDDEN', '不允许的请求来源'));
@@ -63,6 +68,9 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
   app.use(helmet());
+  // JSON 与静态资源 gzip 压缩：计时列表约 25 KB → 2 KB，前端包约 870 KB → 250 KB。
+  // Render 按出站字节计费（Hobby 5 GB/月、Pro 25 GB/月）。
+  app.use(compression());
   app.use(cors(corsOptions));
 
   if (config.nodeEnv !== 'test') {
@@ -102,7 +110,17 @@ export function createApp() {
       throw new Error(`生产构建不存在：${clientDirectory}。请先运行客户端构建。`);
     }
 
-    app.use(express.static(clientDirectory));
+    app.use(express.static(clientDirectory, {
+      setHeaders(res, filePath) {
+        // Vite 产物文件名带内容哈希，可永久缓存；index.html 每次校验，保证能拿到新版本。
+        res.setHeader(
+          'Cache-Control',
+          filePath.includes(`${path.sep}assets${path.sep}`)
+            ? 'public, max-age=31536000, immutable'
+            : 'no-cache',
+        );
+      },
+    }));
     app.use((req, res, next) => {
       const acceptsHtml = (req.get('Accept') ?? '')
         .split(',')
@@ -111,6 +129,7 @@ export function createApp() {
         (req.method === 'GET' || req.method === 'HEAD')
         && acceptsHtml
       ) {
+        res.setHeader('Cache-Control', 'no-cache');
         return res.sendFile(path.join(clientDirectory, 'index.html'));
       }
 

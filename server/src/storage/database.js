@@ -1,8 +1,9 @@
 import pg from 'pg';
-import { newDb } from 'pg-mem';
 import { config } from '../config.js';
+import { INSTANCE_ID } from '../utils/instance.js';
 
 const { Pool } = pg;
+export const REALTIME_CHANNEL = 'potxpress_realtime';
 const col = (property, name, options = {}) => ({ property, name, ...options });
 const resource = (table, idField, keyColumn, columns) => ({ table, idField, keyColumn, columns });
 
@@ -209,14 +210,40 @@ const INDEX_STATEMENTS = [
   'CREATE INDEX IF NOT EXISTS realtime_events_store_created_idx ON realtime_events (store_id, created_at DESC)',
 ];
 
+// 会随营业时间无限增长的表。读取它们必须给出范围（门店、ID、日期或行数），
+// 否则 withFiles 直接拒绝——这是 2026-10-14 故障的根因（整表读审计日志）。
+export const GROWING_RESOURCES = new Set([
+  'records.json',
+  'timerInterventionRecords.json',
+  'auditLogs.json',
+  'idempotencyKeys.json',
+  'realtimeEvents.json',
+]);
+
+export function connectionOptions() {
+  return {
+    connectionString: config.databaseUrl,
+    ssl: config.databaseSsl ? { rejectUnauthorized: false } : false,
+    ...(config.databaseSchema
+      ? { options: `-c search_path=${config.databaseSchema}` }
+      : {}),
+  };
+}
+
 function createPool() {
-  if (config.useMemoryDatabase) {
-    const memoryDatabase = newDb({ autoCreateForeignKeyIndices: true });
-    return new (memoryDatabase.adapters.createPg().Pool)();
-  }
-  return new Pool({ connectionString: config.databaseUrl, max: config.databasePoolSize,
-    connectionTimeoutMillis: 10_000, idleTimeoutMillis: 30_000,
-    ssl: config.databaseSsl ? { rejectUnauthorized: false } : false });
+  const pool = new Pool({
+    ...connectionOptions(),
+    max: config.databasePoolSize,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+  });
+  // 空闲连接被数据库端终止时，pg 会在 Pool 上触发 error 事件；没有监听器时
+  // Node 会把它当作未处理异常直接退出进程（2026-10-14 06:57 的崩溃）。
+  // 出错的连接已被 Pool 丢弃，下一次 connect() 会新建连接，这里只需记录。
+  pool.on('error', (error) => {
+    console.error(`数据库空闲连接异常（已丢弃该连接）：${error.message}`);
+  });
+  return pool;
 }
 
 export const databasePool = createPool();
@@ -283,9 +310,68 @@ function buildScopeClause(filename, definition, scope, parameters) {
     (descriptor) => descriptor.property === property,
   )?.name;
 
+  const requireColumn = (property, label) => {
+    const column = columnFor(property);
+    if (!column) throw new Error(`${filename} 不支持 ${label} 查询范围：${property}`);
+    return column;
+  };
+
   if (scope.none) clauses.push('FALSE');
   if (scope.id !== undefined) {
     clauses.push(`resource_row.${definition.keyColumn} = ${parameter(scope.id)}`);
+  }
+  if (scope.ids !== undefined) {
+    clauses.push(`resource_row.${definition.keyColumn} = ANY(${parameter(scope.ids)}::text[])`);
+  }
+  for (const [property, value] of Object.entries(scope.where ?? {})) {
+    const column = requireColumn(property, 'where');
+    clauses.push(value === null
+      ? `resource_row.${column} IS NULL`
+      : `resource_row.${column} = ${parameter(value)}`);
+  }
+  if (scope.localDate) {
+    // 门店本地日期 → [当天 00:00, 次日 00:00) 的 UTC 区间，由 PostgreSQL 按时区
+    // 规则换算（含夏令时）。区间条件可以直接使用 (store_id, 时间) 索引。
+    const { property, date, timezone } = scope.localDate;
+    const column = requireColumn(property, 'localDate');
+    const datePlaceholder = parameter(date);
+    const timezonePlaceholder = parameter(timezone);
+    clauses.push(
+      `resource_row.${column} >= (${datePlaceholder}::date)::timestamp AT TIME ZONE ${timezonePlaceholder}`,
+      `resource_row.${column} < (${datePlaceholder}::date + 1)::timestamp AT TIME ZONE ${timezonePlaceholder}`,
+    );
+  }
+  if (scope.historyOfTableIds !== undefined) {
+    // 每张桌台最多取一条历史记录，只用于判断"是否有历史"，不读取全部历史。
+    if (filename !== 'records.json') throw new Error(`${filename} 不支持 historyOfTableIds`);
+    const idsPlaceholder = parameter(scope.historyOfTableIds);
+    // LATERAL + LIMIT 1：每张桌台命中索引后立即停止，与该桌历史量无关。
+    clauses.push(`resource_row.id IN (
+      SELECT found.record_id
+      FROM unnest(${idsPlaceholder}::text[]) AS wanted(table_id)
+      CROSS JOIN LATERAL (
+        SELECT history.id AS record_id
+        FROM timer_records history
+        WHERE history.table_id = wanted.table_id
+        UNION ALL
+        SELECT member.record_id
+        FROM timer_record_members member
+        WHERE member.table_id = wanted.table_id
+        LIMIT 1
+      ) found
+    )`);
+  }
+  if (scope.jsonContains) {
+    const { property, value } = scope.jsonContains;
+    const column = requireColumn(property, 'jsonContains');
+    clauses.push(`resource_row.${column} @> jsonb_build_array(${parameter(value)}::text)`);
+  }
+  if (scope.before) {
+    // 稳定游标：(排序列, 主键) 严格小于上一页最后一条。
+    const column = requireColumn(scope.orderBy, 'before');
+    clauses.push(
+      `(resource_row.${column}, resource_row.${definition.keyColumn}) < (${parameter(scope.before.value)}, ${parameter(scope.before.id)})`,
+    );
   }
   if (scope.storeId !== undefined) {
     const storeColumn = filename === 'stores.json' ? 'id' : columnFor('storeId');
@@ -359,14 +445,19 @@ function buildResourceAggregate(filename, scope, parameters, alias) {
     ? definition.columns.find(({ property }) => property === scope.orderBy)?.name
     : definition.keyColumn;
   if (!orderColumn) throw new Error(`${filename} 不支持 ${scope.orderBy} 排序`);
+  const orderFor = (alias) => (
+    orderColumn === definition.keyColumn
+      ? `${alias}.${orderColumn} ${orderDirection}`
+      : `${alias}.${orderColumn} ${orderDirection}, ${alias}.${definition.keyColumn} ${orderDirection}`
+  );
   const selectedColumns = ['resource_row.*', ...childColumns].join(', ');
 
-  return `(SELECT COALESCE(jsonb_agg(scoped_resource), '[]'::jsonb)
+  return `(SELECT COALESCE(jsonb_agg(scoped_resource ORDER BY ${orderFor('scoped_resource')}), '[]'::jsonb)
     FROM (
       SELECT ${selectedColumns}
       FROM ${definition.table} resource_row
       ${where}
-      ORDER BY resource_row.${orderColumn} ${orderDirection}${limit}
+      ORDER BY ${orderFor('resource_row')}${limit}
     ) scoped_resource) AS "${alias}"`;
 }
 
@@ -387,32 +478,47 @@ export async function readResources(client, resourceScopes) {
   ]));
 }
 
-export async function readResource(client, filename, { forUpdate = false } = {}) {
-  const definition = definitionFor(filename);
-  const result = await client.query(`SELECT * FROM ${definition.table} ORDER BY ${definition.keyColumn}${forUpdate ? ' FOR UPDATE' : ''}`);
-  const values = result.rows.map((row) => Object.fromEntries(
-    definition.columns.filter(({ property }) => property !== '_id')
-      .map((descriptor) => [descriptor.property, toApiValue(row[descriptor.name], descriptor)]),
-  ));
-  const byId = new Map(values.map((record) => [record[definition.idField], record]));
-  for (const child of CHILD_RESOURCES[filename] ?? []) {
-    for (const record of values) record[child.property] = [];
-    const children = await client.query(
-      `SELECT * FROM ${child.table} ORDER BY ${child.parentColumn}, position${forUpdate ? ' FOR UPDATE' : ''}`,
+const GLOBAL_LOCK_NAME = 'potxpress:global';
+const storeLockName = (storeId) => `potxpress:store:${storeId}`;
+
+/**
+ * 写事务的并发控制：按门店加事务级 advisory lock。
+ * - 门店内写：共享全局锁 + 独占该门店锁。A 店开台不再挡住 B 店开台。
+ * - 跨门店写（用户、门店增删、数据初始化）：独占全局锁，等待所有门店写完成。
+ * 锁随 COMMIT/ROLLBACK 自动释放，跨服务实例同样有效。
+ */
+export async function acquireWriteLocks(client, lockScope) {
+  if (lockScope?.storeId) {
+    await client.query(
+      `SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0)),
+              pg_advisory_xact_lock(hashtextextended($2, 0))`,
+      [GLOBAL_LOCK_NAME, storeLockName(lockScope.storeId)],
     );
-    for (const row of children.rows) {
-      const parent = byId.get(row[child.parentColumn]);
-      if (!parent) continue;
-      if (child.valueColumn) parent[child.property].push(row[child.valueColumn]);
-      else parent[child.property].push(Object.fromEntries(
-        child.columns.map((descriptor) => [
-          descriptor.property,
-          toApiValue(row[descriptor.name], descriptor),
-        ]),
-      ));
-    }
+    return;
   }
-  return definition.idField ? values : (values[0] ?? null);
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    [GLOBAL_LOCK_NAME],
+  );
+}
+
+/** 非阻塞版本：拿不到门店锁时返回 false（用于后台结算，避免排队）。 */
+export async function tryAcquireStoreWriteLock(client, storeId) {
+  const result = await client.query(
+    `SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1, 0))
+        AND pg_try_advisory_xact_lock(hashtextextended($2, 0)) AS acquired`,
+    [GLOBAL_LOCK_NAME, storeLockName(storeId)],
+  );
+  return result.rows[0].acquired === true;
+}
+
+function realtimeNotification(record) {
+  return JSON.stringify({
+    instanceId: INSTANCE_ID,
+    storeId: record.storeId,
+    id: record.id,
+    version: record.version,
+  });
 }
 
 export async function replaceResource(client, filename, value) {
@@ -569,6 +675,7 @@ export async function syncResourceChanges(client, filename, before, after) {
   const afterIds = new Set();
   const changedStoreIds = new Set();
   const changedRecords = [];
+  const notifications = [];
 
   for (const record of afterRecords) {
     const id = recordKey(definition, record);
@@ -580,6 +687,7 @@ export async function syncResourceChanges(client, filename, before, after) {
     }
     if (filename === 'realtimeEvents.json' && record.storeId) {
       changedStoreIds.add(record.storeId);
+      if (!previous) notifications.push(realtimeNotification(record));
     }
     changedRecords.push({ record, previous: previous ?? null });
   }
@@ -609,11 +717,7 @@ export async function syncResourceChanges(client, filename, before, after) {
       deletedIds,
     );
   }
-  if (
-    filename === 'realtimeEvents.json'
-    && changedStoreIds.size > 0
-    && !config.useMemoryDatabase
-  ) {
+  if (filename === 'realtimeEvents.json' && changedStoreIds.size > 0) {
     await client.query(
       `DELETE FROM realtime_events
        WHERE id IN (
@@ -628,6 +732,9 @@ export async function syncResourceChanges(client, filename, before, after) {
        )`,
       [[...changedStoreIds]],
     );
+  }
+  for (const notification of notifications) {
+    await client.query('SELECT pg_notify($1, $2)', [REALTIME_CHANNEL, notification]);
   }
 }
 
@@ -645,6 +752,7 @@ export async function syncResourceChangeBatch(client, changes) {
   const parameters = [];
   const ctes = [];
   const changedRealtimeStoreIds = new Set();
+  const notifications = [];
   let cleanExpiredIdempotencyKeys = false;
   const changedIdempotencyIds = new Set();
   const parameter = (value) => {
@@ -678,6 +786,7 @@ export async function syncResourceChangeBatch(client, changes) {
         }
         if (filename === 'realtimeEvents.json' && record.storeId) {
           changedRealtimeStoreIds.add(record.storeId);
+          if (!previous) notifications.push(realtimeNotification(record));
         }
       }
     }
@@ -746,8 +855,16 @@ export async function syncResourceChangeBatch(client, changes) {
     );
   }
 
-  if (ctes.length > 0) {
-    await client.query(`WITH ${ctes.join(', ')} SELECT 1 AS ok`, parameters);
+  if (ctes.length > 0 || notifications.length > 0) {
+    // NOTIFY 是事务性的：只有 COMMIT 后其他实例才会收到，回滚则不会发出。
+    const channel = notifications.length > 0 ? parameter(REALTIME_CHANNEL) : null;
+    const selections = notifications.length > 0
+      ? notifications.map((notification) => `pg_notify(${channel}, ${parameter(notification)})`)
+      : ['1 AS ok'];
+    await client.query(
+      `${ctes.length > 0 ? `WITH ${ctes.join(', ')} ` : ''}SELECT ${selections.join(', ')}`,
+      parameters,
+    );
   }
 }
 
@@ -789,22 +906,74 @@ async function migrateLegacyPayloadSchema(client) {
   }
 }
 
+const BASELINE_SCHEMA_VERSION = 6;
+
+// 版本化迁移：只追加，不修改已发布的条目。每条迁移在启动事务中执行一次，
+// 并登记到 schema_migrations；已存在的生产表通过 ALTER 升级。
+const MIGRATIONS = Object.freeze([
+  {
+    version: 7,
+    description: '门店独立店员入口密钥、共享登录限流、桌台活动计时唯一约束',
+    statements: [
+      'ALTER TABLE stores ADD COLUMN IF NOT EXISTS kiosk_key_version INTEGER NOT NULL DEFAULT 0',
+      'ALTER TABLE stores ADD COLUMN IF NOT EXISTS kiosk_key_hash TEXT NULL',
+      'CREATE UNIQUE INDEX IF NOT EXISTS stores_kiosk_key_hash_idx ON stores (kiosk_key_hash)',
+      `CREATE TABLE IF NOT EXISTS login_attempts (attempt_key TEXT PRIMARY KEY,
+        failures INTEGER NOT NULL, window_started_at TIMESTAMPTZ NOT NULL)`,
+      'CREATE INDEX IF NOT EXISTS login_attempts_window_idx ON login_attempts (window_started_at)',
+      // 一张桌台同一时间只能属于一个活动计时（含拼桌成员）。
+      'CREATE UNIQUE INDEX IF NOT EXISTS active_timer_members_table_uidx ON active_timer_members (table_id)',
+      // 删除桌台前判断"是否有历史"使用；避免扫描全部计时记录。
+      'CREATE INDEX IF NOT EXISTS timer_records_table_idx ON timer_records (table_id)',
+      'CREATE INDEX IF NOT EXISTS timer_record_members_table_idx ON timer_record_members (table_id)',
+    ],
+  },
+]);
+
+export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? BASELINE_SCHEMA_VERSION;
+
 export async function initializeDatabase() {
   if (initializationPromise) return initializationPromise;
   initializationPromise = (async () => {
     const client = await databasePool.connect();
     try {
+      if (config.databaseSchema) {
+        await client.query(`CREATE SCHEMA IF NOT EXISTS "${config.databaseSchema}"`);
+      }
+      // 整个初始化放在一个事务里，并用事务级 advisory lock 互斥：多个实例同时
+      // 启动时只有一个在执行迁移，其余等待后看到已完成的版本。事务级锁在
+      // 事务连接池（Supabase pooler）下同样安全。
       await client.query('BEGIN');
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        ['potxpress:migrations'],
+      );
       await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
-      await client.query('CREATE TABLE IF NOT EXISTS resource_locks (resource_name TEXT PRIMARY KEY)');
       if (await hasLegacyPayloadSchema(client)) await migrateLegacyPayloadSchema(client);
       else await createNormalizedSchema(client);
-      for (const filename of Object.keys(DATABASE_RESOURCES)) {
-        await client.query(`INSERT INTO resource_locks (resource_name) VALUES ($1)
-          ON CONFLICT (resource_name) DO NOTHING`, [filename]);
+      await client.query(
+        'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
+        [BASELINE_SCHEMA_VERSION],
+      );
+      const applied = new Set((await client.query(
+        'SELECT version FROM schema_migrations',
+      )).rows.map((row) => row.version));
+      for (const migration of MIGRATIONS) {
+        if (applied.has(migration.version)) continue;
+        for (const statement of migration.statements) await client.query(statement);
+        await client.query(
+          'INSERT INTO schema_migrations (version) VALUES ($1)',
+          [migration.version],
+        );
+        console.log(`数据库迁移 v${migration.version} 已执行：${migration.description}`);
       }
-      await client.query(`INSERT INTO schema_migrations (version) VALUES (6) ON CONFLICT (version) DO NOTHING`);
+      const newest = (await client.query(
+        'SELECT MAX(version)::int AS version FROM schema_migrations',
+      )).rows[0].version;
+      if (newest > LATEST_SCHEMA_VERSION) {
+        throw new Error(`数据库结构版本 ${newest} 高于程序支持的版本 ${LATEST_SCHEMA_VERSION}`);
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
@@ -816,7 +985,24 @@ export async function initializeDatabase() {
   try { await initializationPromise; } catch (error) { initializationPromise = null; throw error; }
 }
 
+const HEALTH_CHECK_TIMEOUT_MILLISECONDS = 2_000;
+
 export async function checkDatabaseHealth() {
-  await databasePool.query('SELECT 1 AS ok');
+  // Render 要求健康检查 5 秒内响应；这里给数据库往返一个独立的短预算，
+  // 连接池排队或数据库无响应时快速返回失败，而不是拖到平台超时。
+  let timer;
+  try {
+    await Promise.race([
+      databasePool.query('SELECT 1 AS ok'),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('数据库健康检查超时')),
+          HEALTH_CHECK_TIMEOUT_MILLISECONDS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   return 'ok';
 }

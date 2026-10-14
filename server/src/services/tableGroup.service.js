@@ -26,9 +26,29 @@ function assertStore(stores, storeId) {
   }
 }
 
+function groupReadScopes(storeId, user, idempotencyKey) {
+  return {
+    stores: { id: storeId },
+    tables: { storeId },
+    tableGroups: { storeId },
+    activeTimers: { storeId },
+    idempotencyKeys: idempotencyKey
+      ? { userId: user.userId, key: idempotencyKey }
+      : { none: true },
+    realtimeEvents: { storeId, orderBy: 'version', latest: true, limit: 1 },
+  };
+}
+
 export async function listTableGroups(storeId) {
   return unitOfWorkRepository.run(
-    { resources: ['tableGroups', 'tables'], writeOrder: [] },
+    {
+      resources: ['tableGroups', 'tables'],
+      writeOrder: [],
+      readScopes: {
+        tableGroups: { storeId },
+        tables: { storeId },
+      },
+    },
     ({ tableGroups, tables }) => tableGroups.findByStoreId(storeId)
       .filter((group) => group.enabled)
       .map((group) => publicGroup(group, tables)),
@@ -62,6 +82,10 @@ export async function createTableGroup(
         'idempotencyKeys',
         'realtimeEvents',
       ],
+      // 审计只追加；其余资源只读当前门店，并只锁定当前门店。
+      skipRead: ['auditLogs'],
+      storeId,
+      readScopes: groupReadScopes(storeId, user, idempotencyKey),
     },
     (repositories) => runIdempotentMutation({
       idempotencyKeys: repositories.idempotencyKeys,
@@ -191,6 +215,11 @@ export async function deleteTableGroup(
         'idempotencyKeys',
         'realtimeEvents',
       ],
+      skipRead: ['auditLogs'],
+      storeId,
+      readScopes: (({ tables, ...scopes }) => scopes)(
+        groupReadScopes(storeId, user, idempotencyKey),
+      ),
     },
     (repositories) => runIdempotentMutation({
       idempotencyKeys: repositories.idempotencyKeys,

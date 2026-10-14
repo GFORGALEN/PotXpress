@@ -135,10 +135,17 @@ apiClient.interceptors.response.use(
     }
 
     if (!error.response || (status >= 500 && !payload)) {
+      // 区分三类情况，避免把服务器超时误报成用户网络问题。
+      let message = '无法连接服务器，请检查网络后重试';
+      if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+        message = '服务器响应超时，请稍后重试';
+      } else if (error.response) {
+        message = '服务器暂时不可用，请稍后重试';
+      }
       throw new ApiError({
         code: 'NETWORK_ERROR',
-        message: '无法连接服务器，请检查网络后重试',
-        status: 0,
+        message,
+        status: error.response ? status : 0,
         cause: error,
       });
     }

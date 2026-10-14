@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: potxpress
+          POSTGRES_USER: potxpress
+          POSTGRES_PASSWORD: potxpress
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U potxpress -d potxpress"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://potxpress:potxpress@127.0.0.1:5432/potxpress
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # 服务端测试运行在真实 PostgreSQL 上，与生产执行同一套 SQL。
+      - run: npm test
+      - run: npm run build

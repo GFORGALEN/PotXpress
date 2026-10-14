@@ -176,6 +176,12 @@ async function createTablesInTransaction(storeId, specifications, user) {
     {
       resources: ['stores', 'tables', 'layouts'],
       writeOrder: ['tables', 'layouts'],
+      storeId,
+      readScopes: {
+        stores: { id: storeId },
+        tables: { storeId },
+        layouts: { id: storeId },
+      },
     },
     ({ stores, tables, layouts }) => {
       assertEnabledStore(stores, storeId);
@@ -299,6 +305,14 @@ async function updateTableState(storeId, tableId, input, user, action) {
         'tableGroups',
       ],
       writeOrder: ['tables', 'layouts'],
+      storeId,
+      readScopes: {
+        stores: { id: storeId },
+        tables: { storeId },
+        layouts: { id: storeId },
+        activeTimers: { storeId },
+        tableGroups: { storeId },
+      },
     },
     ({ stores, tables, layouts, activeTimers, tableGroups }) => {
       assertEnabledStore(stores, storeId);
@@ -443,6 +457,15 @@ export async function deleteTablesPermanent(storeId, tableIds, user) {
         'records',
       ],
       writeOrder: ['tables', 'layouts'],
+      storeId,
+      readScopes: {
+        stores: { id: storeId },
+        tables: { storeId },
+        layouts: { id: storeId },
+        activeTimers: { storeId },
+        tableGroups: { storeId },
+        records: { storeId, historyOfTableIds: uniqueIds },
+      },
     },
     ({
       stores,

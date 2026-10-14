@@ -74,6 +74,10 @@ import {
 } from '../utils/layoutCoordinates.js';
 
 const TIMER_POLL_INTERVAL = 3000;
+// 实时连接断开后先快速轮询，持续断开则放慢：一台设备长期 3 秒轮询每月约
+// 8 GB 数据库流量，会单独耗尽免费额度。
+const DEGRADED_TIMER_POLL_INTERVAL = 15000;
+const FAST_POLL_WINDOW = 2 * 60 * 1000;
 const CONNECTED_SAFETY_POLL_INTERVAL = 60000;
 const CLOCK_RECALIBRATION_POLLS = 30;
 const MOBILE_VIEW_STORAGE_KEY = 'potxpress_mobile_dashboard_view';
@@ -383,11 +387,20 @@ export function DashboardPage() {
     onSnapshotRequired: handleRealtimeSnapshotRequired,
     onServerContact: setLastServerContactAt,
   });
+  const [pollingDegraded, setPollingDegraded] = useState(false);
+  useEffect(() => {
+    if (realtime.connected) {
+      setPollingDegraded(false);
+      return undefined;
+    }
+    const timeoutId = setTimeout(() => setPollingDegraded(true), FAST_POLL_WINDOW);
+    return () => clearTimeout(timeoutId);
+  }, [realtime.connected]);
   const refreshTimers = usePolling(
     fetchTimers,
     realtime.connected
       ? CONNECTED_SAFETY_POLL_INTERVAL
-      : TIMER_POLL_INTERVAL,
+      : pollingDegraded ? DEGRADED_TIMER_POLL_INTERVAL : TIMER_POLL_INTERVAL,
     {
       enabled: Boolean(selectedStoreId),
       hiddenIntervalMs: realtime.connected

@@ -2,13 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import pg from 'pg';
 
-const runIntegration = process.env.RUN_POSTGRES_INTEGRATION === 'true';
-const baseDatabaseUrl = process.env.DATABASE_URL
+const baseDatabaseUrl = process.env.TEST_DATABASE_URL
   ?? 'postgres://potxpress:potxpress@127.0.0.1:5432/potxpress';
 
+const sleep = (milliseconds) => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+
+function storeRow(id) {
+  const timestamp = new Date().toISOString();
+  return {
+    id, name: id, code: id.toUpperCase(), normalizedCode: id.toUpperCase(),
+    address: null, timezone: 'Pacific/Auckland', enabled: true,
+    createdAt: timestamp, updatedAt: timestamp,
+  };
+}
+
+function eventRow(id, storeId, version) {
+  return {
+    id, storeId, version, type: 'timer.started', entityType: 'timer',
+    entityId: null, payload: {}, createdAt: new Date().toISOString(),
+  };
+}
+
 test(
-  '真实 PostgreSQL 资源行锁可跨实例串行化空表和事件版本并回滚失败事务',
-  { skip: !runIntegration },
+  '真实 PostgreSQL：旧表迁移、门店级并发隔离、跨实例串行化与失败回滚',
   async () => {
     const schemaName = `potxpress_lock_test_${process.pid}_${Date.now()}`;
     const adminPool = new pg.Pool({ connectionString: baseDatabaseUrl });
@@ -79,6 +97,7 @@ test(
       await legacyPool.end();
 
       process.env.NODE_ENV = 'development';
+      delete process.env.DATABASE_SSL;
       process.env.SEED_DEMO_DATA = 'false';
       process.env.DATABASE_URL = schemaUrl.toString();
       process.env.DATABASE_POOL_SIZE = '4';
@@ -110,6 +129,11 @@ test(
         `SELECT COUNT(*)::int AS count FROM active_timer_adjustments WHERE timer_id = 'timer_migrated'`,
       )).rows[0].count, 1);
 
+      // 迁移是版本化的：v7 的结构变更已执行并登记。
+      assert.equal((await businessPool.query(
+        `SELECT COUNT(*)::int AS count FROM schema_migrations WHERE version = 7`,
+      )).rows[0].count, 1);
+
       const firstStore = new DatabaseStore();
       const secondStore = new DatabaseStore();
       await Promise.all([
@@ -117,77 +141,91 @@ test(
         secondStore.initStorage(),
       ]);
 
+      // 两个实例并发创建门店（跨店写，全局锁）：都成功且互不覆盖。
       await Promise.all([
-        firstStore.withFiles(
-          ['stores.json'],
-          async (drafts) => {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            drafts['stores.json'].push({
-              id: 'store_from_first_instance', name: 'First store', code: 'FIRST',
-              normalizedCode: 'FIRST', address: null, timezone: 'Pacific/Auckland',
-              enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-            });
-          },
-          { writeOrder: ['stores.json'] },
-        ),
-        secondStore.withFiles(
-          ['stores.json'],
-          (drafts) => {
-            drafts['stores.json'].push({
-              id: 'store_from_second_instance', name: 'Second store', code: 'SECOND',
-              normalizedCode: 'SECOND', address: null, timezone: 'Pacific/Auckland',
-              enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-            });
-          },
-          { writeOrder: ['stores.json'] },
-        ),
+        firstStore.withFiles(['stores.json'], async (drafts) => {
+          await sleep(100);
+          drafts['stores.json'].push(storeRow('store_a'));
+        }, { writeOrder: ['stores.json'] }),
+        secondStore.withFiles(['stores.json'], (drafts) => {
+          drafts['stores.json'].push(storeRow('store_b'));
+        }, { writeOrder: ['stores.json'] }),
       ]);
-
-      const storesAfterRace = await firstStore.readJSON('stores.json');
       assert.deepEqual(
-        storesAfterRace.map((store) => store.id).sort(),
-        ['store_from_first_instance', 'store_from_second_instance', 'store_migrated'],
+        (await firstStore.readJSON('stores.json')).map((store) => store.id).sort(),
+        ['store_a', 'store_b', 'store_migrated'],
       );
 
-      const appendVersionedEvent = (id) => (drafts) => {
+      const appendVersionedEvent = (id, storeId, delay = 0) => async (drafts) => {
+        if (delay) await sleep(delay);
         const events = drafts['realtimeEvents.json'];
         const version = events.reduce(
           (latest, event) => Math.max(latest, event.version),
           0,
         ) + 1;
-        events.push({
-          id,
-          storeId: 'store_from_first_instance',
-          version,
-          type: 'timer.started',
-          entityType: 'timer',
-          entityId: null,
-          payload: {},
-          createdAt: new Date().toISOString(),
-        });
+        events.push(eventRow(id, storeId, version));
       };
+      const latestEventScope = (storeId) => ({
+        readScopes: {
+          'realtimeEvents.json': { storeId, orderBy: 'version', latest: true, limit: 1 },
+        },
+      });
+
+      // 同一门店：两个实例的写事务被门店锁串行化，版本号不冲突。
       await Promise.all([
         firstStore.withFiles(
           ['realtimeEvents.json'],
-          async (drafts) => {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            appendVersionedEvent('event_from_first_instance')(drafts);
-          },
-          { writeOrder: ['realtimeEvents.json'] },
+          appendVersionedEvent('event_a_first', 'store_a', 150),
+          { writeOrder: ['realtimeEvents.json'], lockScope: { storeId: 'store_a' }, ...latestEventScope('store_a') },
         ),
         secondStore.withFiles(
           ['realtimeEvents.json'],
-          appendVersionedEvent('event_from_second_instance'),
-          { writeOrder: ['realtimeEvents.json'] },
+          appendVersionedEvent('event_a_second', 'store_a'),
+          { writeOrder: ['realtimeEvents.json'], lockScope: { storeId: 'store_a' }, ...latestEventScope('store_a') },
         ),
       ]);
       assert.deepEqual(
-        (await firstStore.readJSON('realtimeEvents.json'))
+        (await firstStore.readWhere('realtimeEvents.json', { storeId: 'store_a' }))
           .map((event) => event.version)
           .sort((left, right) => left - right),
         [1, 2],
       );
 
+      // 不同门店：A 店的慢写事务不阻塞 B 店写入，也不阻塞只读查询。
+      const finished = [];
+      let releaseSlowWrite;
+      const slowWriteGate = new Promise((resolve) => {
+        releaseSlowWrite = resolve;
+      });
+      const slowStoreA = firstStore.withFiles(
+        ['realtimeEvents.json'],
+        async (drafts) => {
+          await slowWriteGate;
+          await appendVersionedEvent('event_a_slow', 'store_a')(drafts);
+        },
+        { writeOrder: ['realtimeEvents.json'], lockScope: { storeId: 'store_a' }, ...latestEventScope('store_a') },
+      ).then(() => finished.push('store_a'));
+      await sleep(50);
+      await secondStore.withFiles(
+        ['realtimeEvents.json'],
+        appendVersionedEvent('event_b_fast', 'store_b'),
+        { writeOrder: ['realtimeEvents.json'], lockScope: { storeId: 'store_b' }, ...latestEventScope('store_b') },
+      ).then(() => finished.push('store_b'));
+      await secondStore.readWhere('realtimeEvents.json', { storeId: 'store_a' })
+        .then(() => finished.push('read_store_a'));
+      assert.deepEqual(finished, ['store_b', 'read_store_a']);
+
+      // 跨店（全局）写必须等待进行中的门店写事务结束。
+      const globalWrite = secondStore.withFiles(['stores.json'], (drafts) => {
+        drafts['stores.json'].push(storeRow('store_c'));
+      }, { writeOrder: ['stores.json'] }).then(() => finished.push('global'));
+      await sleep(150);
+      assert.deepEqual(finished, ['store_b', 'read_store_a']);
+      releaseSlowWrite();
+      await Promise.all([slowStoreA, globalWrite]);
+      assert.deepEqual(finished, ['store_b', 'read_store_a', 'store_a', 'global']);
+
+      // 审计写入走批量路径时，故障注入同样生效，整个事务回滚。
       firstStore.setFaultInjector(({ stage, filename }) => {
         if (stage === 'before_replace' && filename === 'auditLogs.json') {
           firstStore.setFaultInjector(null);
@@ -198,11 +236,7 @@ test(
         firstStore.withFiles(
           ['stores.json', 'auditLogs.json'],
           (drafts) => {
-            drafts['stores.json'].push({
-              id: 'store_must_rollback', name: 'Rollback store', code: 'ROLLBACK',
-              normalizedCode: 'ROLLBACK', address: null, timezone: 'Pacific/Auckland',
-              enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-            });
+            drafts['stores.json'].push(storeRow('store_must_rollback'));
             drafts['auditLogs.json'].push({
               id: 'audit_must_rollback',
               timestamp: new Date().toISOString(),
@@ -216,7 +250,10 @@ test(
               dataAfter: null,
             });
           },
-          { writeOrder: ['stores.json', 'auditLogs.json'] },
+          {
+            writeOrder: ['stores.json', 'auditLogs.json'],
+            skipRead: ['auditLogs.json'],
+          },
         ),
         /injected postgres rollback failure/,
       );
@@ -227,7 +264,7 @@ test(
         false,
       );
       assert.deepEqual(
-        await secondStore.readJSON('auditLogs.json'),
+        await secondStore.readWhere('auditLogs.json', { id: 'audit_must_rollback' }),
         [],
       );
 

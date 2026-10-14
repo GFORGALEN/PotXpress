@@ -152,14 +152,14 @@ test('WebSocket 鉴权、门店隔离、事件版本和重启恢复链路可靠'
   process.env.CORS_ORIGIN = 'http://localhost:5173';
 
   const { startServer, stopServer } = await import('../server.js');
-  const { fileStore } = await import('../src/storage/fileStore.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
   const { realtimeHub } = await import('../src/realtime/realtimeHub.js');
   let server = await startServer();
   let baseUrl = `http://127.0.0.1:${server.address().port}`;
   const sockets = new Set();
 
   t.after(async () => {
-    fileStore.setFaultInjector(null);
+    databaseStore.setFaultInjector(null);
     for (const socket of sockets) {
       socket.terminate();
     }
@@ -299,10 +299,10 @@ test('WebSocket 鉴权、门店隔离、事件版本和重启恢复链路可靠'
   );
   assert.equal(snapshotAfterPause.body.data.eventVersion, 2);
 
-  const eventsBeforeFailure = await fileStore.readJSON('realtimeEvents.json');
-  fileStore.setFaultInjector(({ stage, filename }) => {
+  const eventsBeforeFailure = await databaseStore.readWhere('realtimeEvents.json', { limit: 10_000 });
+  databaseStore.setFaultInjector(({ stage, filename }) => {
     if (stage === 'before_replace' && filename === 'auditLogs.json') {
-      fileStore.setFaultInjector(null);
+      databaseStore.setFaultInjector(null);
       throw new Error('injected websocket transaction failure');
     }
   });
@@ -324,7 +324,7 @@ test('WebSocket 鉴权、门店隔离、事件版本和重启恢复链路可靠'
   }
   assert.equal(failedStart.status, 500);
   assert.deepEqual(
-    await fileStore.readJSON('realtimeEvents.json'),
+    await databaseStore.readWhere('realtimeEvents.json', { limit: 10_000 }),
     eventsBeforeFailure,
   );
   await assert.rejects(
@@ -399,7 +399,7 @@ test('WebSocket 鉴权、门店隔离、事件版本和重启恢复链路可靠'
     token: staff.token,
   });
 
-  await fileStore.updateJSON('users.json', (users) => {
+  await databaseStore.updateJSON('users.json', (users) => {
     const staffUser = users.find((user) => user.id === 'user_demo_staff');
     staffUser.tokenVersion += 1;
   });

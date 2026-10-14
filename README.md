@@ -34,7 +34,7 @@ PotXpress 是面向餐厅、台球厅等门店的桌台计时与运营管理网�
 
 ## 技术栈与目录
 
-- 前端：React 18、React Router 6、Vite 5、Tailwind CSS 3、Axios。
+- 前端：React 19、React Router 7、Vite 8、Tailwind CSS 4、Axios。
 - 后端：Node.js、Express、PostgreSQL、ws、Zod、JWT、bcrypt。
 - `packages/contracts`：Table、Timer、Record、Layout、WebSocket 等共享
   Zod 契约及其推导出的 TypeScript 类型。
@@ -48,12 +48,24 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
 [`docs/typescript-migration.md`](docs/typescript-migration.md)。
 
 业务资源保存在 PostgreSQL 中。计时、历史记录、拼桌、审计日志与
-幂等响应、实时事件版本通过同一数据库事务提交；写事务按固定顺序锁定
-`resource_locks` 中的资源行，因此空表、多请求和多服务实例下也不会
-绕过并发控制。历史记录同时保存 `groupId` 与成员桌台快照，因此解除
-临时拼桌后仍可追溯。
+幂等响应、实时事件版本通过同一数据库事务提交。并发控制按门店划分：
 
-数据库 schemaVersion 6 使用显式业务列、主键、唯一约束、外键和门店维度
+- 门店内的写事务持有该门店的事务级 advisory lock（并共享全局锁），
+  A 店开台不会阻塞 B 店；同一门店的写入在多个服务实例之间同样串行。
+- 跨门店的写入（门店、用户管理、数据初始化）独占全局锁。
+- 只读请求不加锁、不排队，使用一致性快照。
+- 只追加的审计日志不读取历史、不加锁。
+- 持续增长的历史表（计时记录、干预记录、审计日志、幂等键、实时事件）
+  读取时必须给出 SQL 范围（门店、ID、门店本地日期或行数上限），
+  存储层会直接拒绝整表读取。
+- 服务端为锁等待（5 秒）与单条 SQL（10 秒）设置上限，超时返回
+  `503 DATABASE_BUSY`，不会拖到浏览器 15 秒超时。
+
+历史记录同时保存 `groupId` 与成员桌台快照，因此解除临时拼桌后仍可追溯。
+
+数据库结构通过 `server/src/storage/database.js` 中只追加的版本化迁移
+升级（`schema_migrations` 登记，启动时在单个事务中用 advisory lock 互斥执行，
+多个实例同时启动也只执行一次）。基线 schemaVersion 6 使用显式业务列、主键、唯一约束、外键和门店维度
 索引，不再把整条业务记录放进通用 `payload JSONB`。拼桌成员、计时成员和
 调整历史使用独立明细表；只有画布布局、审计前后快照、幂等响应和实时事件
 载荷等复杂或整体保存的数据使用 JSONB。HTTP 与 WebSocket 接口仍使用 JSON；启动迁移会在事务内把旧版
@@ -71,6 +83,24 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
   获取完整计时快照。
 - WebSocket 断开时使用 3 秒轮询，连接正常时保留 60 秒安全轮询，因而即使
   广播丢失或 WebSocket 被代理阻断也能恢复。
+- 多实例：事件写入时在同一事务内 `pg_notify`，提交后每个实例通过
+  `LISTEN` 收到通知并推送给自己的连接。`LISTEN` 需要会话级连接；如果
+  `DATABASE_URL` 指向事务模式连接池（如 Supabase 的 6543 端口），请把
+  `REALTIME_LISTEN_DATABASE_URL` 设为直连或会话模式地址。监听不可用时
+  自动重连，期间由客户端版本缺口检测与安全轮询兜底。
+- 登录失败限流计数保存在 PostgreSQL（只存 IP+用户名的摘要），多实例共享。
+- 计时列表等 GET 接口只读。超时提醒与自动清台由后台结算完成：每个实例
+  每 30 秒巡检一次，读接口发现待结算时也会登记一次（同一门店去重），
+  结算完成后通过实时事件推送。
+
+## 店员入口链接
+
+- 系统管理员或本店管理员通过 `GET /api/stores/:storeId/kiosk-link` 获取
+  链接，通过 `POST /api/stores/:storeId/kiosk-link/rotate` 更换。更换只作废
+  该门店的旧链接，不影响其他门店与已登录用户。
+- 数据库只保存链接密钥的 SHA-256 摘要，登录时按摘要索引查找。
+- 升级前发出的链接继续有效，直到该门店第一次更换；更换 `JWT_SECRET`
+  仍会使所有门店链接失效。
 
 ## 环境变量
 
@@ -86,6 +116,8 @@ TypeScript 采用渐进迁移：现有 JavaScript 可以继续运行，新迁移
 | `DATABASE_URL` | `postgres://potxpress:potxpress@127.0.0.1:5432/potxpress` | PostgreSQL 连接地址 |
 | `DATABASE_POOL_SIZE` | `10` | 数据库连接池大小（1–50） |
 | `DATABASE_SSL` | `false` | 是否为数据库连接启用 SSL |
+| `REALTIME_LISTEN_DATABASE_URL` | 空（复用 `DATABASE_URL`） | 跨实例实时广播的 `LISTEN` 连接地址，需支持会话级连接 |
+| `TEST_DATABASE_URL` | 本地 compose 数据库 | `npm test` 使用的 PostgreSQL；每个测试文件使用独立 schema，结束后自动删除 |
 | `SEED_DEMO_DATA` | `false` | 仅本地开发可设为 `true` |
 | `TRUST_PROXY` | `false` | 反向代理层数或受支持地址范围；仅按真实拓扑配置 |
 | `VITE_SHOW_DEMO_ACCOUNTS` | `false` | 仅控制开发登录页演示账号快捷入口 |
@@ -123,15 +155,12 @@ npm test
 npm run dev:server
 ```
 
-Docker PostgreSQL 可用时，可额外运行真实行锁集成测试：
-
-```powershell
-$env:RUN_POSTGRES_INTEGRATION = "true"
-npm run test:postgres --workspace @potxpress/server
-```
-
-该集成测试会在隔离 schema 中建立旧版 v4 表，验证数据迁移、显式列、
-跨实例资源锁、事件版本唯一性及失败事务回滚，结束后自动删除测试 schema。
+服务端测试直接运行在真实 PostgreSQL 上（与生产执行同一套 SQL，没有内存
+数据库分支），因此 `npm test` 前需要先启动数据库。每个测试文件在独立
+schema 中运行，结束后自动清理。`test/postgresConcurrency.test.js` 覆盖旧表
+迁移、门店级并发隔离（A 店慢写不阻塞 B 店）、跨实例串行化与失败回滚；
+`test/multiInstance.test.js` 覆盖跨实例实时广播、店员入口链接更换和共享
+登录限流。GitHub Actions 在每次推送和 PR 上用 PostgreSQL 17 运行完整测试。
 
 另开一个终端：
 

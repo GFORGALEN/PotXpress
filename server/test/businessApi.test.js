@@ -91,7 +91,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
   process.env.CORS_ORIGIN = 'http://localhost:5173';
 
   const { startServer, stopServer } = await import('../server.js');
-  const { fileStore } = await import('../src/storage/fileStore.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
   let server = await startServer();
   let baseUrl = `http://127.0.0.1:${server.address().port}`;
 
@@ -473,7 +473,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
   );
 
   const tableToDelete = createTwentyNine.body.data.table;
-  await fileStore.updateJSON('activeTimers.json', (timers) => {
+  await databaseStore.updateJSON('activeTimers.json', (timers) => {
     timers.push({
       id: 'timer_delete_conflict',
       storeId: 'store_demo',
@@ -503,7 +503,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
   );
   assert.equal(deleteConflict.status, 409);
   assert.equal(deleteConflict.body.error.code, 'TABLE_HAS_ACTIVE_TIMER');
-  await fileStore.updateJSON('activeTimers.json', (timers) => (
+  await databaseStore.updateJSON('activeTimers.json', (timers) => (
     timers.filter((timer) => timer.id !== 'timer_delete_conflict')
   ));
 
@@ -597,7 +597,7 @@ test('门店、桌台、设置和布局 API 权限与并发链路可用', async 
     true,
   );
 
-  const auditLogs = await fileStore.readJSON('auditLogs.json');
+  const auditLogs = await databaseStore.readWhere('auditLogs.json', { limit: 10_000 });
   const auditActions = new Set(auditLogs.map((entry) => entry.action));
 
   for (const action of [

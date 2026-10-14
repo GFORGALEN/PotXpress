@@ -11,12 +11,6 @@ import { buildLayoutTransferPlan } from '../src/utils/layoutTransferPlan.js';
 
 const { Pool } = pg;
 const LOCAL_DATABASE_URL = 'postgres://potxpress:potxpress@127.0.0.1:5432/potxpress';
-const LOCKED_RESOURCES = [
-  'activeTimers.json',
-  'layouts.json',
-  'tableGroups.json',
-  'tables.json',
-];
 
 function parseArguments(argv) {
   const options = {
@@ -141,19 +135,12 @@ async function readStoreSnapshot(client, storeId, { lock = false } = {}) {
 }
 
 async function lockResources(client) {
-  for (const resource of [...LOCKED_RESOURCES].sort()) {
-    await client.query(
-      `INSERT INTO resource_locks (resource_name)
-       VALUES ($1)
-       ON CONFLICT (resource_name) DO NOTHING`,
-      [resource],
-    );
-    await client.query(
-      `SELECT resource_name FROM resource_locks
-       WHERE resource_name = $1 FOR UPDATE`,
-      [resource],
-    );
-  }
+  // 与应用使用同一把全局写锁（见 src/storage/database.js acquireWriteLocks）：
+  // 独占全局锁会等待所有门店的写事务结束，并阻止新的写事务开始，直到提交。
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    ['potxpress:global'],
+  );
 }
 
 function publicPlan(sourceStore, targetStore, sourceSnapshot, targetSnapshot, plan) {

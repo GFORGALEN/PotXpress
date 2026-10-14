@@ -14,7 +14,7 @@ test('健康检查、登录续期和 tokenVersion 失效链路可用', async (t)
   process.env.CORS_ORIGIN = 'http://localhost:5173';
 
   const { startServer, stopServer } = await import('../server.js');
-  const { fileStore } = await import('../src/storage/fileStore.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
   const { userRepository } = await import('../src/repositories/user.repository.js');
   let server;
 
@@ -177,7 +177,7 @@ test('健康检查、登录续期和 tokenVersion 失效链路可用', async (t)
   assert.equal(selfDisableResponse.status, 409);
   assert.equal(selfDisableBody.error.code, 'CANNOT_REVOKE_SELF');
 
-  await fileStore.updateJSON('users.json', (users) => {
+  await databaseStore.updateJSON('users.json', (users) => {
     const admin = users.find((user) => user.id === 'user_admin');
     admin.tokenVersion += 1;
     admin.updatedAt = new Date().toISOString();

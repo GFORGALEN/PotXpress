@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { fileStore } from '../storage/fileStore.js';
+import { databaseStore } from '../storage/databaseStore.js';
 
 const SENSITIVE_KEY_PATTERN = /password|passwordhash|token|authorization|secret/i;
 
@@ -63,12 +63,17 @@ export async function writeAuditLog(entry) {
 
   // 只追加，不读取整张审计表：审计日志只增不减，全表读取会随数据量
   // 无限变慢，并把整表从数据库传到应用（登录超时与 egress 暴涨）。
-  await fileStore.withFiles(
+  await databaseStore.withFiles(
     ['auditLogs.json'],
     (drafts) => {
       drafts['auditLogs.json'].push(auditLog);
     },
-    { writeOrder: ['auditLogs.json'], skipRead: ['auditLogs.json'] },
+    {
+      writeOrder: ['auditLogs.json'],
+      skipRead: ['auditLogs.json'],
+      // 纯追加：不读取历史、不依赖其他数据，因此不需要任何门店锁或全局锁。
+      lockScope: { none: true },
+    },
   );
 
   return auditLog;

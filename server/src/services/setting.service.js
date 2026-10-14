@@ -21,6 +21,11 @@ export async function updateSettings(storeId, input, user) {
     {
       resources: ['stores', 'settings'],
       writeOrder: ['settings'],
+      storeId,
+      readScopes: {
+        stores: { id: storeId },
+        settings: { id: storeId },
+      },
     },
     ({ stores, settings }) => {
       const store = stores.findById(storeId);

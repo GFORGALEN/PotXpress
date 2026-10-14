@@ -8,7 +8,7 @@ import {
   passwordSchema,
   usernameSchema,
 } from '../validators/auth.validator.js';
-import { fileStore } from './fileStore.js';
+import { databaseStore } from './databaseStore.js';
 
 const SEED_IDS = Object.freeze({
   store: 'store_demo',
@@ -217,7 +217,7 @@ export async function initializeDemoData() {
 
   const seedTables = buildSeedTables(timestamp);
 
-  await fileStore.withFiles(
+  await databaseStore.withFiles(
     [
       'stores.json',
       'settings.json',

@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { kioskRepository } from '../repositories/kiosk.repository.js';
 import { storeRepository } from '../repositories/store.repository.js';
 import { unitOfWorkRepository } from '../repositories/unitOfWork.repository.js';
 import { DEFAULT_CANVAS } from '../storage/dataInitializer.js';
@@ -174,4 +175,26 @@ export async function updateStore(storeId, input, user) {
   });
 
   return toPublicStore(updated);
+}
+
+export async function getKioskLink(storeId) {
+  const { key, version } = await kioskRepository.getKey(storeId);
+  return { key, version, path: `/kiosk/${key}` };
+}
+
+export async function rotateKioskLink(storeId, user) {
+  const { key, version } = await kioskRepository.rotateKey(storeId);
+
+  await writeAuditLogBestEffort({
+    userId: user.userId,
+    userNameSnapshot: user.displayName,
+    storeId,
+    action: 'store.kiosk_link_rotate',
+    targetType: 'store',
+    targetId: storeId,
+    dataBefore: { version: version - 1 },
+    dataAfter: { version },
+  });
+
+  return { key, version, path: `/kiosk/${key}` };
 }

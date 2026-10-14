@@ -26,6 +26,7 @@ export const auditLogQuerySchema = z.object({
   date: dateSchema.optional(),
   action: z.string().trim().min(1).max(100).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(200),
+  before: z.string().trim().min(3).max(200).optional(),
 }).strict();
 
 export const timerInterventionQuerySchema = z.object({

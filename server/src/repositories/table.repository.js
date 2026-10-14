@@ -6,7 +6,7 @@ class TableRepository extends BaseRepository {
   }
 
   async findByStoreId(storeId) {
-    return this.find((table) => table.storeId === storeId);
+    return this.findWhere({ storeId });
   }
 }
 

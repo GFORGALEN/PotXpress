@@ -7,9 +7,10 @@ import {
   initializeBootstrapAdmin,
   initializeDemoData,
 } from './src/storage/dataInitializer.js';
-import { fileStore } from './src/storage/fileStore.js';
-import { runMigrations } from './src/storage/migrations.js';
+import { databaseStore } from './src/storage/databaseStore.js';
+import { kioskRepository } from './src/repositories/kiosk.repository.js';
 import { realtimeHub } from './src/realtime/realtimeHub.js';
+import { timerService } from './src/services/timer.service.js';
 
 let httpServer = null;
 let shutdownPromise = null;
@@ -21,12 +22,11 @@ export async function startServer() {
 
   try {
     validateRuntimeConfig();
-    await fileStore.initStorage();
-    await fileStore.recoverTransactions();
-    await runMigrations();
+    await databaseStore.initStorage();
     await initializeDemoData();
     await initializeBootstrapAdmin();
     await checkDataConsistency();
+    await kioskRepository.syncKeyHashes();
 
     const app = createApp();
     const candidateServer = http.createServer(app);
@@ -35,6 +35,8 @@ export async function startServer() {
       candidateServer.listen(config.port, () => resolve(candidateServer));
       candidateServer.once('error', reject);
     });
+
+    timerService.startOverdueSweeper(config.overdueSweepIntervalMilliseconds);
 
     const address = httpServer.address();
     const port = typeof address === 'object' && address ? address.port : config.port;
@@ -52,6 +54,7 @@ export async function stopServer() {
   }
 
   shutdownPromise = (async () => {
+    timerService.stopOverdueSweeper();
     if (httpServer) {
       const serverToClose = httpServer;
       httpServer = null;
@@ -67,7 +70,8 @@ export async function stopServer() {
       });
     }
 
-    await fileStore.drain();
+    await timerService.waitForSettlements();
+    await databaseStore.drain();
     shutdownPromise = null;
   })();
 

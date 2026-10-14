@@ -1,5 +1,7 @@
 import {
   createStore,
+  getKioskLink,
+  rotateKioskLink,
   getStore,
   listStores,
   updateStore,
@@ -24,4 +26,14 @@ export async function getStoreController(req, res) {
 export async function updateStoreController(req, res) {
   const store = await updateStore(req.params.storeId, req.body, req.user);
   return ok(res, { store }, '门店已更新');
+}
+
+export async function getKioskLinkController(req, res) {
+  const kiosk = await getKioskLink(req.params.storeId);
+  return ok(res, { kiosk }, '已获取店员入口链接');
+}
+
+export async function rotateKioskLinkController(req, res) {
+  const kiosk = await rotateKioskLink(req.params.storeId, req.user);
+  return ok(res, { kiosk }, '店员入口链接已更换，旧链接立即失效');
 }

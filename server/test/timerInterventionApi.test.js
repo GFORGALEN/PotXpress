@@ -45,7 +45,7 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
 
   const { startServer, stopServer } = await import('../server.js');
   const { timerService } = await import('../src/services/timer.service.js');
-  const { fileStore } = await import('../src/storage/fileStore.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
   let now = Date.parse('2026-01-15T00:00:00.000Z');
   timerService.setNowProvider(() => now);
   const server = await startServer();
@@ -134,6 +134,14 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
   assert.equal(acknowledged.body.data.timer.overtimeAcknowledged, true);
 
   now += 20 * 60 * 1000;
+  // GET 是只读的：返回当前快照，并把结算交给后台（不在轮询请求里写库）。
+  const beforeSettlement = await request(
+    baseUrl,
+    '/api/stores/store_demo/timers',
+    { token: staff.token },
+  );
+  assert.equal(beforeSettlement.body.data.timers.length, 1);
+  await timerService.waitForSettlements();
   const afterAutomaticReset = await request(
     baseUrl,
     '/api/stores/store_demo/timers',
@@ -227,7 +235,7 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
   );
   assert.equal(bulkInterventions.body.data.records.length, 2);
   assert.equal(
-    (await fileStore.readJSON('activeTimers.json')).length,
+    (await databaseStore.readJSON('activeTimers.json')).length,
     0,
   );
 
@@ -236,7 +244,10 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
     token: staff.token,
     body: { durationMinutes: 5 },
   });
-  now += 25 * 60 * 1000;
+  now += 15 * 60 * 1000;
+  assert.deepEqual(await timerService.findOverdueStoreIds(), []);
+  now += 10 * 60 * 1000;
+  assert.deepEqual(await timerService.findOverdueStoreIds(), ['store_demo']);
   await timerService.processOverdueTimers();
   const extendedBackIntoRunning = await request(
     baseUrl,
@@ -268,7 +279,7 @@ test('超时每 20 分钟升级、第二次自动清台并支持管理员一键�
   });
 
   const auditActions = new Set(
-    (await fileStore.readJSON('auditLogs.json')).map((entry) => entry.action),
+    (await databaseStore.readWhere('auditLogs.json', { limit: 10_000 })).map((entry) => entry.action),
   );
   assert.equal(auditActions.has('timer.overdue_reminder'), true);
   assert.equal(auditActions.has('timer.auto_reset'), true);

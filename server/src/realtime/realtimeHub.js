@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
+import pg from 'pg';
 import { WebSocket, WebSocketServer } from 'ws';
 import { config } from '../config.js';
+import { connectionOptions, REALTIME_CHANNEL } from '../storage/database.js';
+import { databaseStore } from '../storage/databaseStore.js';
+import { INSTANCE_ID } from '../utils/instance.js';
 import { authorizeRealtimeSubscription } from './socketAuth.js';
 import { readStoreRealtimeVersion } from './realtimeVersion.service.js';
 
@@ -65,11 +69,110 @@ function originAllowed(request) {
   if (config.corsOrigins.includes(origin)) {
     return true;
   }
+  if (
+    !config.isProduction
+    && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  ) {
+    return true;
+  }
 
   try {
     return new URL(origin).host === request.headers.host;
   } catch (error) {
     return false;
+  }
+}
+
+const LISTEN_RECONNECT_MIN_MILLISECONDS = 1000;
+const LISTEN_RECONNECT_MAX_MILLISECONDS = 30000;
+
+/**
+ * 跨实例事件分发：事件写入数据库时在同一事务内 pg_notify（见 database.js），
+ * 提交后每个实例都会收到通知，再推送给连接在本实例上的客户端。
+ * 本实例产生的事件已经直接推送过，收到自己的通知时跳过。
+ * LISTEN 断开期间漏掉的事件由客户端的版本缺口检测与安全轮询补齐。
+ */
+class CrossInstanceListener {
+  constructor(onEvent) {
+    this.onEvent = onEvent;
+    this.client = null;
+    this.listening = false;
+    this.stopped = true;
+    this.reconnectDelay = LISTEN_RECONNECT_MIN_MILLISECONDS;
+    this.reconnectTimer = null;
+  }
+
+  start() {
+    this.stopped = false;
+    this.connect();
+  }
+
+  async connect() {
+    if (this.stopped) return;
+    const client = new pg.Client(
+      config.realtimeListenUrl
+        ? { ...connectionOptions(), connectionString: config.realtimeListenUrl }
+        : connectionOptions(),
+    );
+    this.client = client;
+    client.on('notification', (message) => {
+      if (message.channel === REALTIME_CHANNEL) this.handle(message.payload);
+    });
+    client.on('error', (error) => {
+      console.error(`实时广播监听连接异常：${error.message}`);
+      this.scheduleReconnect(client);
+    });
+    client.on('end', () => this.scheduleReconnect(client));
+
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${REALTIME_CHANNEL}`);
+      this.listening = client === this.client;
+      this.reconnectDelay = LISTEN_RECONNECT_MIN_MILLISECONDS;
+    } catch (error) {
+      if (this.stopped) return;
+      console.error(`实时广播监听启动失败，将重试：${error.message}`);
+      this.scheduleReconnect(client);
+    }
+  }
+
+  scheduleReconnect(client) {
+    if (this.stopped || client !== this.client || this.reconnectTimer) return;
+    this.client = null;
+    this.listening = false;
+    client.end().catch(() => {});
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, this.reconnectDelay);
+    this.reconnectTimer.unref?.();
+    this.reconnectDelay = Math.min(
+      this.reconnectDelay * 2,
+      LISTEN_RECONNECT_MAX_MILLISECONDS,
+    );
+  }
+
+  handle(payload) {
+    let notification;
+    try {
+      notification = JSON.parse(payload);
+    } catch (error) {
+      return;
+    }
+    if (notification.instanceId === INSTANCE_ID) return;
+    this.onEvent(notification).catch((error) => {
+      console.error(`跨实例实时事件分发失败：${error.message}`);
+    });
+  }
+
+  async stop() {
+    this.stopped = true;
+    this.listening = false;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    const client = this.client;
+    this.client = null;
+    await client?.end().catch(() => {});
   }
 }
 
@@ -80,6 +183,16 @@ class RealtimeHub {
     this.serverInstanceId = null;
     this.heartbeatTimer = null;
     this.authorizationTimer = null;
+    this.listener = new CrossInstanceListener(
+      (notification) => this.deliverRemoteEvent(notification),
+    );
+  }
+
+  async deliverRemoteEvent({ storeId, id }) {
+    // 本实例没有该门店的订阅者时不读库。
+    if (!this.rooms.get(storeId)?.size) return;
+    const [event] = await databaseStore.readWhere('realtimeEvents.json', { id, storeId });
+    if (event) this.publish(event);
   }
 
   attach(httpServer) {
@@ -121,6 +234,8 @@ class RealtimeHub {
       this.recheckAuthorizations();
     }, AUTH_RECHECK_INTERVAL_MILLISECONDS);
     this.authorizationTimer.unref?.();
+
+    this.listener.start();
   }
 
   handleConnection(socket) {
@@ -276,6 +391,7 @@ class RealtimeHub {
     clearInterval(this.authorizationTimer);
     this.heartbeatTimer = null;
     this.authorizationTimer = null;
+    await this.listener.stop();
 
     const server = this.webSocketServer;
     if (!server) {

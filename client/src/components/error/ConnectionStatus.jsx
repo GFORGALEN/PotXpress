@@ -41,7 +41,6 @@ export function ConnectionStatus() {
   }
 
   const config = STATUS_CONFIG[connectionStatus];
-  const Icon = config.Icon;
 
   return (
     <div

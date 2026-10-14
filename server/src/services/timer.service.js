@@ -1,5 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { unitOfWorkRepository } from '../repositories/unitOfWork.repository.js';
+import { databasePool } from '../storage/database.js';
+import { databaseStore } from '../storage/databaseStore.js';
 import { appendRealtimeEvent, getStoreEventVersion } from '../realtime/realtimeEvent.js';
 import { realtimeHub } from '../realtime/realtimeHub.js';
 import { AppError } from '../utils/appError.js';
@@ -292,14 +294,86 @@ function buildInterventionRecord({
 export class TimerService {
   constructor({ nowProvider = Date.now } = {}) {
     this.nowProvider = nowProvider;
+    this.pendingSettlements = new Map();
+    this.sweepTimer = null;
+    this.snapshotCache = new Map();
+    this.snapshotCacheHits = 0;
   }
 
   setNowProvider(nowProvider) {
     this.nowProvider = nowProvider;
   }
 
-  async list(storeId, { settleOverdue = true } = {}) {
+  /**
+   * 计时列表是只读接口（多台设备每 3 秒轮询）。发现需要结算的超时计时时，
+   * 只登记一次后台结算并立即返回当前快照；结算完成后通过实时事件推送变化。
+   */
+  async list(storeId) {
     const now = this.nowProvider();
+    const raw = await this.readTimerSnapshot(storeId);
+    const interventions = {
+      find: (predicate) => raw.interventions.filter(predicate),
+    };
+    const snapshot = {
+      serverTime: new Date(now).toISOString(),
+      eventVersion: raw.eventVersion,
+      timers: raw.timers.map((timer) => timerResponse(
+        timer,
+        now,
+        raw.settings.warningThresholdMinutes,
+        reminderCountForTimer(interventions, timer, now),
+      )),
+    };
+
+    const requiresSettlement = snapshot.timers.some((timer) => (
+      timer.status === 'overtime'
+      && (
+        (
+          timer.overtimeSeconds >= OVERDUE_REMINDER_INTERVAL_SECONDS
+          && timer.overdueReminderCount < 1
+        )
+        || (
+          timer.overtimeSeconds
+          >= MAX_OVERDUE_REMINDERS * OVERDUE_REMINDER_INTERVAL_SECONDS
+          && timer.overdueReminderCount < MAX_OVERDUE_REMINDERS
+        )
+      )
+    ));
+
+    if (requiresSettlement) {
+      this.requestSettlement(storeId);
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * 计时列表的原始数据（设置、活动计时、提醒记录、事件版本），按门店缓存。
+   *
+   * 每次轮询先用一条只返回几十字节的查询读取数据指纹：最新事件版本、设置
+   * 更新时间、活动计时数量与最近更新时间、最近一次提醒记录时间。指纹不变
+   * 就复用缓存，只按当前时间重新计算剩余时间；指纹变化才读取完整快照。
+   * 指纹来自数据库，多实例下同样正确。指纹先读、快照后读，因此缓存内容
+   * 只可能比指纹新（下一次轮询会再刷新），不会比指纹旧。
+   */
+  async readTimerSnapshot(storeId) {
+    const { rows: [fingerprintRow] } = await databasePool.query(
+      `SELECT
+         (SELECT version FROM realtime_events WHERE store_id = $1
+          ORDER BY version DESC LIMIT 1) AS event_version,
+         (SELECT updated_at FROM store_settings WHERE store_id = $1) AS settings_updated_at,
+         (SELECT COUNT(*)::int FROM active_timers WHERE store_id = $1) AS timer_count,
+         (SELECT MAX(updated_at) FROM active_timers WHERE store_id = $1) AS timers_updated_at,
+         (SELECT MAX(created_at) FROM timer_intervention_records WHERE store_id = $1)
+           AS interventions_created_at`,
+      [storeId],
+    );
+    const fingerprint = JSON.stringify(fingerprintRow);
+    const cached = this.snapshotCache.get(storeId);
+    if (cached?.fingerprint === fingerprint) {
+      this.snapshotCacheHits += 1;
+      return cached;
+    }
 
     const snapshot = await unitOfWorkRepository.run(
       {
@@ -322,50 +396,86 @@ export class TimerService {
         activeTimers,
         timerInterventionRecords,
         realtimeEvents,
-      }) => {
-        const storeSettings = getSettings(settings, storeId);
-        const timers = activeTimers.findByStoreId(storeId)
+      }) => ({
+        fingerprint,
+        settings: getSettings(settings, storeId),
+        timers: activeTimers.findByStoreId(storeId)
           .sort(
             (left, right) => (
               left.tableNumberSnapshot - right.tableNumberSnapshot
             ),
-          )
-          .map((timer) => timerResponse(
-            timer,
-            now,
-            storeSettings.warningThresholdMinutes,
-            reminderCountForTimer(timerInterventionRecords, timer, now),
-          ));
-
-        return {
-          serverTime: new Date(now).toISOString(),
-          eventVersion: getStoreEventVersion(realtimeEvents, storeId),
-          timers,
-        };
-      },
+          ),
+        interventions: timerInterventionRecords.find(),
+        eventVersion: getStoreEventVersion(realtimeEvents, storeId),
+      }),
     );
-
-    const requiresSettlement = snapshot.timers.some((timer) => (
-      timer.status === 'overtime'
-      && (
-        (
-          timer.overtimeSeconds >= OVERDUE_REMINDER_INTERVAL_SECONDS
-          && timer.overdueReminderCount < 1
-        )
-        || (
-          timer.overtimeSeconds
-          >= MAX_OVERDUE_REMINDERS * OVERDUE_REMINDER_INTERVAL_SECONDS
-          && timer.overdueReminderCount < MAX_OVERDUE_REMINDERS
-        )
-      )
-    ));
-
-    if (settleOverdue && requiresSettlement) {
-      await this.processOverdueTimers({ storeId, now });
-      return this.list(storeId, { settleOverdue: false });
-    }
-
+    this.snapshotCache.set(storeId, snapshot);
     return snapshot;
+  }
+
+  /**
+   * 登记某门店的超时结算。同一门店同时只会有一个结算在进行，重复请求复用它。
+   * 结算在门店写锁内重新读取数据并判定，因此重复触发不会重复记账。
+   */
+  requestSettlement(storeId) {
+    const pending = this.pendingSettlements.get(storeId);
+    if (pending) return pending;
+
+    const settlement = this.processOverdueTimers({ storeId })
+      .catch((error) => {
+        console.error(`门店 ${storeId} 超时结算失败：${error.message}`);
+        return null;
+      })
+      .finally(() => {
+        this.pendingSettlements.delete(storeId);
+      });
+    this.pendingSettlements.set(storeId, settlement);
+    return settlement;
+  }
+
+  async waitForSettlements() {
+    await Promise.all([...this.pendingSettlements.values()]);
+  }
+
+  /**
+   * 返回存在"已超过第一次提醒阈值"计时的门店 ID。超时判断在 SQL 中完成
+   * （与 computeRawRemainingSeconds 同一公式：暂停中的计时以暂停开始时刻
+   * 为准），只传回门店 ID，不读取计时明细。
+   */
+  async findOverdueStoreIds(now = this.nowProvider()) {
+    const { rows } = await databasePool.query(
+      `SELECT DISTINCT store_id FROM active_timers
+       WHERE EXTRACT(EPOCH FROM (
+           CASE WHEN status = 'paused' AND pause_started_at IS NOT NULL
+             THEN pause_started_at ELSE $1::timestamptz END
+         ) - start_time) - planned_duration_seconds - total_paused_seconds >= $2
+       ORDER BY store_id`,
+      [new Date(now).toISOString(), OVERDUE_REMINDER_INTERVAL_SECONDS],
+    );
+    return rows.map((row) => row.store_id);
+  }
+
+  /** 定期巡检：只对存在已超过提醒阈值计时的门店发起结算。 */
+  startOverdueSweeper(intervalMilliseconds) {
+    this.stopOverdueSweeper();
+    if (!intervalMilliseconds) return;
+
+    const sweep = async () => {
+      try {
+        const storeIds = await this.findOverdueStoreIds();
+        await Promise.all(storeIds.map((storeId) => this.requestSettlement(storeId)));
+      } catch (error) {
+        console.error(`超时巡检失败：${error.message}`);
+      }
+    };
+    this.sweepTimer = setInterval(sweep, intervalMilliseconds);
+    this.sweepTimer.unref?.();
+    sweep();
+  }
+
+  stopOverdueSweeper() {
+    clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
   }
 
   async start({
@@ -398,6 +508,7 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        storeId,
         readScopes: storeTimerReadScopes(storeId, {
           user,
           idempotencyKey,
@@ -692,6 +803,7 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        storeId,
         readScopes: storeTimerReadScopes(storeId, {
           user,
           idempotencyKey,
@@ -819,6 +931,7 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        storeId,
         readScopes: storeTimerReadScopes(storeId, {
           user,
           idempotencyKey,
@@ -933,6 +1046,7 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        storeId,
         readScopes: storeTimerReadScopes(storeId, {
           user,
           idempotencyKey,
@@ -1047,6 +1161,25 @@ export class TimerService {
   }
 
   async processOverdueTimers({ storeId = null, now = this.nowProvider() } = {}) {
+    if (!storeId) {
+      // 逐门店结算：每个门店独立加锁、独立提交，一家店的结算不阻塞其他门店。
+      const timers = await databaseStore.readJSON('activeTimers.json');
+      const totals = {
+        remindersCreated: 0,
+        automaticResets: 0,
+        reminders: [],
+        resetRecords: [],
+      };
+      for (const id of new Set(timers.map((timer) => timer.storeId))) {
+        const result = await this.processOverdueTimers({ storeId: id, now });
+        totals.remindersCreated += result.remindersCreated;
+        totals.automaticResets += result.automaticResets;
+        totals.reminders.push(...result.reminders);
+        totals.resetRecords.push(...result.resetRecords);
+      }
+      return totals;
+    }
+
     const timestamp = new Date(now).toISOString();
     const committedEvents = [];
 
@@ -1067,7 +1200,8 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
-        readScopes: storeId ? {
+        storeId,
+        readScopes: {
           activeTimers: { storeId },
           records: { storeId, activeTimersOnly: true },
           timerInterventionRecords: { storeId, activeTimersOnly: true },
@@ -1077,15 +1211,13 @@ export class TimerService {
             latest: true,
             limit: 1,
           },
-        } : {},
+        },
       },
       (repositories) => {
         const reminders = [];
         const automaticResets = [];
 
-        for (const timer of repositories.activeTimers.find((candidate) => (
-          !storeId || candidate.storeId === storeId
-        ))) {
+        for (const timer of repositories.activeTimers.findByStoreId(storeId)) {
           const {
             rawRemainingSeconds,
             effectiveEndMilliseconds,
@@ -1288,6 +1420,7 @@ export class TimerService {
           'realtimeEvents',
         ],
         skipRead: ['auditLogs'],
+        storeId,
         readScopes: storeTimerReadScopes(storeId, {
           user,
           idempotencyKey,

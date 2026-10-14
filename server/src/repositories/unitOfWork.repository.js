@@ -1,4 +1,4 @@
-import { fileStore } from '../storage/fileStore.js';
+import { databaseStore } from '../storage/databaseStore.js';
 
 const REPOSITORY_DEFINITIONS = Object.freeze({
   stores: { filename: 'stores.json', idField: 'id' },
@@ -72,11 +72,20 @@ class TransactionRepository {
 }
 
 class UnitOfWorkRepository {
+  /**
+   * @param {object} options
+   * @param {string[]} options.resources 事务需要读取的资源
+   * @param {string[]} [options.writeOrder] 需要写回的资源；为空表示只读事务
+   * @param {string[]} [options.skipRead] 只追加、不需要读取的资源（如审计日志）
+   * @param {object} [options.readScopes] 每个资源的 SQL 读取范围；历史表必填
+   * @param {string} [options.storeId] 写事务只锁定该门店；省略时锁定全局
+   */
   async run({
     resources,
     writeOrder = [],
     skipRead = [],
     readScopes = {},
+    storeId = null,
   }, callback) {
     const lockFiles = resources.map((name) => {
       const definition = REPOSITORY_DEFINITIONS[name];
@@ -124,7 +133,7 @@ class UnitOfWorkRepository {
       }),
     );
 
-    return fileStore.withFiles(
+    return databaseStore.withFiles(
       lockFiles,
       async (drafts) => {
         const repositories = {};
@@ -147,6 +156,7 @@ class UnitOfWorkRepository {
         writeOrder: writeFiles,
         skipRead: skipReadFiles,
         readScopes: readScopeFiles,
+        lockScope: storeId ? { storeId } : null,
       },
     );
   }

@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseStore } from '../src/storage/databaseStore.js';
 import {
+  acquireWriteLocks,
   readResources,
   syncResourceChangeBatch,
 } from '../src/storage/database.js';
 
-test('资源锁使用固定两次 SQL 并按名称排序去重', async () => {
+test('门店写事务只锁本门店：共享全局锁 + 独占门店锁；跨店写独占全局锁', async () => {
   const queries = [];
   const client = {
     async query(sql, values) {
@@ -15,18 +16,30 @@ test('资源锁使用固定两次 SQL 并按名称排序去重', async () => {
     },
   };
 
-  const store = new DatabaseStore();
-  await store.lockResourcesWithClient(client, [
-    'tables.json',
-    'stores.json',
-    'tables.json',
-  ]);
+  await acquireWriteLocks(client, { storeId: 'store_a' });
+  await acquireWriteLocks(client, { global: true });
 
   assert.equal(queries.length, 2);
-  assert.deepEqual(queries[0].values, ['stores.json', 'tables.json']);
-  assert.deepEqual(queries[1].values, ['stores.json', 'tables.json']);
-  assert.match(queries[0].sql, /VALUES \(\$1\), \(\$2\)/);
-  assert.match(queries[1].sql, /ORDER BY resource_name\s+FOR UPDATE/);
+  assert.match(queries[0].sql, /pg_advisory_xact_lock_shared/);
+  assert.deepEqual(queries[0].values, ['potxpress:global', 'potxpress:store:store_a']);
+  assert.doesNotMatch(queries[1].sql, /_shared/);
+  assert.deepEqual(queries[1].values, ['potxpress:global']);
+});
+
+test('历史表没有读取范围时直接拒绝，避免整表读取', async () => {
+  const store = new DatabaseStore();
+  for (const filename of [
+    'auditLogs.json',
+    'records.json',
+    'timerInterventionRecords.json',
+    'idempotencyKeys.json',
+    'realtimeEvents.json',
+  ]) {
+    await assert.rejects(
+      store.withFiles([filename], () => null),
+      /必须指定范围/,
+    );
+  }
 });
 
 test('范围快照把多资源读取合并为一次参数化 SQL', async () => {

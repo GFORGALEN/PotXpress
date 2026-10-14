@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { fileStore } from '../storage/fileStore.js';
+import { databaseStore } from '../storage/databaseStore.js';
 import { databasePool } from '../storage/database.js';
 import { AppError } from '../utils/appError.js';
 import { normalizeUsername } from '../utils/normalization.js';
@@ -65,32 +65,29 @@ class UserRepository {
   }
 
   async findById(userId) {
-    return fileStore.readById('users.json', userId);
+    return databaseStore.readById('users.json', userId);
   }
 
   async findByUsername(username) {
-    const normalizedUsername = normalizeUsername(username);
-    const users = await fileStore.readJSON('users.json');
-
-    return users.find(
-      (user) => user.normalizedUsername === normalizedUsername,
-    ) ?? null;
+    const [user] = await databaseStore.readWhere('users.json', {
+      where: { normalizedUsername: normalizeUsername(username) },
+      limit: 1,
+    });
+    return user ?? null;
   }
 
   async findEnabledSystemAdmins() {
-    const users = await fileStore.readJSON('users.json');
-    return users.filter(
-      (user) => user.role === 'system_admin' && user.enabled,
-    );
+    return databaseStore.readWhere('users.json', {
+      where: { role: 'system_admin', enabled: true },
+    });
   }
 
   async findEnabledStaffByStore(storeId) {
-    const users = await fileStore.readJSON('users.json');
-    return users.find(
-      (user) => user.role === 'store_staff'
-        && user.storeId === storeId
-        && user.enabled,
-    ) ?? null;
+    const [user] = await databaseStore.readWhere('users.json', {
+      where: { role: 'store_staff', storeId, enabled: true },
+      limit: 1,
+    });
+    return user ?? null;
   }
 
   async createSystemAdmin({
@@ -114,17 +111,19 @@ class UserRepository {
       updatedAt: timestamp,
     };
 
-    await fileStore.updateJSON('users.json', (users) => {
-      if (
-        users.some(
-          (candidate) => candidate.normalizedUsername === normalizedUsername,
-        )
-      ) {
-        throw new AppError(409, 'USERNAME_TAKEN', '用户名已存在');
-      }
-
-      users.push(user);
-    });
+    await databaseStore.withFiles(
+      ['users.json'],
+      (drafts) => {
+        if (drafts['users.json'].length > 0) {
+          throw new AppError(409, 'USERNAME_TAKEN', '用户名已存在');
+        }
+        drafts['users.json'].push(user);
+      },
+      {
+        writeOrder: ['users.json'],
+        readScopes: { 'users.json': { where: { normalizedUsername } } },
+      },
+    );
 
     return user;
   }

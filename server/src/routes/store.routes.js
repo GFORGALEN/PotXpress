@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import {
   createStoreController,
+  getKioskLinkController,
   getStoreController,
   listStoresController,
+  rotateKioskLinkController,
   updateStoreController,
 } from '../controllers/store.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -58,4 +60,26 @@ storeRouter.patch(
   }),
   asyncHandler(storeAccess),
   asyncHandler(updateStoreController),
+);
+storeRouter.get(
+  '/:storeId/kiosk-link',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(getKioskLinkController),
+);
+storeRouter.post(
+  '/:storeId/kiosk-link/rotate',
+  asyncHandler(authenticate),
+  requireRole('system_admin', 'store_admin'),
+  validate({
+    params: storeParamsSchema,
+    query: emptyQuerySchema,
+  }),
+  asyncHandler(storeAccess),
+  asyncHandler(rotateKioskLinkController),
 );

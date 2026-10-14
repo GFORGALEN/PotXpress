@@ -1,44 +1,65 @@
+import { createHash } from 'node:crypto';
+import { databasePool } from '../storage/database.js';
 import { fail } from '../utils/response.js';
 import { normalizeUsername } from '../utils/normalization.js';
 
-const WINDOW_MS = 15 * 60 * 1000;
+const WINDOW_SECONDS = 15 * 60;
 const MAX_FAILURES = 5;
-const MAX_ENTRIES = 10_000;
-const attempts = new Map();
 
-function pruneTimestamps(timestamps, now) {
-  return timestamps.filter((timestamp) => now - timestamp < WINDOW_MS);
-}
-
-function evictExpired(now) {
-  for (const [key, entry] of attempts) {
-    entry.timestamps = pruneTimestamps(entry.timestamps, now);
-
-    if (entry.timestamps.length === 0) {
-      attempts.delete(key);
-    }
-  }
-
-  while (attempts.size >= MAX_ENTRIES) {
-    const oldestKey = attempts.keys().next().value;
-    attempts.delete(oldestKey);
-  }
-}
-
-export function loginRateLimit(req, res, next) {
-  const now = Date.now();
-  evictExpired(now);
-
+// 失败计数存放在 PostgreSQL，多个服务实例共享同一限额。键只保存
+// "IP + 用户名" 的摘要，不落地原始 IP 和用户名。
+function attemptKey(req) {
   const username = normalizeUsername(String(req.body?.username ?? ''));
-  const key = `${req.ip}|${username}`;
-  const entry = attempts.get(key) ?? { timestamps: [] };
-  entry.timestamps = pruneTimestamps(entry.timestamps, now);
+  return createHash('sha256').update(`${req.ip}|${username}`).digest('hex');
+}
 
-  if (entry.timestamps.length >= MAX_FAILURES) {
-    const retryAfterSeconds = Math.max(
-      1,
-      Math.ceil((WINDOW_MS - (now - entry.timestamps[0])) / 1000),
+async function recordFailure(key) {
+  await databasePool.query(
+    `INSERT INTO login_attempts (attempt_key, failures, window_started_at)
+     VALUES ($1, 1, NOW())
+     ON CONFLICT (attempt_key) DO UPDATE SET
+       failures = CASE
+         WHEN login_attempts.window_started_at <= NOW() - make_interval(secs => $2)
+           THEN 1
+         ELSE login_attempts.failures + 1
+       END,
+       window_started_at = CASE
+         WHEN login_attempts.window_started_at <= NOW() - make_interval(secs => $2)
+           THEN NOW()
+         ELSE login_attempts.window_started_at
+       END`,
+    [key, WINDOW_SECONDS],
+  );
+  // 顺带清理过期窗口，表的规模始终受最近 15 分钟的失败次数约束。
+  await databasePool.query(
+    'DELETE FROM login_attempts WHERE window_started_at <= NOW() - make_interval(secs => $1)',
+    [WINDOW_SECONDS],
+  );
+}
+
+export async function loginRateLimit(req, res, next) {
+  const key = attemptKey(req);
+  let retryAfterSeconds = 0;
+
+  try {
+    const { rows } = await databasePool.query(
+      `SELECT failures,
+              CEIL(EXTRACT(EPOCH FROM (
+                window_started_at + make_interval(secs => $2) - NOW()
+              )))::int AS remaining_seconds
+       FROM login_attempts WHERE attempt_key = $1`,
+      [key, WINDOW_SECONDS],
     );
+    const entry = rows[0];
+    if (entry && entry.remaining_seconds > 0 && entry.failures >= MAX_FAILURES) {
+      retryAfterSeconds = entry.remaining_seconds;
+    }
+  } catch (error) {
+    // 限流存储不可用时不阻断登录本身（登录仍需要正确密码）。
+    console.error(`登录限流检查失败：${error.message}`);
+  }
+
+  if (retryAfterSeconds > 0) {
     res.setHeader('Retry-After', String(retryAfterSeconds));
     return fail(
       res,
@@ -49,24 +70,28 @@ export function loginRateLimit(req, res, next) {
     );
   }
 
-  attempts.set(key, entry);
+  // 在响应发出之前完成计数更新：否则客户端收到 401 后立即重试，可能在
+  // 计数写入前到达，从而绕过限额。
+  const sendJson = res.json.bind(res);
+  res.json = (body) => {
+    const update = res.statusCode >= 200 && res.statusCode < 300
+      ? databasePool.query('DELETE FROM login_attempts WHERE attempt_key = $1', [key])
+      : res.statusCode === 401
+        ? recordFailure(key)
+        : null;
+    if (!update) return sendJson(body);
 
-  res.once('finish', () => {
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      attempts.delete(key);
-      return;
-    }
-
-    if (res.statusCode === 401) {
-      entry.timestamps.push(Date.now());
-      attempts.delete(key);
-      attempts.set(key, entry);
-    }
-  });
+    update
+      .catch((error) => {
+        console.error(`登录限流记录失败：${error.message}`);
+      })
+      .finally(() => sendJson(body));
+    return res;
+  };
 
   return next();
 }
 
-export function resetLoginRateLimitForTests() {
-  attempts.clear();
+export async function resetLoginRateLimitForTests() {
+  await databasePool.query('DELETE FROM login_attempts');
 }

@@ -1,20 +1,25 @@
 import { AppError } from '../utils/appError.js';
-import { config } from '../config.js';
 import {
+  acquireWriteLocks,
   canBatchResourceChanges,
   DATABASE_RESOURCES,
   databasePool,
+  GROWING_RESOURCES,
   initializeDatabase,
-  readResource,
+  LATEST_SCHEMA_VERSION,
   readResources,
-  replaceResource,
   syncResourceChangeBatch,
   syncResourceChanges,
 } from './database.js';
 
-function cloneData(value) {
-  return structuredClone(value);
-}
+// 服务端时间预算：必须明显小于浏览器的 15 秒等待上限，
+// 让超时以明确错误返回，而不是让客户端误报"网络连接失败"。
+const LOCK_TIMEOUT = '5s';
+const STATEMENT_TIMEOUT = '10s';
+const BUSY_ERROR_CODES = new Set([
+  '55P03', // lock_not_available（lock_timeout）
+  '57014', // query_canceled（statement_timeout）
+]);
 
 function serialize(value) {
   return JSON.stringify(value);
@@ -30,9 +35,30 @@ function definitionFor(filename) {
   return definition;
 }
 
+function assertBoundedRead(filename, scope) {
+  if (!GROWING_RESOURCES.has(filename)) return;
+  if (!scope || Object.keys(scope).length === 0) {
+    throw new Error(
+      `${filename} 是持续增长的历史表，读取时必须指定范围（readScopes），禁止整表读取`,
+    );
+  }
+}
+
+function lockKeyFor(lockScope) {
+  return lockScope?.storeId ? `store:${lockScope.storeId}` : 'global';
+}
+
+function translateDatabaseError(error) {
+  if (BUSY_ERROR_CODES.has(error?.code)) {
+    return new AppError(503, 'DATABASE_BUSY', '系统繁忙，请稍后重试');
+  }
+  return error;
+}
+
 export class DatabaseStore {
   constructor({ faultInjector = null } = {}) {
-    this.lockTails = new Map();
+    this.writeQueues = new Map();
+    this.activeOperations = new Set();
     this.status = 'starting';
     this.fatalError = null;
     this.faultInjector = faultInjector;
@@ -53,14 +79,11 @@ export class DatabaseStore {
   async initStorage() {
     try {
       await initializeDatabase();
-      const metadata = await this.readJSON('metadata.json');
-
-      if (!metadata) {
-        await this.updateJSON('metadata.json', () => ({
-          schemaVersion: 6,
-          updatedAt: new Date().toISOString(),
-        }));
-      }
+      await this.updateJSON('metadata.json', (metadata) => (
+        metadata?.schemaVersion === LATEST_SCHEMA_VERSION
+          ? metadata
+          : { schemaVersion: LATEST_SCHEMA_VERSION, updatedAt: new Date().toISOString() }
+      ));
       this.status = 'ok';
     } catch (error) {
       this.fatalError = error;
@@ -69,107 +92,26 @@ export class DatabaseStore {
     }
   }
 
-  async recoverTransactions() {
-    // PostgreSQL guarantees transaction recovery.
-  }
-
-  async readWithClient(client, filename, { forUpdate = false } = {}) {
-    definitionFor(filename);
-    return readResource(client, filename, { forUpdate });
-  }
-
-  async lockResourcesWithClient(client, filenames) {
-    const resources = [...new Set(filenames)].sort();
-
-    if (resources.length === 0) {
-      return;
-    }
-
-    const placeholders = resources.map((_, index) => `$${index + 1}`).join(', ');
-    const valuesTuples = resources.map((_, index) => `($${index + 1})`).join(', ');
-
-    await client.query(
-      `INSERT INTO resource_locks (resource_name)
-       VALUES ${valuesTuples}
-       ON CONFLICT (resource_name) DO NOTHING`,
-      resources,
-    );
-    await client.query(
-      `SELECT resource_name
-       FROM resource_locks
-       WHERE resource_name IN (${placeholders})
-       ORDER BY resource_name
-       FOR UPDATE`,
-      resources,
-    );
-  }
-
+  /** 读取一个"小而有上限"的配置资源（门店、用户、桌台等）。历史表必须用 readWhere。 */
   async readJSON(filename) {
-    return this.withLocks([filename], async () => {
-      const client = await databasePool.connect();
-      try {
-        return cloneData(await this.readWithClient(client, filename));
-      } finally {
-        client.release();
-      }
-    });
+    const result = await this.withFiles([filename], (drafts) => drafts[filename]);
+    return result;
+  }
+
+  async readWhere(filename, scope) {
+    return this.withFiles(
+      [filename],
+      (drafts) => drafts[filename],
+      { readScopes: { [filename]: scope } },
+    );
   }
 
   async readById(filename, id) {
-    definitionFor(filename);
-    return this.withLocks([filename], async () => {
-      const client = await databasePool.connect();
-      try {
-        if (config.useMemoryDatabase) {
-          const value = await this.readWithClient(client, filename);
-          if (!Array.isArray(value)) return cloneData(value);
-          const definition = definitionFor(filename);
-          return cloneData(
-            value.find((record) => record[definition.idField] === id) ?? null,
-          );
-        }
-        const result = await readResources(client, [{
-          filename,
-          scope: { id },
-        }]);
-        const value = result[filename];
-        return cloneData(Array.isArray(value) ? (value[0] ?? null) : value);
-      } finally {
-        client.release();
-      }
-    });
+    const value = await this.readWhere(filename, { id });
+    return Array.isArray(value) ? (value[0] ?? null) : value;
   }
 
-  async replaceWithClient(
-    client,
-    filename,
-    value,
-    { injectFault = true } = {},
-  ) {
-    definitionFor(filename);
-
-    if (injectFault && this.faultInjector) {
-      await this.faultInjector({
-        stage: 'before_replace',
-        filename,
-      });
-    }
-
-    return replaceResource(client, filename, value);
-  }
-
-  async syncWithClient(client, filename, before, after) {
-    definitionFor(filename);
-    if (this.faultInjector) {
-      await this.faultInjector({
-        stage: 'before_replace',
-        filename,
-      });
-    }
-    return syncResourceChanges(client, filename, before, after);
-  }
-
-  async updateJSON(filename, updater) {
+  async updateJSON(filename, updater, { lockScope } = {}) {
     return this.withFiles(
       [filename],
       async (drafts) => {
@@ -189,14 +131,27 @@ export class DatabaseStore {
         }
         return drafts[filename];
       },
-      { writeOrder: [filename] },
+      { writeOrder: [filename], lockScope },
     );
   }
 
+  /**
+   * 在一个数据库事务中读取所需资源快照、执行 updater，并只把差异写回。
+   *
+   * - 只读（writeOrder 为空）不加任何锁、不排队、不开事务：一条 SQL 读完。
+   * - 写事务按 lockScope 加锁：{ storeId } 只锁该门店；{ none: true } 用于
+   *   只追加、不依赖已有数据的写入（如审计日志）；省略时锁全局。
+   * - 历史表（GROWING_RESOURCES）必须给出 readScopes 或放入 skipRead。
+   */
   async withFiles(
     filenames,
     updater,
-    { writeOrder = [], skipRead = [], readScopes = {} } = {},
+    {
+      writeOrder = [],
+      skipRead = [],
+      readScopes = {},
+      lockScope = null,
+    } = {},
   ) {
     const resources = [...new Set(filenames)].sort();
     resources.forEach(definitionFor);
@@ -218,171 +173,177 @@ export class DatabaseStore {
         throw new Error(`readScopes 中的 ${filename} 未包含在事务资源中`);
       }
     });
+    const readableResources = resources.filter(
+      (filename) => !skipRead.includes(filename),
+    );
+    readableResources.forEach((filename) => (
+      assertBoundedRead(filename, readScopes[filename])
+    ));
 
-    return this.withLocks(resources, async () => {
-      const client = await databasePool.connect();
-      let before = null;
-      let afterSnapshot = null;
+    const isWrite = writeOrder.length > 0;
+    const run = () => (isWrite ? this.runTransaction : this.runRead).call(this, {
+      resources,
+      readableResources,
+      writeOrder,
+      skipRead,
+      readScopes,
+      lockScope: isWrite ? (lockScope ?? { global: true }) : null,
+      updater,
+    });
 
-      try {
-        await client.query(
-          writeOrder.length === 0 && !config.useMemoryDatabase
-            ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'
-            : 'BEGIN',
-        );
-        if (writeOrder.length > 0) {
-          await this.lockResourcesWithClient(client, resources);
+    const operation = isWrite && !lockScope?.none
+      ? this.withWriteQueue(lockKeyFor(lockScope), run)
+      : this.guarded(run);
+    this.activeOperations.add(operation);
+    try {
+      return await operation;
+    } finally {
+      this.activeOperations.delete(operation);
+    }
+  }
+
+  /**
+   * 只读：所有资源合并成一条 SQL，单条语句本身就是一致性快照，
+   * 因此不需要 BEGIN/COMMIT，也不加锁——一次数据库往返。
+   */
+  async runRead({ readableResources, readScopes, updater }) {
+    try {
+      const snapshot = await readResources(
+        databasePool,
+        readableResources.map((filename) => ({
+          filename,
+          scope: readScopes[filename] ?? {},
+        })),
+      );
+      const outcome = await updater(snapshot);
+      const hasEnvelope = outcome
+        && typeof outcome === 'object'
+        && Object.prototype.hasOwnProperty.call(outcome, 'data');
+      return hasEnvelope ? outcome.result : outcome;
+    } catch (error) {
+      throw translateDatabaseError(error);
+    }
+  }
+
+  async runTransaction({
+    resources,
+    readableResources,
+    writeOrder,
+    skipRead,
+    readScopes,
+    lockScope,
+    updater,
+  }) {
+    const client = await databasePool.connect();
+
+    try {
+      await client.query(
+        `BEGIN; SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'; SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`,
+      );
+      if (!lockScope.none) {
+        await acquireWriteLocks(client, lockScope);
+      }
+
+      const before = await readResources(
+        client,
+        readableResources.map((filename) => ({
+          filename,
+          scope: readScopes[filename] ?? {},
+        })),
+      );
+      for (const filename of skipRead) before[filename] = [];
+
+      const drafts = structuredClone(before);
+      const outcome = await updater(drafts);
+      const hasEnvelope = outcome
+        && typeof outcome === 'object'
+        && Object.prototype.hasOwnProperty.call(outcome, 'data');
+      const after = hasEnvelope
+        ? { ...drafts, ...outcome.data }
+        : drafts;
+      const result = hasEnvelope ? outcome.result : outcome;
+
+      const pendingBatch = [];
+      const flushBatch = async () => {
+        if (pendingBatch.length === 0) return;
+        await syncResourceChangeBatch(client, pendingBatch.splice(0));
+      };
+      for (const filename of writeOrder) {
+        if (serialize(before[filename]) === serialize(after[filename])) continue;
+        if (this.faultInjector) {
+          await this.faultInjector({ stage: 'before_replace', filename });
         }
-        const readableResources = resources.filter(
-          (filename) => !skipRead.includes(filename),
-        );
-        if (config.useMemoryDatabase) {
-          // pg-mem does not support the correlated JSON aggregates used by the
-          // production PostgreSQL bundle query. Keep the same logical snapshot
-          // through its regular resource reader in tests.
-          before = {};
-          for (const filename of readableResources) {
-            before[filename] = await this.readWithClient(
-              client,
-              filename,
-              { forUpdate: writeOrder.includes(filename) },
-            );
-          }
-        } else {
-          before = await readResources(
-            client,
-            readableResources.map((filename) => ({
-              filename,
-              scope: readScopes[filename] ?? {},
-            })),
-          );
-        }
-        for (const filename of skipRead) before[filename] = [];
-
-        const drafts = cloneData(before);
-        const outcome = await updater(drafts);
-        const hasEnvelope = outcome
-          && typeof outcome === 'object'
-          && Object.prototype.hasOwnProperty.call(outcome, 'data');
-        const after = hasEnvelope
-          ? { ...drafts, ...outcome.data }
-          : drafts;
-        afterSnapshot = after;
-        const result = hasEnvelope ? outcome.result : outcome;
-
-        const pendingBatch = [];
-        const flushBatch = async () => {
-          if (pendingBatch.length === 0) return;
-          await syncResourceChangeBatch(client, pendingBatch.splice(0));
-        };
-        for (const filename of writeOrder) {
-          if (serialize(before[filename]) === serialize(after[filename])) continue;
-          if (!config.useMemoryDatabase && canBatchResourceChanges(filename)) {
-            pendingBatch.push({
-              filename,
-              before: before[filename],
-              after: after[filename],
-            });
-            continue;
-          }
-          await flushBatch();
-          await this.syncWithClient(
-            client,
+        if (canBatchResourceChanges(filename)) {
+          pendingBatch.push({
             filename,
-            before[filename],
-            after[filename],
-          );
+            before: before[filename],
+            after: after[filename],
+          });
+          continue;
         }
         await flushBatch();
-
-        if (this.faultInjector) {
-          await this.faultInjector({
-            stage: 'before_commit',
-            filenames: resources,
-            writeOrder,
-          });
-        }
-
-        await client.query('COMMIT');
-        return result;
-      } catch (error) {
-        await client.query('ROLLBACK').catch(() => {});
-
-        // pg-mem does not fully emulate PostgreSQL transaction rollback.
-        // Restore the captured snapshot only in the in-memory test adapter.
-        if (config.useMemoryDatabase && before) {
-          await client.query('BEGIN');
-          try {
-            for (const filename of [...writeOrder].reverse()) {
-              // skipRead 资源的 before 是空数组快照，不能用 replace 恢复
-              // （会清空整表）；改为把本事务追加的记录同步删除。
-              if (skipRead.includes(filename)) {
-                if (afterSnapshot) {
-                  await this.syncWithClient(
-                    client,
-                    filename,
-                    afterSnapshot[filename],
-                    before[filename],
-                  );
-                }
-                continue;
-              }
-
-              await this.replaceWithClient(
-                client,
-                filename,
-                before[filename],
-                { injectFault: false },
-              );
-            }
-            await client.query('COMMIT');
-          } catch (restoreError) {
-            await client.query('ROLLBACK').catch(() => {});
-            restoreError.cause = error;
-            throw restoreError;
-          }
-        }
-
-        throw error;
-      } finally {
-        client.release();
+        await syncResourceChanges(
+          client,
+          filename,
+          before[filename],
+          after[filename],
+        );
       }
-    });
+      await flushBatch();
+
+      if (this.faultInjector) {
+        await this.faultInjector({
+          stage: 'before_commit',
+          filenames: resources,
+          writeOrder,
+        });
+      }
+
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw translateDatabaseError(error);
+    } finally {
+      client.release();
+    }
   }
 
-  async withLocks(filenames, action, index = 0) {
-    if (index >= filenames.length) return action();
-    return this.withSingleLock(
-      filenames[index],
-      () => this.withLocks(filenames, action, index + 1),
-    );
+  async guarded(action) {
+    if (this.fatalError) {
+      throw new AppError(503, 'STORAGE_FATAL', '数据库存储不可用');
+    }
+    return action();
   }
 
-  async withSingleLock(filename, action) {
-    const previous = this.lockTails.get(filename) ?? Promise.resolve();
+  /**
+   * 同一锁键的写事务在进程内排队，避免几十个请求同时占用连接池去等待同一把
+   * 数据库锁。不同门店的写互不影响；只读事务完全不进入这里。
+   */
+  async withWriteQueue(key, action) {
+    const previous = this.writeQueues.get(key) ?? Promise.resolve();
     let release;
     const gate = new Promise((resolve) => {
       release = resolve;
     });
     const tail = previous.catch(() => {}).then(() => gate);
-    this.lockTails.set(filename, tail);
+    this.writeQueues.set(key, tail);
     await previous.catch(() => {});
 
     try {
-      if (this.fatalError) {
-        throw new AppError(503, 'STORAGE_FATAL', '数据库存储不可用');
-      }
-      return await action();
+      return await this.guarded(action);
     } finally {
       release();
-      if (this.lockTails.get(filename) === tail) {
-        this.lockTails.delete(filename);
+      if (this.writeQueues.get(key) === tail) {
+        this.writeQueues.delete(key);
       }
     }
   }
 
   async drain() {
-    await Promise.all([...this.lockTails.values()].map((tail) => tail.catch(() => {})));
+    await Promise.all(
+      [...this.activeOperations].map((operation) => operation.catch(() => {})),
+    );
   }
 }
 

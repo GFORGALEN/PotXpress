@@ -77,6 +77,11 @@ export async function getLayout(storeId) {
     {
       resources: ['layouts', 'tables', 'tableGroups'],
       writeOrder: [],
+      readScopes: {
+        layouts: { id: storeId },
+        tables: { storeId },
+        tableGroups: { storeId },
+      },
     },
     ({ layouts, tables, tableGroups }) => {
       const layout = getLayoutOrThrow(layouts, storeId);
@@ -136,6 +141,16 @@ export async function saveLayout(storeId, input, user) {
         'records',
       ],
       writeOrder: ['tables', 'layouts'],
+      storeId,
+      readScopes: {
+        stores: { id: storeId },
+        layouts: { id: storeId },
+        tables: { storeId },
+        activeTimers: { storeId },
+        tableGroups: { storeId },
+        // 只取待删除桌台各自的一条历史记录，用于判断能否永久删除。
+        records: { storeId, historyOfTableIds: [...new Set(input.deletedTableIds ?? [])] },
+      },
     },
     ({
       stores,

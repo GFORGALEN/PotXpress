@@ -111,17 +111,12 @@ function summarize(plan, existing) {
 }
 
 async function lockResources(client) {
-  for (const resource of ['layouts.json', 'settings.json', 'stores.json', 'tables.json']) {
-    await client.query(
-      `INSERT INTO resource_locks (resource_name) VALUES ($1)
-       ON CONFLICT (resource_name) DO NOTHING`,
-      [resource],
-    );
-    await client.query(
-      'SELECT resource_name FROM resource_locks WHERE resource_name = $1 FOR UPDATE',
-      [resource],
-    );
-  }
+  // 与应用使用同一把全局写锁（见 src/storage/database.js acquireWriteLocks）：
+  // 独占全局锁会等待所有门店的写事务结束，并阻止新的写事务开始，直到提交。
+  await client.query(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    ['potxpress:global'],
+  );
 }
 
 async function writeBackup(snapshots) {

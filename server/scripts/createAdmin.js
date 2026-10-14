@@ -2,7 +2,8 @@ import readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { displayNameSchema, passwordSchema, usernameSchema } from '../src/validators/auth.validator.js';
 import { userRepository } from '../src/repositories/user.repository.js';
-import { fileStore } from '../src/storage/fileStore.js';
+import { databaseStore } from '../src/storage/databaseStore.js';
+import { databasePool } from '../src/storage/database.js';
 import { checkDataConsistency } from '../src/storage/consistencyChecker.js';
 import { writeAuditLog } from '../src/utils/audit.js';
 import { hashPassword } from '../src/utils/hash.js';
@@ -149,7 +150,7 @@ async function main() {
   };
 
   try {
-    await fileStore.initStorage();
+    await databaseStore.initStorage();
     await checkDataConsistency();
 
     const existingAdmins = await userRepository.findEnabledSystemAdmins();
@@ -185,7 +186,8 @@ async function main() {
 
     console.log(`系统管理员已创建：${user.username}（${user.id}）`);
   } finally {
-    await fileStore.drain();
+    await databaseStore.drain();
+    await databasePool.end().catch(() => {});
   }
 }
 

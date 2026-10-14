@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { generateErrorId } from '../utils/errorId.js';
 
 /**
@@ -11,8 +11,6 @@ import { generateErrorId } from '../utils/errorId.js';
  *  - wrap(fn, errorContext?)       包装异步函数，自动 catch 并 handleError
  */
 export function useErrorHandler() {
-  const captureRef = useRef(null);
-
   const handleError = useCallback((error, meta = {}) => {
     const errorId = generateErrorId();
 

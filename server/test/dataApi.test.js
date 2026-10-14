@@ -92,3 +92,68 @@ test('数据 API 拒绝未登录和普通管理员，系统管理员可查询并
     }
   }
 });
+
+test('SQL 聚合与内存统计口径一致（时区日界线、拼桌成员、自动清台、超时、最近 20 条）', async (t) => {
+  const { startServer, stopServer } = await import('../server.js');
+  const { databaseStore } = await import('../src/storage/databaseStore.js');
+  const { aggregateRecords, readRecordStats } = await import('../src/services/data.service.js');
+  await startServer();
+  t.after(stopServer);
+
+  const demo = await databaseStore.readById('stores.json', 'store_demo');
+  const [first, second] = (await databaseStore.readWhere('tables.json', { storeId: 'store_demo' }))
+    .map((table) => table.id);
+  // Pacific/Auckland：2026-04-05 凌晨夏令时结束，覆盖本地午夜两侧与回拨时段。
+  const base = Date.parse('2026-04-03T10:30:00Z');
+  const records = Array.from({ length: 45 }, (_, index) => {
+    const start = base + index * 97 * 60 * 1000;
+    const grouped = index % 7 === 0;
+    return {
+      id: `record_agg_${String(index).padStart(2, '0')}`,
+      timerId: `timer_agg_${index}`,
+      storeId: 'store_demo',
+      tableId: first,
+      targetType: grouped ? 'group' : 'table',
+      groupId: null,
+      memberTableIds: grouped ? [first, second] : [index % 2 ? second : first],
+      tableNameSnapshot: `桌 ${index}`,
+      tableNumberSnapshot: 1,
+      startTime: new Date(start).toISOString(),
+      plannedEndTime: new Date(start + 3600_000).toISOString(),
+      effectiveEndTimeAtReset: new Date(start + 3600_000).toISOString(),
+      actualEndTime: new Date(start + (index % 3 === 0 ? 4000_000 : 3000_000)).toISOString(),
+      plannedDurationSeconds: 3600,
+      actualDurationSeconds: index % 3 === 0 ? 4000 : 3000,
+      totalPausedSeconds: 0,
+      adjustments: [],
+      startedBy: 'user_admin',
+      startedByNameSnapshot: 'admin',
+      resetBy: index % 5 === 0 ? 'system_automation' : 'user_admin',
+      resetByNameSnapshot: 'admin',
+      finalStatus: 'reset',
+      createdAt: new Date(start).toISOString(),
+    };
+  });
+  await databaseStore.withFiles(['records.json'], (drafts) => {
+    drafts['records.json'].push(...records);
+  }, { writeOrder: ['records.json'], skipRead: ['records.json'], lockScope: { storeId: 'store_demo' } });
+
+  const activeTimerIds = new Set(['timer_agg_3', 'timer_not_recorded']);
+  for (const window of [
+    { startDate: '2026-04-04', endDate: '2026-04-04', days: 1 },
+    { startDate: '2026-04-05', endDate: '2026-04-05', days: 1 },
+    { startDate: '2026-04-01', endDate: '2026-04-07', days: 7 },
+  ]) {
+    const fromSql = (await readRecordStats(
+      [{ storeId: 'store_demo', timezone: demo.timezone, ...window }],
+      activeTimerIds,
+    )).get('store_demo');
+    const inMemory = aggregateRecords(records, demo, window, activeTimerIds);
+    assert.deepEqual(
+      { ...fromSql, byHour: { ...fromSql.byHour } },
+      { ...inMemory, byHour: Object.fromEntries(Object.entries(inMemory.byHour).map(([k, v]) => [String(k), v])) },
+      `窗口 ${window.startDate}–${window.endDate} 的 SQL 聚合与内存统计不一致`,
+    );
+    assert.ok(fromSql.sessions > 0);
+  }
+});
