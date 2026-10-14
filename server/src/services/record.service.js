@@ -178,6 +178,10 @@ export class RecordService {
       {
         resources: ['stores', 'auditLogs'],
         writeOrder: [],
+        readScopes: {
+          stores: { id: storeId },
+          auditLogs: { storeId },
+        },
       },
       ({ stores, auditLogs }) => {
         const store = getStoreOrThrow(stores, storeId);
@@ -202,6 +206,10 @@ export class RecordService {
       {
         resources: ['stores', 'auditLogs'],
         writeOrder: ['auditLogs'],
+        readScopes: {
+          stores: { id: storeId },
+          auditLogs: { storeId },
+        },
       },
       ({ stores, auditLogs }) => {
         getStoreOrThrow(stores, storeId);
@@ -221,6 +229,10 @@ export class RecordService {
       {
         resources: ['stores', 'auditLogs'],
         writeOrder: ['auditLogs'],
+        readScopes: {
+          stores: { id: storeId },
+          auditLogs: { storeId },
+        },
       },
       ({ stores, auditLogs }) => {
         getStoreOrThrow(stores, storeId);

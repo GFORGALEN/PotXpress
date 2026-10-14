@@ -61,9 +61,15 @@ export function appendAuditLog(auditLogs, entry, options) {
 export async function writeAuditLog(entry) {
   const auditLog = buildAuditLog(entry);
 
-  await fileStore.updateJSON('auditLogs.json', (logs) => {
-    logs.push(auditLog);
-  });
+  // 只追加，不读取整张审计表：审计日志只增不减，全表读取会随数据量
+  // 无限变慢，并把整表从数据库传到应用（登录超时与 egress 暴涨）。
+  await fileStore.withFiles(
+    ['auditLogs.json'],
+    (drafts) => {
+      drafts['auditLogs.json'].push(auditLog);
+    },
+    { writeOrder: ['auditLogs.json'], skipRead: ['auditLogs.json'] },
+  );
 
   return auditLog;
 }
