@@ -138,7 +138,6 @@ export async function saveLayout(storeId, input, user) {
         'tables',
         'activeTimers',
         'tableGroups',
-        'records',
       ],
       writeOrder: ['tables', 'layouts'],
       storeId,
@@ -148,8 +147,6 @@ export async function saveLayout(storeId, input, user) {
         tables: { storeId },
         activeTimers: { storeId },
         tableGroups: { storeId },
-        // 只取待删除桌台各自的一条历史记录，用于判断能否永久删除。
-        records: { storeId, historyOfTableIds: [...new Set(input.deletedTableIds ?? [])] },
       },
     },
     ({
@@ -158,7 +155,6 @@ export async function saveLayout(storeId, input, user) {
       tables,
       activeTimers,
       tableGroups,
-      records,
     }) => {
       const store = stores.findById(storeId);
 
@@ -215,14 +211,8 @@ export async function saveLayout(storeId, input, user) {
           .filter((group) => group.enabled)
           .flatMap((group) => group.tableIds),
       );
-      const recordedTableIds = new Set(
-        records.findByStoreId(storeId).flatMap(
-          (record) => record.memberTableIds ?? [record.tableId],
-        ),
-      );
       const blockedActive = deletedTableIds.filter((id) => activeTableIds.has(id));
       const blockedGrouped = deletedTableIds.filter((id) => groupedTableIds.has(id));
-      const blockedHistory = deletedTableIds.filter((id) => recordedTableIds.has(id));
 
       if (blockedActive.length) {
         throw new AppError(409, 'TABLE_HAS_ACTIVE_TIMER', '待删除桌台正在计时，请先重置清台', {
@@ -234,12 +224,6 @@ export async function saveLayout(storeId, input, user) {
           tableIds: blockedGrouped,
         });
       }
-      if (blockedHistory.length) {
-        throw new AppError(409, 'TABLE_HAS_HISTORY', '已有计时历史的桌台只能停用，不能永久删除', {
-          tableIds: blockedHistory,
-        });
-      }
-
       const remainingTables = storeTables.filter((table) => !deletedIdSet.has(table.id));
       const nextCanvas = {
         ...currentLayout.canvas,
@@ -262,6 +246,11 @@ export async function saveLayout(storeId, input, user) {
         input.tables.map((item) => [item.tableId, item.layout]),
       );
       const timestamp = new Date().toISOString();
+      const enabledOrders = new Map(
+        remainingTables.filter((table) => table.enabled)
+          .sort((left, right) => left.sortOrder - right.sortOrder || left.number - right.number)
+          .map((table, index) => [table.id, index + 1]),
+      );
 
       for (const tableId of deletedTableIds) {
         tables.delete(tableId);
@@ -270,6 +259,7 @@ export async function saveLayout(storeId, input, user) {
       for (const table of remainingTables) {
         tables.update(table.id, {
           ...table,
+          sortOrder: enabledOrders.get(table.id) ?? table.sortOrder,
           layout: submittedById.get(table.id),
           updatedAt: timestamp,
         });

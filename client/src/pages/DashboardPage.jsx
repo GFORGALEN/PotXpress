@@ -882,7 +882,7 @@ export function DashboardPage() {
         showToast('桌台已停用，历史记录仍会保留', 'success');
       } else {
         await deleteTablePermanent(selectedStoreId, tableMutation.table.tableId);
-        showToast('桌台已永久删除', 'success');
+        showToast('桌台已删除，历史计时记录已保留', 'success');
       }
       setTableMutation(null);
       await refreshAfterTableMutation(continueEditing);
@@ -1325,9 +1325,9 @@ export function DashboardPage() {
           ? '永久删除桌台？'
           : '停用桌台？'}
         description={tableMutation?.type === 'stage-delete'
-          ? `“${tableMutation?.table.name}”会先从当前草稿移除，点击“保存布局”后才永久删除。已有计时历史的桌台不能永久删除。`
+          ? `“${tableMutation?.table.name}”会先从当前草稿移除，点击“保存布局”后才永久删除。历史计时记录会保留；正在计时或仍在拼桌组内的桌台需先处理。`
           : tableMutation?.type === 'delete'
-          ? `“${tableMutation?.table.name}”将被永久删除；存在计时历史或活动计时时不会执行。`
+          ? `“${tableMutation?.table.name}”将被永久删除，桌台无法恢复，历史计时记录会保留；正在计时或仍在拼桌组内的桌台需先处理。`
           : `“${tableMutation?.table.name}”将从当前画布隐藏，但历史记录会保留。`}
         confirmText={tableMutationBusy
           ? '处理中…'

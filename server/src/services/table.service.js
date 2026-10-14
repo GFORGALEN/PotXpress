@@ -454,7 +454,6 @@ export async function deleteTablesPermanent(storeId, tableIds, user) {
         'layouts',
         'activeTimers',
         'tableGroups',
-        'records',
       ],
       writeOrder: ['tables', 'layouts'],
       storeId,
@@ -464,7 +463,6 @@ export async function deleteTablesPermanent(storeId, tableIds, user) {
         layouts: { id: storeId },
         activeTimers: { storeId },
         tableGroups: { storeId },
-        records: { storeId, historyOfTableIds: uniqueIds },
       },
     },
     ({
@@ -473,7 +471,6 @@ export async function deleteTablesPermanent(storeId, tableIds, user) {
       layouts,
       activeTimers,
       tableGroups,
-      records,
     }) => {
       assertEnabledStore(stores, storeId);
       const targets = uniqueIds.map((id) => tables.findById(id));
@@ -506,21 +503,7 @@ export async function deleteTablesPermanent(storeId, tableIds, user) {
         });
       }
 
-      const recordedIds = new Set(
-        records.findByStoreId(storeId).flatMap(
-          (record) => record.memberTableIds ?? [record.tableId],
-        ),
-      );
-      const blockedByHistory = targets.filter((table) => recordedIds.has(table.id));
-      if (blockedByHistory.length) {
-        throw new AppError(
-          409,
-          'TABLE_HAS_HISTORY',
-          '选中的桌台已有计时记录，只能停用，不能永久删除',
-          { tableIds: blockedByHistory.map((table) => table.id) },
-        );
-      }
-
+      // 已结束计时的桌台 ID 和名称保存在历史快照中；删除桌台不改写历史。
       const timestamp = new Date().toISOString();
       deleted = targets.map((table) => tables.delete(table.id));
       reorderEnabledTables(tables, storeId, null, undefined, timestamp);

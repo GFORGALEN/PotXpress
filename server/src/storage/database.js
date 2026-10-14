@@ -928,6 +928,16 @@ const MIGRATIONS = Object.freeze([
       'CREATE INDEX IF NOT EXISTS timer_record_members_table_idx ON timer_record_members (table_id)',
     ],
   },
+  {
+    version: 8,
+    description: '计时历史保留桌台快照，允许删除已结束计时的桌台',
+    statements: [
+      // 历史关联是原始 ID 快照，不能随桌台删除级联删除或置空。
+      // 活动计时和拼桌成员的桌台外键继续保证当前业务引用有效。
+      'ALTER TABLE timer_records DROP CONSTRAINT IF EXISTS timer_records_table_id_fkey',
+      'ALTER TABLE timer_record_members DROP CONSTRAINT IF EXISTS timer_record_members_table_id_fkey',
+    ],
+  },
 ]);
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? BASELINE_SCHEMA_VERSION;

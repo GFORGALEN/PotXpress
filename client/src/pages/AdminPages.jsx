@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createTable,
   createTableBatch,
@@ -163,6 +163,8 @@ export function TablesAdminPage() {
     capacity: 4,
   });
   const [selectedTableIds, setSelectedTableIds] = useState([]);
+  const [deletingTables, setDeletingTables] = useState(false);
+  const deletingTablesRef = useRef(false);
   const [groupName, setGroupName] = useState('');
   const [groupType, setGroupType] = useState('temporary');
   const groupByTableId = useMemo(() => new Map(
@@ -170,12 +172,19 @@ export function TablesAdminPage() {
       group.tableIds.map((tableId) => [tableId, group])
     )),
   ), [groupsResource.data]);
+  const tableStatusReady = Boolean(groupsResource.data && timerResource.data);
+  const selectableTableIds = useMemo(() => (resource.data ?? [])
+    .filter((table) => !groupByTableId.has(table.id) && !timerByTable.has(table.id))
+    .map((table) => table.id), [resource.data, groupByTableId, timerByTable]);
+  const selectedIdleTableIds = selectedTableIds.filter((id) => selectableTableIds.includes(id));
+  const quickSelectTableIds = selectableTableIds.slice(0, 100);
   const run = async (action, message) => {
     try {
       await action();
       showToast(message, 'success');
       resource.refresh();
       groupsResource.refresh();
+      timerResource.refresh();
     } catch (error) {
       showToast(
         error.code === 'TABLE_HAS_ACTIVE_TIMER'
@@ -185,10 +194,39 @@ export function TablesAdminPage() {
       );
     }
   };
+  const removeTables = async (tableIds) => {
+    if (deletingTablesRef.current || !tableIds.length) return;
+    const target = tableIds.length === 1
+      ? `“${resource.data.find((table) => table.id === tableIds[0])?.name}”`
+      : `选中的 ${tableIds.length} 张桌台`;
+    if (!window.confirm(`确定永久删除${target}吗？桌台无法恢复，历史计时记录会保留。`)) return;
+    deletingTablesRef.current = true;
+    setDeletingTables(true);
+    try {
+      await run(async () => {
+        if (tableIds.length === 1) {
+          await deleteTablePermanent(selectedStoreId, tableIds[0]);
+        } else {
+          await deleteTablesBatch(selectedStoreId, tableIds);
+        }
+        resource.setData((current) => current.filter((table) => !tableIds.includes(table.id)));
+        setSelectedTableIds((current) => current.filter((id) => !tableIds.includes(id)));
+      }, '桌台已删除，历史计时记录已保留');
+    } finally {
+      deletingTablesRef.current = false;
+      setDeletingTables(false);
+    }
+  };
   if (resource.error) return <ErrorMessage message={resource.error.message} onRetry={resource.refresh} />;
+  if (groupsResource.error || timerResource.error) {
+    return <ErrorMessage message={(groupsResource.error || timerResource.error).message} onRetry={() => {
+      groupsResource.refresh();
+      timerResource.refresh();
+    }} />;
+  }
   if (!resource.data) return <LoadingSpinner label="正在读取桌台" />;
   return (
-    <Page title="桌台管理" description="创建、排序、编辑和停用桌台；停用不会删除历史记录。">
+    <Page title="桌台管理" description="创建、排序、编辑、停用和删除桌台；历史计时记录会保留。">
       <div className="grid gap-5 lg:grid-cols-[22rem_1fr]">
         <div className="space-y-5">
           <Card>
@@ -200,9 +238,9 @@ export function TablesAdminPage() {
                 <option value="temporary">临时拼桌</option>
                 <option value="fixed">固定拼桌</option>
               </select>
-              <button className={buttonClass} disabled={selectedTableIds.length < 2} onClick={() => run(
+              <button className={buttonClass} disabled={!tableStatusReady || deletingTables || selectedIdleTableIds.length < 2 || selectedIdleTableIds.length > 20} onClick={() => run(
                 () => createTableGroup(selectedStoreId, {
-                  tableIds: selectedTableIds,
+                  tableIds: selectedIdleTableIds,
                   ...(groupName.trim() ? { name: groupName.trim() } : {}),
                   type: groupType,
                 }).then((result) => {
@@ -211,7 +249,7 @@ export function TablesAdminPage() {
                   return result;
                 }),
                 '拼桌组已创建',
-              )}>绑定 {selectedTableIds.length} 张桌台</button>
+              )}>绑定 {selectedIdleTableIds.length} 张桌台</button>
             </div>
             {(groupsResource.data ?? []).length ? (
               <div className="mt-4 space-y-2 border-t border-stone-100 pt-4">
@@ -306,24 +344,23 @@ export function TablesAdminPage() {
         </div>
         <Card className="overflow-x-auto">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-stone-500">桌台位置请在首页点击“进入布局编辑”调整。已有计时历史的桌台只能停用。</p>
+            <p className="text-xs text-stone-500">空闲桌台可直接删除，历史计时记录会保留。正在计时的请先清台，拼桌成员请先解除拼桌。</p>
+            <label className="inline-flex min-h-10 items-center gap-2 text-sm font-bold text-stone-700">
+              <input
+                type="checkbox"
+                disabled={!tableStatusReady || deletingTables || !quickSelectTableIds.length}
+                checked={quickSelectTableIds.length > 0 && quickSelectTableIds.every((id) => selectedIdleTableIds.includes(id))}
+                onChange={(event) => setSelectedTableIds(event.target.checked ? quickSelectTableIds : [])}
+              />
+              全选空闲桌台（最多100张）
+            </label>
             <button
               type="button"
-              disabled={!selectedTableIds.length}
+              disabled={!tableStatusReady || deletingTables || !selectedIdleTableIds.length || selectedIdleTableIds.length > 100}
               className="min-h-10 rounded-xl bg-red-600 px-4 text-sm font-bold text-white disabled:opacity-40"
-              onClick={() => {
-                if (!window.confirm(`确定永久删除选中的 ${selectedTableIds.length} 张桌台吗？此操作无法恢复。`)) return;
-                run(
-                  () => deleteTablesBatch(selectedStoreId, selectedTableIds)
-                    .then((result) => {
-                      setSelectedTableIds([]);
-                      return result;
-                    }),
-                  '桌台已批量删除',
-                );
-              }}
+              onClick={() => removeTables(selectedIdleTableIds)}
             >
-              批量删除（{selectedTableIds.length}）
+              {deletingTables ? '正在删除…' : `批量删除（${selectedIdleTableIds.length}）`}
             </button>
           </div>
           <table className="w-full min-w-[48rem] text-left text-sm">
@@ -333,7 +370,7 @@ export function TablesAdminPage() {
               || left.sortOrder - right.sortOrder
             )).map((table) => (
               <tr key={table.id} className="border-t border-stone-100">
-                <td className="p-3"><input type="checkbox" aria-label={`选择${table.name}`} disabled={groupByTableId.has(table.id) || timerByTable.has(table.id)} checked={selectedTableIds.includes(table.id)} onChange={(event) => setSelectedTableIds((current) => event.target.checked ? [...current, table.id] : current.filter((id) => id !== table.id))} /></td>
+                <td className="p-3"><input type="checkbox" aria-label={`选择${table.name}`} disabled={!tableStatusReady || deletingTables || groupByTableId.has(table.id) || timerByTable.has(table.id) || (selectedIdleTableIds.length >= 100 && !selectedTableIds.includes(table.id))} checked={selectedIdleTableIds.includes(table.id)} onChange={(event) => setSelectedTableIds((current) => event.target.checked ? [...current, table.id] : current.filter((id) => id !== table.id))} /></td>
                 <td>{table.sortOrder}</td><td>{table.number}</td><td className="font-bold">{table.name}{groupByTableId.has(table.id) ? <span className="ml-2 rounded-full bg-violet-100 px-2 py-1 text-[10px] text-violet-800">{groupByTableId.get(table.id).name}</span> : null}</td>
                 <td className="text-xs text-stone-500">{table.area} · {table.capacity}人 · {{ round: '圆桌', square: '方桌', rectangle: '长桌', booth: '包厢桌' }[table.shape]}</td>
                 <td>
@@ -375,14 +412,8 @@ export function TablesAdminPage() {
                   }}>{table.enabled ? '停用' : '启用'}</button>
                   <button
                     className="min-h-10 rounded-xl border border-red-200 bg-white px-3 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-40"
-                    disabled={groupByTableId.has(table.id) || timerByTable.has(table.id)}
-                    onClick={() => {
-                      if (!window.confirm(`确定永久删除“${table.name}”吗？已有计时历史时将不允许删除。`)) return;
-                      run(
-                        () => deleteTablePermanent(selectedStoreId, table.id),
-                        '桌台已永久删除',
-                      );
-                    }}
+                    disabled={!tableStatusReady || deletingTables || groupByTableId.has(table.id) || timerByTable.has(table.id)}
+                    onClick={() => removeTables([table.id])}
                   >
                     删除
                   </button>

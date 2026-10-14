@@ -16,6 +16,8 @@ export const AUDIT_ACTION_LABELS = Object.freeze({
   'table.batch_create': '批量创建桌台',
   'table.update': '更新桌台',
   'table.delete': '停用桌台',
+  'table.permanent_delete': '永久删除桌台',
+  'table.batch_delete': '批量删除桌台',
   'table_group.create': '创建拼桌组',
   'table_group.delete': '解除拼桌组',
   'layout.save': '保存布局',

@@ -4,8 +4,8 @@ import { databaseStore } from './databaseStore.js';
 import { normalizeStoreCode, normalizeUsername } from '../utils/normalization.js';
 
 // 启动检查只覆盖规模有上限的配置类资源。历史表（计时记录、审计、干预、
-// 幂等键、实时事件）的引用与唯一性由数据库外键和唯一约束保证，不在每次
-// 启动时整表读入内存——否则数据越多，重启恢复越慢。
+// 幂等键、实时事件）的门店/记录引用与唯一性由数据库约束保证；历史桌台 ID
+// 是允许保留的删除前快照。不在每次启动时整表读入内存，避免重启恢复变慢。
 const BOUNDED_FILES = Object.freeze(
   Object.keys(fileDataSchemas).filter((filename) => !GROWING_RESOURCES.has(filename)),
 );

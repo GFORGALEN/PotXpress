@@ -231,8 +231,9 @@ export async function initializeDemoData() {
       const layouts = drafts['layouts.json'];
       const tables = drafts['tables.json'];
       const users = drafts['users.json'];
+      const creatingSeedStore = !stores.some((store) => store.id === seedStore.id);
 
-      if (!stores.some((store) => store.id === seedStore.id)) {
+      if (creatingSeedStore) {
         const codeConflict = findConflict(
           stores,
           seedStore.id,
@@ -267,7 +268,8 @@ export async function initializeDemoData() {
         });
       }
 
-      for (const seedTable of seedTables) {
+      // 初次创建演示门店时才放入示例桌台，避免重启复活用户已永久删除的桌台。
+      for (const seedTable of creatingSeedStore ? seedTables : []) {
         if (tables.some((table) => table.id === seedTable.id)) {
           continue;
         }
