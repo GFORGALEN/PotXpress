@@ -1,4 +1,4 @@
-import { databasePool } from '../storage/database.js';
+import { databasePool, withDatabaseClient } from '../storage/database.js';
 import { AppError } from '../utils/appError.js';
 import {
   kioskHashesMatch,
@@ -57,30 +57,29 @@ class KioskRepository {
 
   /** 只作废这一家门店的店员入口链接，不影响其他门店和已登录用户。 */
   async rotateKey(storeId) {
-    const client = await databasePool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows } = await client.query(
-        `UPDATE stores SET kiosk_key_version = kiosk_key_version + 1
-         WHERE id = $1 RETURNING kiosk_key_version`,
-        [storeId],
-      );
-      if (!rows[0]) throw new AppError(404, 'STORE_NOT_FOUND', '门店不存在');
+    return withDatabaseClient(async (client) => {
+      try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+          `UPDATE stores SET kiosk_key_version = kiosk_key_version + 1
+           WHERE id = $1 RETURNING kiosk_key_version`,
+          [storeId],
+        );
+        if (!rows[0]) throw new AppError(404, 'STORE_NOT_FOUND', '门店不存在');
 
-      const version = rows[0].kiosk_key_version;
-      const key = kioskKeyForStore(storeId, version);
-      await client.query(
-        'UPDATE stores SET kiosk_key_hash = $2 WHERE id = $1',
-        [storeId, kioskKeyHash(key)],
-      );
-      await client.query('COMMIT');
-      return { key, version };
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-    }
+        const version = rows[0].kiosk_key_version;
+        const key = kioskKeyForStore(storeId, version);
+        await client.query(
+          'UPDATE stores SET kiosk_key_hash = $2 WHERE id = $1',
+          [storeId, kioskKeyHash(key)],
+        );
+        await client.query('COMMIT');
+        return { key, version };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+    });
   }
 }
 

@@ -6,10 +6,12 @@ import {
   databasePool,
   GROWING_RESOURCES,
   initializeDatabase,
+  isConnectionLostError,
   LATEST_SCHEMA_VERSION,
   readResources,
   syncResourceChangeBatch,
   syncResourceChanges,
+  withDatabaseClient,
 } from './database.js';
 
 // 服务端时间预算：必须明显小于浏览器的 15 秒等待上限，
@@ -51,6 +53,11 @@ function lockKeyFor(lockScope) {
 function translateDatabaseError(error) {
   if (BUSY_ERROR_CODES.has(error?.code)) {
     return new AppError(503, 'DATABASE_BUSY', '系统繁忙，请稍后重试');
+  }
+  if (isConnectionLostError(error)) {
+    // 503 不经过统一错误日志；连接中断需要留下记录便于排查数据库/连接池问题。
+    console.error(`数据库连接中断：${error.message}`);
+    return new AppError(503, 'DATABASE_UNAVAILABLE', '数据库暂时不可用，请稍后重试');
   }
   return error;
 }
@@ -225,7 +232,17 @@ export class DatabaseStore {
     }
   }
 
-  async runTransaction({
+  async runTransaction(options) {
+    try {
+      return await withDatabaseClient(
+        (client) => this.writeTransaction(client, options),
+      );
+    } catch (error) {
+      throw translateDatabaseError(error);
+    }
+  }
+
+  async writeTransaction(client, {
     resources,
     readableResources,
     writeOrder,
@@ -234,8 +251,6 @@ export class DatabaseStore {
     lockScope,
     updater,
   }) {
-    const client = await databasePool.connect();
-
     try {
       await client.query(
         `BEGIN; SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'; SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`,
@@ -303,9 +318,7 @@ export class DatabaseStore {
       return result;
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
-      throw translateDatabaseError(error);
-    } finally {
-      client.release();
+      throw error;
     }
   }
 
