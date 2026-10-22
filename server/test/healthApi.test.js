@@ -61,3 +61,24 @@ test('存活检查不访问数据库，数据库占满或变慢时只有就绪�
   assert.equal(ready.status, 200);
   assert.equal(ready.body.data.storage, 'ok');
 });
+
+test('停机关闭连接池，同一进程再次启动时换上新的连接池', async () => {
+  const { startServer, stopServer } = await import('../server.js');
+  const database = await import('../src/storage/database.js');
+  await startServer();
+  const firstPool = database.databasePool;
+  assert.ok(firstPool.totalCount > 0);
+
+  await stopServer();
+  assert.equal(firstPool.ending, true);
+  assert.equal(firstPool.totalCount, 0);
+
+  const server = await startServer();
+  try {
+    assert.notEqual(database.databasePool, firstPool);
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/health/ready`);
+    assert.equal(response.status, 200);
+  } finally {
+    await stopServer();
+  }
+});

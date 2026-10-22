@@ -246,8 +246,21 @@ function createPool() {
   return pool;
 }
 
-export const databasePool = createPool();
+// 用 let 导出：closeDatabasePool() 之后 openDatabasePool() 换上新的连接池，
+// 各模块通过 ES 模块的实时绑定拿到的始终是当前连接池（同进程内重启时用到）。
+export let databasePool = createPool();
 let initializationPromise = null;
+
+/** 停机时关闭连接池：等借出的连接归还后断开全部连接，进程无需再等空闲连接超时。 */
+export async function closeDatabasePool() {
+  if (databasePool.ending) return;
+  await databasePool.end();
+}
+
+/** 连接池已关闭时重新创建（同进程内 stopServer 后再 startServer）。 */
+export function openDatabasePool() {
+  if (databasePool.ending) databasePool = createPool();
+}
 
 // 连接本身已不可用：服务端终止会话或关闭（57P0x）、连接异常类 SQLSTATE（08xxx）、
 // 套接字被对端或网络中断（含 Supavisor 关闭连接）。
