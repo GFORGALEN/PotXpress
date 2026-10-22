@@ -9,6 +9,7 @@ import {
   isConnectionLostError,
   LATEST_SCHEMA_VERSION,
   readResources,
+  rollbackTransaction,
   syncResourceChangeBatch,
   syncResourceChanges,
   withDatabaseClient,
@@ -18,6 +19,9 @@ import {
 // 让超时以明确错误返回，而不是让客户端误报"网络连接失败"。
 const LOCK_TIMEOUT = '5s';
 const STATEMENT_TIMEOUT = '10s';
+// 事务内两次请求之间允许的最长空闲：事务卡在应用侧或连接已半开时，由数据库
+// 终止会话、回滚并释放门店 advisory lock，而不是无限期挡住这家门店的写入。
+const IDLE_IN_TRANSACTION_TIMEOUT = '15s';
 const BUSY_ERROR_CODES = new Set([
   '55P03', // lock_not_available（lock_timeout）
   '57014', // query_canceled（statement_timeout）
@@ -63,12 +67,16 @@ function translateDatabaseError(error) {
 }
 
 export class DatabaseStore {
-  constructor({ faultInjector = null } = {}) {
+  constructor({
+    faultInjector = null,
+    idleInTransactionTimeout = IDLE_IN_TRANSACTION_TIMEOUT,
+  } = {}) {
     this.writeQueues = new Map();
     this.activeOperations = new Set();
     this.status = 'starting';
     this.fatalError = null;
     this.faultInjector = faultInjector;
+    this.idleInTransactionTimeout = idleInTransactionTimeout;
   }
 
   getStatus() {
@@ -253,7 +261,8 @@ export class DatabaseStore {
   }) {
     try {
       await client.query(
-        `BEGIN; SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'; SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`,
+        `BEGIN; SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'; SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'; `
+        + `SET LOCAL idle_in_transaction_session_timeout = '${this.idleInTransactionTimeout}'`,
       );
       if (!lockScope.none) {
         await acquireWriteLocks(client, lockScope);
@@ -317,7 +326,7 @@ export class DatabaseStore {
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
+      await rollbackTransaction(client, error);
       throw error;
     }
   }

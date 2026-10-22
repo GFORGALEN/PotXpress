@@ -4,6 +4,10 @@ import { createApp } from './src/app.js';
 import { config, validateRuntimeConfig } from './src/config.js';
 import { checkDataConsistency } from './src/storage/consistencyChecker.js';
 import {
+  closeDatabasePool,
+  openDatabasePool,
+} from './src/storage/database.js';
+import {
   initializeBootstrapAdmin,
   initializeDemoData,
 } from './src/storage/dataInitializer.js';
@@ -22,6 +26,7 @@ export async function startServer() {
 
   try {
     validateRuntimeConfig();
+    openDatabasePool();
     await databaseStore.initStorage();
     await initializeDemoData();
     await initializeBootstrapAdmin();
@@ -44,6 +49,8 @@ export async function startServer() {
     return httpServer;
   } catch (error) {
     await realtimeHub.close().catch(() => {});
+    // 启动失败时同样关闭连接池，进程按 exitCode 尽快退出，由平台重新拉起。
+    await closeDatabasePool().catch(() => {});
     throw error;
   }
 }
@@ -72,6 +79,8 @@ export async function stopServer() {
 
     await timerService.waitForSettlements();
     await databaseStore.drain();
+    // 不关闭的话，空闲连接要等 idleTimeoutMillis 才断开，SIGTERM 后进程迟迟不退出。
+    await closeDatabasePool();
     shutdownPromise = null;
   })();
 

@@ -1,4 +1,8 @@
-import { databasePool, withDatabaseClient } from '../storage/database.js';
+import {
+  databasePool,
+  rollbackTransaction,
+  withDatabaseClient,
+} from '../storage/database.js';
 import { AppError } from '../utils/appError.js';
 import {
   kioskHashesMatch,
@@ -76,7 +80,7 @@ class KioskRepository {
         await client.query('COMMIT');
         return { key, version };
       } catch (error) {
-        await client.query('ROLLBACK').catch(() => {});
+        await rollbackTransaction(client, error);
         throw error;
       }
     });

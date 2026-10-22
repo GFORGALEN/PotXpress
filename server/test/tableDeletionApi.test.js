@@ -39,7 +39,6 @@ test('永久删除桌台保留历史快照，活动计时和拼桌仍受保护',
   t.after(async () => {
     timerService.setNowProvider(Date.now);
     await stopServer();
-    await databasePool.end();
   });
 
   const login = async (username, password) => {

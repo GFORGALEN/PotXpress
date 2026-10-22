@@ -220,10 +220,26 @@ export const GROWING_RESOURCES = new Set([
   'realtimeEvents.json',
 ]);
 
+// 客户端兜底超时，略长于生产库的 statement_timeout（10s）：正常情况下服务端
+// 先取消语句并返回明确错误；只有连接半开、服务端的响应永远到不了时才由这里
+// 结束等待——否则这个连接（以及排在它后面的整条门店写队列）会无限期挂起。
+export const CLIENT_QUERY_TIMEOUT_MILLISECONDS = 12_000;
+const CLIENT_QUERY_TIMEOUT_MESSAGE = 'Query read timeout';
+
+/** pg 在客户端等待超时（query_timeout）时抛出的错误：连接状态已不可知。 */
+export function isClientQueryTimeout(error) {
+  return error?.message === CLIENT_QUERY_TIMEOUT_MESSAGE && !error.code;
+}
+
 export function connectionOptions() {
   return {
     connectionString: config.databaseUrl,
     ssl: config.databaseSsl ? { rejectUnauthorized: false } : false,
+    // 连接空闲 10 秒后开始 TCP 保活探测：被网络或 Supavisor 静默丢弃的连接会
+    // 以 error 暴露出来并被丢弃，而不是作为半开连接借给下一个请求。
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    query_timeout: CLIENT_QUERY_TIMEOUT_MILLISECONDS,
     ...(config.databaseSchema
       ? { options: `-c search_path=${config.databaseSchema}` }
       : {}),
@@ -246,20 +262,45 @@ function createPool() {
   return pool;
 }
 
-export const databasePool = createPool();
+// 用 let 导出：closeDatabasePool() 之后 openDatabasePool() 换上新的连接池，
+// 各模块通过 ES 模块的实时绑定拿到的始终是当前连接池（同进程内重启时用到）。
+export let databasePool = createPool();
 let initializationPromise = null;
 
-// 连接本身已不可用：服务端终止会话或关闭（57P0x）、连接异常类 SQLSTATE（08xxx）、
-// 套接字被对端或网络中断（含 Supavisor 关闭连接）。
+/** 停机时关闭连接池：等借出的连接归还后断开全部连接，进程无需再等空闲连接超时。 */
+export async function closeDatabasePool() {
+  if (databasePool.ending) return;
+  await databasePool.end();
+}
+
+/** 连接池已关闭时重新创建（同进程内 stopServer 后再 startServer）。 */
+export function openDatabasePool() {
+  if (databasePool.ending) databasePool = createPool();
+}
+
+// 连接本身已不可用：服务端终止会话或关闭（57P0x）、因事务空闲超时终止会话
+// （25P03）、连接异常类 SQLSTATE（08xxx）、套接字被对端或网络中断（含 Supavisor
+// 关闭连接），以及客户端读超时（连接状态未知，不能再交给下一个请求）。
 const CONNECTION_LOST_CODES = new Set([
-  '57P01', '57P02', '57P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
+  '57P01', '57P02', '57P03', '25P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
 ]);
 
 export function isConnectionLostError(error) {
   const code = String(error?.code ?? '');
   return CONNECTION_LOST_CODES.has(code)
     || code.startsWith('08')
-    || error?.message === 'Connection terminated unexpectedly';
+    || error?.message === 'Connection terminated unexpectedly'
+    || isClientQueryTimeout(error);
+}
+
+/**
+ * 事务失败后回滚。连接已不可用（含客户端读超时、状态未知）时跳过：ROLLBACK
+ * 要么立即失败，要么再等一个超时周期；withDatabaseClient 会带着错误归还，
+ * 连接池销毁该连接，数据库随连接关闭回滚事务并释放锁。
+ */
+export async function rollbackTransaction(client, error) {
+  if (isConnectionLostError(error)) return;
+  await client.query('ROLLBACK').catch(() => {});
 }
 
 /**
@@ -1025,7 +1066,7 @@ export async function initializeDatabase() {
       }
       await client.query('COMMIT');
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
+      await rollbackTransaction(client, error);
       throw error;
     }
   });

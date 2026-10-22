@@ -6,6 +6,8 @@ services:
     plan: free
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm run db:migrate && npm start --workspace @potxpress/server
+    # 存活检查，不访问数据库：数据库抖动时不应让 Render 重启实例。
+    # 需要确认数据库可用时请看 /api/health/ready。
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION

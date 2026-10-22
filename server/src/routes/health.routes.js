@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { healthController } from '../controllers/health.controller.js';
+import {
+  healthController,
+  readinessController,
+} from '../controllers/health.controller.js';
 import { validate } from '../middleware/validation.middleware.js';
 import { emptyQuerySchema } from '../validators/common.validator.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -10,4 +13,10 @@ healthRouter.get(
   '/',
   validate({ query: emptyQuerySchema }),
   asyncHandler(healthController),
+);
+
+healthRouter.get(
+  '/ready',
+  validate({ query: emptyQuerySchema }),
+  asyncHandler(readinessController),
 );
