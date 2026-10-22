@@ -9,25 +9,14 @@ import { normalizeStoreCode, normalizeUsername } from '../utils/normalization.js
 const BOUNDED_FILES = Object.freeze(
   Object.keys(fileDataSchemas).filter((filename) => !GROWING_RESOURCES.has(filename)),
 );
+const MAX_SCHEMA_ISSUES_PER_FILE = 20;
 
-function assertUnique(items, keySelector, label) {
-  const seen = new Map();
-
-  for (const item of items) {
-    const key = keySelector(item);
-
-    if (seen.has(key)) {
-      throw new Error(`${label} 重复：${key}（${seen.get(key)} / ${item.id ?? item.storeId}）`);
-    }
-    seen.set(key, item.id ?? item.storeId);
-  }
-}
-
-function assertValidTimezone(timezone, storeId) {
+function isValidTimezone(timezone) {
   try {
     new Intl.DateTimeFormat('en-NZ', { timeZone: timezone }).format(new Date());
+    return true;
   } catch (error) {
-    throw new Error(`门店 ${storeId} 的 timezone 无效：${timezone}`);
+    return false;
   }
 }
 
@@ -41,24 +30,60 @@ async function repairCompletedResetTransactions() {
   );
 }
 
-export async function checkDataConsistency() {
-  await repairCompletedResetTransactions();
+function schemaIssues(filename, value) {
+  const result = fileDataSchemas[filename].safeParse(value);
+  if (result.success) return [];
 
-  const data = await databaseStore.withFiles(
-    BOUNDED_FILES,
-    (drafts) => drafts,
-  );
+  const messages = result.error.issues
+    .slice(0, MAX_SCHEMA_ISSUES_PER_FILE)
+    .map((issue) => {
+      const [index, ...fieldPath] = issue.path;
+      const row = Array.isArray(value) && typeof index === 'number'
+        ? value[index]
+        : null;
+      const location = row
+        ? `${row.id ?? row.storeId ?? `#${index}`} 的 ${fieldPath.join('.') || '(row)'}`
+        : (issue.path.join('.') || '(root)');
+      return `${filename} 数据结构无效：${location} ${issue.message}`;
+    });
+  const omitted = result.error.issues.length - messages.length;
+  if (omitted > 0) messages.push(`${filename} 另有 ${omitted} 处数据结构问题未列出`);
+  return messages;
+}
+
+/**
+ * 检查配置类数据的业务约束，返回问题列表（每条都带出问题行的 ID），不抛错。
+ *
+ * 这些约束由业务代码维护、数据库无法表达；违反时通常只影响个别门店或桌台。
+ * 启动时让一行坏数据阻止整个服务启动，代价远大于带着警告运行——Render 免费
+ * 实例每次休眠唤醒都会重新启动，服务会因此一直起不来。
+ */
+export function findDataConsistencyIssues(data) {
+  const issues = [];
+  const report = (message) => issues.push(message);
+  // 单行数据结构不完整时，后续检查可能读到 undefined；只记录这一行，继续检查其余数据。
+  const inspect = (label, check) => {
+    try {
+      check();
+    } catch (error) {
+      report(`${label} 无法检查：${error.message}`);
+    }
+  };
+  const reportDuplicates = (items, keySelector, label) => {
+    const seen = new Map();
+    for (const item of items) {
+      const key = keySelector(item);
+      const id = item.id ?? item.storeId;
+      if (seen.has(key)) {
+        report(`${label} 重复：${key}（${seen.get(key)} / ${id}）`);
+      } else {
+        seen.set(key, id);
+      }
+    }
+  };
 
   for (const filename of BOUNDED_FILES) {
-    const schema = fileDataSchemas[filename];
-    const result = schema.safeParse(data[filename]);
-
-    if (!result.success) {
-      const issue = result.error.issues[0];
-      throw new Error(
-        `${filename} 数据结构无效：${issue.path.join('.') || '(root)'} ${issue.message}`,
-      );
-    }
+    schemaIssues(filename, data[filename]).forEach(report);
   }
 
   const stores = data['stores.json'];
@@ -74,175 +99,214 @@ export async function checkDataConsistency() {
     layouts.map((entry) => [entry.storeId, entry.canvas]),
   );
 
-  assertUnique(stores, (store) => store.id, '门店 id');
-  assertUnique(stores, (store) => normalizeStoreCode(store.code), '门店 code');
-  assertUnique(users, (user) => user.id, '用户 id');
-  assertUnique(users, (user) => normalizeUsername(user.username), '用户名');
-  assertUnique(tables, (table) => table.id, '桌台 id');
-  assertUnique(tableGroups, (group) => group.id, '拼桌组 id');
-  assertUnique(timers, (timer) => timer.id, '计时器 id');
-  assertUnique(timers, (timer) => timer.tableId, '活动计时桌台');
-  assertUnique(settings, (entry) => entry.storeId, '门店设置');
-  assertUnique(layouts, (entry) => entry.storeId, '门店布局');
+  inspect('唯一性', () => {
+    reportDuplicates(stores, (store) => store.id, '门店 id');
+    reportDuplicates(stores, (store) => normalizeStoreCode(store.code), '门店 code');
+    reportDuplicates(users, (user) => user.id, '用户 id');
+    reportDuplicates(users, (user) => normalizeUsername(user.username), '用户名');
+    reportDuplicates(tables, (table) => table.id, '桌台 id');
+    reportDuplicates(tableGroups, (group) => group.id, '拼桌组 id');
+    reportDuplicates(timers, (timer) => timer.id, '计时器 id');
+    reportDuplicates(timers, (timer) => timer.tableId, '活动计时桌台');
+    reportDuplicates(settings, (entry) => entry.storeId, '门店设置');
+    reportDuplicates(layouts, (entry) => entry.storeId, '门店布局');
+  });
 
   for (const store of stores) {
-    assertValidTimezone(store.timezone, store.id);
+    inspect(`门店 ${store.id}`, () => {
+      if (!isValidTimezone(store.timezone)) {
+        report(`门店 ${store.id} 的 timezone 无效：${store.timezone}`);
+      }
 
-    if (store.normalizedCode !== normalizeStoreCode(store.code)) {
-      throw new Error(`门店 ${store.id} 的 normalizedCode 不一致`);
-    }
+      if (store.normalizedCode !== normalizeStoreCode(store.code)) {
+        report(`门店 ${store.id} 的 normalizedCode 不一致`);
+      }
 
-    if (settings.filter((entry) => entry.storeId === store.id).length !== 1) {
-      throw new Error(`门店 ${store.id} 必须且只能有一条 settings`);
-    }
+      const settingsCount = settings.filter((entry) => entry.storeId === store.id).length;
+      if (settingsCount !== 1) {
+        report(`门店 ${store.id} 必须且只能有一条 settings（实际 ${settingsCount} 条）`);
+      }
 
-    if (layouts.filter((entry) => entry.storeId === store.id).length !== 1) {
-      throw new Error(`门店 ${store.id} 必须且只能有一条 layouts`);
-    }
+      const layoutCount = layouts.filter((entry) => entry.storeId === store.id).length;
+      if (layoutCount !== 1) {
+        report(`门店 ${store.id} 必须且只能有一条 layouts（实际 ${layoutCount} 条）`);
+      }
 
-    const storeTables = tables.filter((table) => table.storeId === store.id);
+      const storeTables = tables.filter((table) => table.storeId === store.id);
 
-    if (storeTables.length > 200) {
-      throw new Error(`门店 ${store.id} 桌台数量超过 200`);
-    }
+      if (storeTables.length > 200) {
+        report(`门店 ${store.id} 桌台数量超过 200（实际 ${storeTables.length} 张）`);
+      }
 
-    assertUnique(storeTables, (table) => table.number, `门店 ${store.id} 桌台编号`);
+      reportDuplicates(storeTables, (table) => table.number, `门店 ${store.id} 桌台编号`);
 
-    const enabledTables = storeTables
-      .filter((table) => table.enabled)
-      .sort((left, right) => left.sortOrder - right.sortOrder);
-    assertUnique(enabledTables, (table) => table.sortOrder, `门店 ${store.id} sortOrder`);
-
-    enabledTables.forEach((table, index) => {
-      if (table.sortOrder !== index + 1) {
-        throw new Error(`门店 ${store.id} enabled 桌台 sortOrder 必须从 1 连续排列`);
+      const enabledTables = storeTables
+        .filter((table) => table.enabled)
+        .sort((left, right) => left.sortOrder - right.sortOrder);
+      const misplaced = enabledTables.filter((table, index) => table.sortOrder !== index + 1);
+      if (misplaced.length > 0) {
+        report(
+          `门店 ${store.id} enabled 桌台 sortOrder 必须从 1 连续排列：`
+          + misplaced.map((table) => `${table.id}=${table.sortOrder}`).join(', '),
+        );
       }
     });
   }
 
   for (const user of users) {
-    if (user.normalizedUsername !== normalizeUsername(user.username)) {
-      throw new Error(`用户 ${user.id} 的 normalizedUsername 不一致`);
-    }
+    inspect(`用户 ${user.id}`, () => {
+      if (user.normalizedUsername !== normalizeUsername(user.username)) {
+        report(`用户 ${user.id} 的 normalizedUsername 不一致`);
+      }
 
-    if (user.role === 'system_admin' && user.storeId !== null) {
-      throw new Error(`系统管理员 ${user.id} 的 storeId 必须为 null`);
-    }
+      if (user.role === 'system_admin' && user.storeId !== null) {
+        report(`系统管理员 ${user.id} 的 storeId 必须为 null`);
+      }
 
-    if (user.role !== 'system_admin' && !storeById.has(user.storeId)) {
-      throw new Error(`用户 ${user.id} 引用了不存在的门店 ${user.storeId}`);
-    }
+      if (user.role !== 'system_admin' && !storeById.has(user.storeId)) {
+        report(`用户 ${user.id} 引用了不存在的门店 ${user.storeId}`);
+      }
+    });
   }
 
   for (const table of tables) {
-    const store = storeById.get(table.storeId);
+    inspect(`桌台 ${table.id}`, () => {
+      if (!storeById.has(table.storeId)) {
+        report(`桌台 ${table.id} 引用了不存在的门店 ${table.storeId}`);
+        return;
+      }
 
-    if (!store) {
-      throw new Error(`桌台 ${table.id} 引用了不存在的门店 ${table.storeId}`);
-    }
+      const { layout } = table;
 
-    const { layout } = table;
+      if (
+        layout.xRatio + layout.widthRatio > 1.000001
+        || layout.yRatio + layout.heightRatio > 1.000001
+      ) {
+        report(`桌台 ${table.id} 布局超出画布边界`);
+      }
 
-    if (
-      layout.xRatio + layout.widthRatio > 1.000001
-      || layout.yRatio + layout.heightRatio > 1.000001
-    ) {
-      throw new Error(`桌台 ${table.id} 布局超出画布边界`);
-    }
+      const canvas = canvasByStoreId.get(table.storeId);
 
-    const canvas = canvasByStoreId.get(table.storeId);
+      if (!canvas) {
+        report(`桌台 ${table.id} 所属门店 ${table.storeId} 缺少画布配置`);
+        return;
+      }
 
-    if (!canvas) {
-      throw new Error(`桌台 ${table.id} 所属门店缺少画布配置`);
-    }
+      const width = layout.widthRatio * canvas.virtualWidth;
+      const height = layout.heightRatio * canvas.virtualHeight;
 
-    const width = layout.widthRatio * canvas.virtualWidth;
-    const height = layout.heightRatio * canvas.virtualHeight;
-
-    const epsilon = 0.01;
-    if (
-      width < canvas.minTableWidth - epsilon
-      || height < canvas.minTableHeight - epsilon
-    ) {
-      throw new Error(`桌台 ${table.id} 布局尺寸小于允许的最小值`);
-    }
+      const epsilon = 0.01;
+      if (
+        width < canvas.minTableWidth - epsilon
+        || height < canvas.minTableHeight - epsilon
+      ) {
+        report(`桌台 ${table.id} 布局尺寸小于允许的最小值`);
+      }
+    });
   }
 
   const groupedTableIds = new Set();
   for (const group of tableGroups.filter((entry) => entry.enabled)) {
-    if (!storeById.has(group.storeId)) {
-      throw new Error(`拼桌组 ${group.id} 引用了不存在的门店`);
-    }
-    for (const tableId of group.tableIds) {
-      const table = tableById.get(tableId);
-      if (!table || table.storeId !== group.storeId || !table.enabled) {
-        throw new Error(`拼桌组 ${group.id} 的桌台引用无效`);
+    inspect(`拼桌组 ${group.id}`, () => {
+      if (!storeById.has(group.storeId)) {
+        report(`拼桌组 ${group.id} 引用了不存在的门店 ${group.storeId}`);
       }
-      if (groupedTableIds.has(tableId)) {
-        throw new Error(`桌台 ${tableId} 同时属于多个启用拼桌组`);
+      for (const tableId of group.tableIds) {
+        const table = tableById.get(tableId);
+        if (!table || table.storeId !== group.storeId || !table.enabled) {
+          report(`拼桌组 ${group.id} 的桌台引用无效：${tableId}`);
+        }
+        if (groupedTableIds.has(tableId)) {
+          report(`桌台 ${tableId} 同时属于多个启用拼桌组（含 ${group.id}）`);
+        }
+        groupedTableIds.add(tableId);
       }
-      groupedTableIds.add(tableId);
-    }
+    });
   }
 
   const timedTableIds = new Set();
   for (const timer of timers) {
-    const table = tableById.get(timer.tableId);
+    inspect(`计时器 ${timer.id}`, () => {
+      const table = tableById.get(timer.tableId);
 
-    if (!table || table.storeId !== timer.storeId) {
-      throw new Error(`计时器 ${timer.id} 的桌台引用无效`);
-    }
-
-    if (!table.enabled) {
-      throw new Error(`计时器 ${timer.id} 不能绑定 disabled 桌台`);
-    }
-
-    for (const memberTableId of timer.memberTableIds) {
-      const member = tableById.get(memberTableId);
-      if (!member || member.storeId !== timer.storeId || !member.enabled) {
-        throw new Error(`计时器 ${timer.id} 的成员桌台引用无效`);
+      if (!table || table.storeId !== timer.storeId) {
+        report(`计时器 ${timer.id} 的桌台引用无效：${timer.tableId}`);
+      } else if (!table.enabled) {
+        report(`计时器 ${timer.id} 不能绑定 disabled 桌台 ${timer.tableId}`);
       }
-      if (timedTableIds.has(memberTableId)) {
-        throw new Error(`桌台 ${memberTableId} 同时存在多个活动计时`);
+
+      for (const memberTableId of timer.memberTableIds) {
+        const member = tableById.get(memberTableId);
+        if (!member || member.storeId !== timer.storeId || !member.enabled) {
+          report(`计时器 ${timer.id} 的成员桌台引用无效：${memberTableId}`);
+        }
+        if (timedTableIds.has(memberTableId)) {
+          report(`桌台 ${memberTableId} 同时存在多个活动计时（含 ${timer.id}）`);
+        }
+        timedTableIds.add(memberTableId);
       }
-      timedTableIds.add(memberTableId);
-    }
 
-    if (
-      timer.targetType === 'group'
-      && !tableGroups.some((group) => (
-        group.id === timer.groupId
-        && group.enabled
-        && group.tableIds.length === timer.memberTableIds.length
-        && group.tableIds.every((id) => timer.memberTableIds.includes(id))
-      ))
-    ) {
-      throw new Error(`计时器 ${timer.id} 的拼桌组引用无效`);
-    }
+      if (
+        timer.targetType === 'group'
+        && !tableGroups.some((group) => (
+          group.id === timer.groupId
+          && group.enabled
+          && group.tableIds.length === timer.memberTableIds.length
+          && group.tableIds.every((id) => timer.memberTableIds.includes(id))
+        ))
+      ) {
+        report(`计时器 ${timer.id} 的拼桌组引用无效：${timer.groupId}`);
+      }
 
-    if (
-      (timer.status === 'paused' && !timer.pauseStartedAt)
-      || (timer.status === 'running' && timer.pauseStartedAt)
-    ) {
-      throw new Error(`计时器 ${timer.id} 的暂停字段不一致`);
-    }
+      if (
+        (timer.status === 'paused' && !timer.pauseStartedAt)
+        || (timer.status === 'running' && timer.pauseStartedAt)
+      ) {
+        report(`计时器 ${timer.id} 的暂停字段不一致`);
+      }
+    });
   }
 
   for (const entry of settings) {
-    const store = storeById.get(entry.storeId);
+    inspect(`门店 ${entry.storeId} 的 settings`, () => {
+      const store = storeById.get(entry.storeId);
 
-    if (!store) {
-      throw new Error(`settings 引用了不存在的门店 ${entry.storeId}`);
-    }
-
-    if (entry.timezone !== store.timezone) {
-      throw new Error(`门店 ${entry.storeId} 的 settings.timezone 与 stores 不一致`);
-    }
+      if (!store) {
+        report(`settings 引用了不存在的门店 ${entry.storeId}`);
+      } else if (entry.timezone !== store.timezone) {
+        report(`门店 ${entry.storeId} 的 settings.timezone 与 stores 不一致`);
+      }
+    });
   }
 
   for (const entry of layouts) {
     if (!storeById.has(entry.storeId)) {
-      throw new Error(`layouts 引用了不存在的门店 ${entry.storeId}`);
+      report(`layouts 引用了不存在的门店 ${entry.storeId}`);
     }
   }
+
+  return issues;
+}
+
+/**
+ * 启动时的数据检查。数据库结构与迁移失败在此之前的 initStorage 中已是致命错误；
+ * 读取数据本身失败（数据库不可用）也照常抛出。业务数据违反约束只记录警告并
+ * 返回问题列表，让服务带着警告启动，由管理员修复对应数据。
+ */
+export async function checkDataConsistency({ logger = console } = {}) {
+  await repairCompletedResetTransactions();
+
+  const data = await databaseStore.withFiles(
+    BOUNDED_FILES,
+    (drafts) => drafts,
+  );
+  const issues = findDataConsistencyIssues(data);
+
+  if (issues.length > 0) {
+    logger.warn(
+      `数据一致性检查发现 ${issues.length} 个问题，服务继续启动，请尽快修复：\n`
+      + issues.map((issue) => `  - ${issue}`).join('\n'),
+    );
+  }
+  return issues;
 }
