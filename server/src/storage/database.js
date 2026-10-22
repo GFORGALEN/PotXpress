@@ -249,6 +249,46 @@ function createPool() {
 export const databasePool = createPool();
 let initializationPromise = null;
 
+// 连接本身已不可用：服务端终止会话或关闭（57P0x）、连接异常类 SQLSTATE（08xxx）、
+// 套接字被对端或网络中断（含 Supavisor 关闭连接）。
+const CONNECTION_LOST_CODES = new Set([
+  '57P01', '57P02', '57P03', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
+]);
+
+export function isConnectionLostError(error) {
+  const code = String(error?.code ?? '');
+  return CONNECTION_LOST_CODES.has(code)
+    || code.startsWith('08')
+    || error?.message === 'Connection terminated unexpectedly';
+}
+
+/**
+ * 借出一个连接执行 action，所有手动 connect() 都必须经过这里。
+ *
+ * pg-pool 在借出期间移除自己的空闲 error 监听；此时连接断开（网络中断、
+ * Supavisor 关闭连接、pg_terminate_backend）会在 Client 上触发没有监听器的
+ * error 事件，Node 直接退出进程。这里在整个借出期间监听它，带着错误归还，
+ * 让连接池销毁坏连接而不是交给下一个请求；并抛出真正的断开原因，而不是
+ * 后续语句的 "not queryable"。断开总会让 action 失败，由调用方记录日志。
+ */
+export async function withDatabaseClient(action) {
+  const client = await databasePool.connect();
+  let connectionError = null;
+  const onError = (error) => {
+    connectionError ??= error;
+  };
+  client.on('error', onError);
+  try {
+    return await action(client);
+  } catch (error) {
+    if (!connectionError && isConnectionLostError(error)) connectionError = error;
+    throw connectionError ?? error;
+  } finally {
+    client.removeListener('error', onError);
+    client.release(connectionError ?? undefined);
+  }
+}
+
 function definitionFor(filename) {
   const definition = DATABASE_RESOURCES[filename];
   if (!definition) throw new Error(`Unknown database resource: ${filename}`);
@@ -944,8 +984,7 @@ export const LATEST_SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? BASELINE_SCHE
 
 export async function initializeDatabase() {
   if (initializationPromise) return initializationPromise;
-  initializationPromise = (async () => {
-    const client = await databasePool.connect();
+  initializationPromise = withDatabaseClient(async (client) => {
     try {
       if (config.databaseSchema) {
         await client.query(`CREATE SCHEMA IF NOT EXISTS "${config.databaseSchema}"`);
@@ -988,10 +1027,8 @@ export async function initializeDatabase() {
     } catch (error) {
       await client.query('ROLLBACK').catch(() => {});
       throw error;
-    } finally {
-      client.release();
     }
-  })();
+  });
   try { await initializationPromise; } catch (error) { initializationPromise = null; throw error; }
 }
 

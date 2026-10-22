@@ -242,6 +242,11 @@ class RealtimeHub {
     socket.isAlive = true;
     socket.subscription = null;
     socket.authenticating = false;
+    // 协议违规（超过 maxPayload、非法帧）时 ws 已用 1009/1002 关闭连接，并在这里
+    // 触发 error；没有监听器时 Node 会直接退出进程，未鉴权的客户端就能让服务宕机。
+    socket.on('error', (error) => {
+      console.warn(`WebSocket 连接因协议错误关闭：${error.message}`);
+    });
     socket.on('pong', () => {
       socket.isAlive = true;
     });
