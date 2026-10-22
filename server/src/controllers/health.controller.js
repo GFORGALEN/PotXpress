@@ -1,13 +1,14 @@
-import { getHealthStatus } from '../services/health.service.js';
+import {
+  getLivenessStatus,
+  getReadinessStatus,
+} from '../services/health.service.js';
 
-export async function healthController(req, res) {
-  const {
-    healthy,
-    status,
-    storage,
-    time,
-  } = await getHealthStatus();
-
+function sendHealth(res, {
+  healthy,
+  status,
+  storage,
+  time,
+}) {
   return res.status(healthy ? 200 : 503).json({
     success: healthy,
     data: {
@@ -16,4 +17,12 @@ export async function healthController(req, res) {
       time,
     },
   });
+}
+
+export async function healthController(req, res) {
+  return sendHealth(res, getLivenessStatus());
+}
+
+export async function readinessController(req, res) {
+  return sendHealth(res, await getReadinessStatus());
 }

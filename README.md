@@ -259,7 +259,8 @@ $password | npm run create-admin --workspace @potxpress/server -- --password-std
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/health` | 服务与存储状态 |
+| `GET` | `/api/health` | 存活检查：进程能处理请求即 200，不访问数据库（Render 健康检查） |
+| `GET` | `/api/health/ready` | 就绪检查：含一次数据库往返，数据库不可用时 503 |
 | `POST` | `/api/auth/login` | 登录 |
 | `GET` | `/api/auth/me` | 当前用户 |
 | `POST` | `/api/auth/refresh` | 为正在使用的登录状态续期 |
