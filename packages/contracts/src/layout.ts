@@ -30,6 +30,7 @@ export const canvasSchema = z.object({
   minTableHeight: z.number().int().min(20).max(2000),
   maxTableWidth: z.number().int().min(40).max(4000),
   maxTableHeight: z.number().int().min(40).max(4000),
+  immersiveVerticalFill: z.boolean().optional(),
   defaultViewBounds: defaultViewBoundsSchema.nullable().optional().default(null),
 }).passthrough();
 

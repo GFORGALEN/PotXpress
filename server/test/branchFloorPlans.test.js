@@ -98,6 +98,56 @@ test('branch floor plans use landscape tablet canvases and preserve table sets',
   }
 });
 
+test('Sunny HotPot aligns uniform tablet cards around the original table groups', () => {
+  const plan = BRANCH_FLOOR_PLANS.find(({ store }) => store.code === 'SUNNYHOTPOT');
+
+  assert.equal(plan.canvas.aspectRatio, '20:13');
+  assert.deepEqual([plan.canvas.virtualWidth, plan.canvas.virtualHeight], [2400, 1560]);
+  assert.equal(plan.canvas.immersiveVerticalFill, false);
+  assert.deepEqual(plan.decorations, []);
+  const capacityByArea = Object.groupBy(plan.tables, ({ area }) => area);
+  assert.deepEqual(Object.fromEntries(Object.entries(capacityByArea).map(([area, tables]) => [
+    area,
+    tables.map(({ capacity }) => capacity),
+  ])), {
+    A区: [8, 8, 8, 4, 4, 4, 2],
+    B区: [4, 4, 6, 4, 4, 4, 2, 2],
+    C区: [2, 4, 4, 2, 4],
+    D区: [4, 4, 4, 4, 4, 4],
+  });
+  assert.equal(tableByName(plan, 'C5').note, '3–4 人');
+
+  const layoutOf = (name) => tableByName(plan, name).layout;
+  const first = layoutOf('D6');
+  for (const { layout } of plan.tables) {
+    assert.equal(layout.widthRatio, first.widthRatio);
+    assert.equal(layout.heightRatio, first.heightRatio);
+  }
+  const rows = [
+    ['D6', 'C5', 'B6'], ['D5', 'C4', 'B5'], ['D4', 'C3', 'B8', 'B4'],
+    ['D3', 'C2', 'B7', 'B3'], ['D2', 'C1', 'B2'], ['D1', 'B1'],
+    ['A4', 'A5', 'A6'], ['A3', 'A7'], ['A2'], ['A1'],
+  ];
+  for (const row of rows) {
+    assert.ok(row.every((name, index) => (
+      layoutOf(name).yRatio === layoutOf(row[0]).yRatio
+      && (index === 0 || layoutOf(name).xRatio > layoutOf(row[index - 1]).xRatio)
+    )));
+  }
+  const columns = [
+    ['D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'A4', 'A3', 'A2', 'A1'],
+    ['C5', 'C4', 'C3', 'C2', 'C1', 'A6', 'A7'],
+    ['B8', 'B7'],
+    ['B6', 'B5', 'B4', 'B3', 'B2', 'B1'],
+  ];
+  for (const column of columns) {
+    assert.ok(column.every((name, index) => (
+      layoutOf(name).xRatio === layoutOf(column[0]).xRatio
+      && (index === 0 || layoutOf(name).yRatio > layoutOf(column[index - 1]).yRatio)
+    )));
+  }
+});
+
 test('branch floor plan geometry is valid, contained, unique, and non-overlapping', () => {
   for (const plan of BRANCH_FLOOR_PLANS) {
     canvasSchema.parse(plan.canvas);

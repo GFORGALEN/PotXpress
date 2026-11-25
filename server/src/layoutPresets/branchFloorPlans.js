@@ -56,11 +56,13 @@ function makeFloorPlan({
   aspectRatio,
   tables,
   decorations,
+  canvasOptions = {},
 }) {
   const canvasSize = size;
   const tableRects = tables.map((item) => item.rect);
   const canvas = Object.freeze({
     ...DEFAULT_CANVAS_OPTIONS,
+    ...canvasOptions,
     aspectRatio,
     virtualWidth: canvasSize[0],
     virtualHeight: canvasSize[1],
@@ -79,7 +81,7 @@ function makeFloorPlan({
       shape: item.shape ?? 'rectangle',
       capacity: item.capacity ?? 4,
       area: item.area ?? areaForName(item.name),
-      note: null,
+      note: item.note ?? null,
       defaultDurationMinutes: null,
       layout: Object.freeze(worldLayout(canvas, tableRects[index], 100 + index)),
     }))),
@@ -221,6 +223,38 @@ const brownsBayTables = [
 
 const brownsBayDecorations = [];
 
+const sunnyTable = (name, column, row, options) => table(
+  name,
+  [55 + column * 400, 30 + row * 152, 340, 142],
+  options,
+);
+
+// The tablet grid keeps D on the left, C in the middle, B on the right, and
+// the A elbow below D and C. Empty slots preserve the aisles between sections.
+const sunnyTables = [
+  sunnyTable('A1', 0, 9, { capacity: 8 }),
+  sunnyTable('A2', 0, 8, { capacity: 8 }),
+  sunnyTable('A3', 0, 7, { capacity: 8 }),
+  sunnyTable('A4', 0, 6),
+  sunnyTable('A5', 1, 6),
+  sunnyTable('A6', 2, 6),
+  sunnyTable('A7', 2, 7, { capacity: 2 }),
+  sunnyTable('B1', 5, 5),
+  sunnyTable('B2', 5, 4),
+  sunnyTable('B3', 5, 3, { capacity: 6 }),
+  sunnyTable('B4', 5, 2),
+  sunnyTable('B5', 5, 1),
+  sunnyTable('B6', 5, 0),
+  sunnyTable('B7', 3, 3, { capacity: 2 }),
+  sunnyTable('B8', 3, 2, { capacity: 2 }),
+  sunnyTable('C1', 2, 4, { capacity: 2 }),
+  sunnyTable('C2', 2, 3),
+  sunnyTable('C3', 2, 2),
+  sunnyTable('C4', 2, 1, { capacity: 2 }),
+  sunnyTable('C5', 2, 0, { capacity: 4, note: '3–4 人' }),
+  ...Array.from({ length: 6 }, (_, index) => sunnyTable(`D${index + 1}`, 0, 5 - index)),
+];
+
 export const BRANCH_FLOOR_PLANS = Object.freeze([
   makeFloorPlan({
     key: 'albany',
@@ -263,5 +297,20 @@ export const BRANCH_FLOOR_PLANS = Object.freeze([
     aspectRatio: '16:9',
     tables: brownsBayTables,
     decorations: brownsBayDecorations,
+  }),
+  makeFloorPlan({
+    key: 'sunny_hotpot',
+    store: {
+      id: 'store_preview_sunny_hotpot',
+      code: 'SUNNYHOTPOT',
+      name: '牛大发 Sunny HotPot',
+      address: null,
+      timezone: 'Pacific/Auckland',
+    },
+    size: [2400, 1560],
+    aspectRatio: '20:13',
+    tables: sunnyTables,
+    decorations: [],
+    canvasOptions: { immersiveVerticalFill: false },
   }),
 ]);

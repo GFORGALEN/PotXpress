@@ -298,6 +298,7 @@ export function FloorCanvas({
   onResizeSelectedTables,
   immersive = false,
   immersiveStage = 'inline',
+  immersiveToolbarRef,
   viewportLocked = false,
   selectedDecorationId = null,
   onSelectDecoration,
@@ -327,7 +328,7 @@ export function FloorCanvas({
   const marqueeSelectionRef = useRef([]);
   const tableIdsRef = useRef(new Set());
   const [flowReady, setFlowReady] = useState(false);
-  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0, topInset: 0 });
   const [flowNodes, setFlowNodes] = useState([]);
   const [flowResetVersion, setFlowResetVersion] = useState(0);
   const [deviceCalibrationStart, setDeviceCalibrationStart] = useState(null);
@@ -359,19 +360,31 @@ export function FloorCanvas({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return undefined;
+    const toolbar = immersive && !editing ? immersiveToolbarRef?.current : null;
     const updateSize = () => {
       const bounds = root.getBoundingClientRect();
+      const topInset = toolbar
+        ? Math.max(0, Math.ceil(toolbar.getBoundingClientRect().bottom - bounds.top))
+        : 0;
       setViewportSize((current) => (
         current.width === bounds.width && current.height === bounds.height
+          && current.topInset === topInset
           ? current
-          : { width: bounds.width, height: bounds.height }
+          : { width: bounds.width, height: bounds.height, topInset }
       ));
     };
     updateSize();
     const observer = new ResizeObserver(updateSize);
     observer.observe(root);
+    if (toolbar) observer.observe(toolbar);
     return () => observer.disconnect();
-  }, []);
+  }, [editing, immersive, immersiveToolbarRef]);
+
+  const immersivePadding = useMemo(() => ({
+    x: 8,
+    top: viewportSize.topInset + 8,
+    bottom: 8,
+  }), [viewportSize.topInset]);
 
   const contentBounds = useMemo(() => getWorldContentBounds([
     ...fitTables.map((table) => table.layout),
@@ -384,18 +397,21 @@ export function FloorCanvas({
       ? ratioBoundsToWorld(canvas.defaultViewBounds, canvas)
       : contentBounds
   ), [canvas, contentBounds]);
+  const fillImmersiveHeight = canvas.immersiveVerticalFill !== false;
   const verticalFillProjection = useMemo(() => (
-    immersive && !editing
+    immersive && !editing && fillImmersiveHeight
       ? createVerticalFillProjection(
         fitTables.map((table) => table.layout),
         viewportSize,
-        { padding: 8 },
+        { padding: immersivePadding },
       )
       : { originY: 0, positionScale: 1 }
   ), [
     editing,
+    fillImmersiveHeight,
     fitTables,
     immersive,
+    immersivePadding,
     viewportSize,
   ]);
   const displayLayoutByTableId = useMemo(() => new Map(
@@ -407,13 +423,9 @@ export function FloorCanvas({
   const tableDisplayLayout = useCallback((table) => (
     displayLayoutByTableId.get(table.tableId) ?? table.layout
   ), [displayLayoutByTableId]);
-  // Fullscreen operations fit against display-projected tables. This keeps
-  // persisted coordinates intact while distributing rows over a tablet.
+  // Fit against display-projected tables without changing their saved positions.
   const immersiveBounds = useMemo(() => getWorldContentBounds(
-    fitTables.map((table) => tableDisplayLayout(table)),
-    canvas,
-    0,
-    false,
+    fitTables.map(tableDisplayLayout), canvas, 0, false,
   ), [canvas, fitTables, tableDisplayLayout]);
   const displayWorldHeight = immersive && !editing
     ? Math.max(canvas.virtualHeight, immersiveBounds.y + immersiveBounds.height)
@@ -463,11 +475,12 @@ export function FloorCanvas({
 
   const applyBoundsViewport = useCallback((bounds, initialize = false) => {
     if (!viewportSize.width || !viewportSize.height) return;
+    const immersiveView = immersive && !editing;
     const nextViewport = fitViewportToBounds(bounds, viewportSize, {
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      padding: immersive && !editing ? 8 : 32,
-      alignY: immersive && !editing ? 'start' : 'center',
+      padding: immersiveView ? immersivePadding : 32,
+      alignY: immersiveView && fillImmersiveHeight ? 'start' : 'center',
     });
     if (initialize) {
       onInitializeViewport?.(nextViewport);
@@ -476,7 +489,9 @@ export function FloorCanvas({
     }
   }, [
     editing,
+    fillImmersiveHeight,
     immersive,
+    immersivePadding,
     onInitializeViewport,
     onViewportChange,
     viewportSize,
@@ -557,7 +572,8 @@ export function FloorCanvas({
       && previousSize.width > 0
       && previousSize.height > 0
       && (Math.abs(viewportSize.width - previousSize.width) > 2
-        || Math.abs(viewportSize.height - previousSize.height) > 2);
+        || Math.abs(viewportSize.height - previousSize.height) > 2
+        || viewportSize.topInset !== previousSize.topInset);
     previousImmersiveRef.current = immersive;
     previousImmersiveStageRef.current = immersiveStage;
     previousDeviceViewStorageKeyRef.current = deviceViewStorageKey;
@@ -597,8 +613,7 @@ export function FloorCanvas({
     immersiveStage,
     deviceViewStorageKey,
     viewportInitialized,
-    viewportSize.height,
-    viewportSize.width,
+    viewportSize,
   ]);
 
   const startDeviceCalibration = useCallback(() => {
