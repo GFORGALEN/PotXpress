@@ -15,9 +15,10 @@ const DEFAULT_LOCAL_DATABASE_URL = 'postgres://potxpress:potxpress@127.0.0.1:543
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 
 function parseArguments(argv) {
-  const options = { apply: false };
+  const options = { apply: false, storeCode: null };
   for (const argument of argv) {
     if (argument === '--apply') options.apply = true;
+    else if (argument.startsWith('--store=')) options.storeCode = argument.slice(8).trim().toUpperCase();
     else throw new Error(`未知参数：${argument}`);
   }
   return options;
@@ -33,8 +34,8 @@ function assertLocalDatabase(connectionString) {
   }
 }
 
-function validateFloorPlans() {
-  for (const plan of BRANCH_FLOOR_PLANS) {
+function validateFloorPlans(plans) {
+  for (const plan of plans) {
     const canvas = canvasSchema.parse(plan.canvas);
     plan.decorations.forEach((item) => decorationSchema.parse(item));
     plan.tables.forEach((item, index) => tableSchema.parse({
@@ -266,14 +267,18 @@ async function applyPlan(client, plan, existing) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  const plans = options.storeCode === null
+    ? BRANCH_FLOOR_PLANS
+    : BRANCH_FLOOR_PLANS.filter((plan) => plan.store.code === options.storeCode);
+  if (!plans.length) throw new Error(`找不到平面图预设：${options.storeCode}`);
   const connectionString = process.env.LOCAL_DATABASE_URL ?? DEFAULT_LOCAL_DATABASE_URL;
   assertLocalDatabase(connectionString);
-  validateFloorPlans();
+  validateFloorPlans(plans);
   const pool = new Pool({ connectionString, max: 2 });
 
   try {
     const snapshots = [];
-    for (const plan of BRANCH_FLOOR_PLANS) {
+    for (const plan of plans) {
       snapshots.push({ plan, existing: await readExisting(pool, plan) });
     }
     console.log(JSON.stringify(
@@ -295,7 +300,7 @@ async function main() {
     try {
       await client.query('BEGIN');
       await lockResources(client);
-      for (const plan of BRANCH_FLOOR_PLANS) {
+      for (const plan of plans) {
         const existing = await readExisting(client, plan);
         await applyPlan(client, plan, existing);
       }
@@ -306,7 +311,7 @@ async function main() {
     } finally {
       client.release();
     }
-    console.log(`\n三家门店平面图已写入本地数据库。备份：${backupFile}`);
+    console.log(`\n已写入本地数据库：${plans.map(({ store }) => store.code).join('、')}。备份：${backupFile}`);
   } finally {
     await pool.end();
   }

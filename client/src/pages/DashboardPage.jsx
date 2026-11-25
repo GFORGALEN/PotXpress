@@ -151,6 +151,7 @@ export function DashboardPage() {
   const pollingFailedRef = useRef(false);
   const realtimeRefreshRef = useRef(() => {});
   const fullscreenRootRef = useRef(null);
+  const immersiveToolbarRef = useRef(null);
   const nativeFullscreenActiveRef = useRef(false);
   const pendingTableClickRef = useRef(null);
   const quickStartTableIdsRef = useRef(new Set());
@@ -1273,7 +1274,7 @@ export function DashboardPage() {
                 : 'relative h-[clamp(38rem,calc(100dvh-12rem),80rem)] min-h-0'}>
               {layoutEditor.mode === 'view' || canManageTables ? (
                 canvasFocused && layoutEditor.mode === 'view' ? (
-                  <div className="absolute right-4 top-4 z-50 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/95 p-1.5 shadow-lg backdrop-blur">
+                  <div ref={immersiveToolbarRef} className="absolute right-4 top-4 z-50 flex items-center gap-1 rounded-full border border-stone-200/80 bg-white/95 p-1.5 shadow-lg backdrop-blur">
                     <span
                       className="inline-flex min-h-10 items-center gap-2 px-3 font-mono text-sm font-black tabular-nums text-ink-950"
                       aria-label={`当前门店时间 ${currentTimeLabel}`}
@@ -1415,6 +1416,7 @@ export function DashboardPage() {
                 immersiveStage={canvasFocused
                   ? (isFullscreen ? 'fullscreen' : 'focused')
                   : 'inline'}
+                immersiveToolbarRef={immersiveToolbarRef}
                 viewportLocked={shouldLockCanvasPan({
                   immersive: canvasFocused,
                   editing: layoutEditor.mode === 'editing',
