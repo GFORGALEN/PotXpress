@@ -52,6 +52,7 @@ function areaForName(name) {
 function makeFloorPlan({
   key,
   store,
+  defaultDurationMinutes = null,
   size,
   aspectRatio,
   tables,
@@ -72,10 +73,11 @@ function makeFloorPlan({
   return Object.freeze({
     key,
     store: Object.freeze(store),
+    defaultDurationMinutes,
     canvas,
     tables: Object.freeze(tables.map((item, index) => Object.freeze({
       name: item.name,
-      number: index + 1,
+      number: item.number ?? index + 1,
       sortOrder: index + 1,
       enabled: true,
       shape: item.shape ?? 'rectangle',
@@ -246,13 +248,15 @@ const sunnyTables = [
   sunnyTable('B5', 5, 1),
   sunnyTable('B6', 5, 0),
   sunnyTable('B7', 3, 3, { capacity: 2 }),
-  sunnyTable('B8', 3, 2, { capacity: 2 }),
-  sunnyTable('C1', 2, 4, { capacity: 2 }),
-  sunnyTable('C2', 2, 3),
-  sunnyTable('C3', 2, 2),
-  sunnyTable('C4', 2, 1, { capacity: 2 }),
-  sunnyTable('C5', 2, 0, { capacity: 4, note: '3–4 人' }),
-  ...Array.from({ length: 6 }, (_, index) => sunnyTable(`D${index + 1}`, 0, 5 - index)),
+  // Number 15 belonged to B8. Retain the numbers of the remaining tables.
+  sunnyTable('C1', 2, 4, { number: 16, capacity: 2 }),
+  sunnyTable('C2', 2, 3, { number: 17 }),
+  sunnyTable('C3', 2, 2, { number: 18 }),
+  sunnyTable('C4', 2, 1, { number: 19, capacity: 2 }),
+  sunnyTable('C5', 2, 0, { number: 20, capacity: 4, note: '3–4 人' }),
+  ...Array.from({ length: 6 }, (_, index) => sunnyTable(
+    `D${index + 1}`, 0, 5 - index, { number: 21 + index },
+  )),
 ];
 
 export const BRANCH_FLOOR_PLANS = Object.freeze([
@@ -307,6 +311,7 @@ export const BRANCH_FLOOR_PLANS = Object.freeze([
       address: null,
       timezone: 'Pacific/Auckland',
     },
+    defaultDurationMinutes: 120,
     size: [2400, 1560],
     aspectRatio: '20:13',
     tables: sunnyTables,
