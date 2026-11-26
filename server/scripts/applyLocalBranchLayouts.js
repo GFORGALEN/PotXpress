@@ -183,9 +183,13 @@ async function applyPlan(client, plan, existing) {
     `INSERT INTO store_settings (
        store_id, default_duration_minutes, warning_threshold_minutes,
        timezone, sound_enabled, updated_at
-     ) VALUES ($1, 90, 10, $2, TRUE, $3)
-     ON CONFLICT (store_id) DO NOTHING`,
-    [storeId, plan.store.timezone, timestamp],
+     ) VALUES ($1, COALESCE($2::integer, 90), 10, $3, TRUE, $4)
+     ON CONFLICT (store_id) DO UPDATE SET
+       default_duration_minutes = EXCLUDED.default_duration_minutes,
+       updated_at = EXCLUDED.updated_at
+     WHERE $2::integer IS NOT NULL
+       AND store_settings.default_duration_minutes IS DISTINCT FROM EXCLUDED.default_duration_minutes`,
+    [storeId, plan.defaultDurationMinutes, plan.store.timezone, timestamp],
   );
 
   if (existing.tables.length) {

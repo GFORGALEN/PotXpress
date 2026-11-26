@@ -105,13 +105,20 @@ test('Sunny HotPot aligns uniform tablet cards around the original table groups'
   assert.deepEqual([plan.canvas.virtualWidth, plan.canvas.virtualHeight], [2400, 1560]);
   assert.equal(plan.canvas.immersiveVerticalFill, false);
   assert.deepEqual(plan.decorations, []);
+  assert.equal(plan.defaultDurationMinutes, 120);
+  assert.equal(plan.tables.length, 25);
+  assert.ok(!tableNames(plan).includes('B8'));
+  assert.deepEqual(
+    plan.tables.map(({ number }) => number),
+    Array.from({ length: 26 }, (_, index) => index + 1).filter((number) => number !== 15),
+  );
   const capacityByArea = Object.groupBy(plan.tables, ({ area }) => area);
   assert.deepEqual(Object.fromEntries(Object.entries(capacityByArea).map(([area, tables]) => [
     area,
     tables.map(({ capacity }) => capacity),
   ])), {
     A区: [8, 8, 8, 4, 4, 4, 2],
-    B区: [4, 4, 6, 4, 4, 4, 2, 2],
+    B区: [4, 4, 6, 4, 4, 4, 2],
     C区: [2, 4, 4, 2, 4],
     D区: [4, 4, 4, 4, 4, 4],
   });
@@ -124,7 +131,7 @@ test('Sunny HotPot aligns uniform tablet cards around the original table groups'
     assert.equal(layout.heightRatio, first.heightRatio);
   }
   const rows = [
-    ['D6', 'C5', 'B6'], ['D5', 'C4', 'B5'], ['D4', 'C3', 'B8', 'B4'],
+    ['D6', 'C5', 'B6'], ['D5', 'C4', 'B5'], ['D4', 'C3', 'B4'],
     ['D3', 'C2', 'B7', 'B3'], ['D2', 'C1', 'B2'], ['D1', 'B1'],
     ['A4', 'A5', 'A6'], ['A3', 'A7'], ['A2'], ['A1'],
   ];
@@ -137,7 +144,6 @@ test('Sunny HotPot aligns uniform tablet cards around the original table groups'
   const columns = [
     ['D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'A4', 'A3', 'A2', 'A1'],
     ['C5', 'C4', 'C3', 'C2', 'C1', 'A6', 'A7'],
-    ['B8', 'B7'],
     ['B6', 'B5', 'B4', 'B3', 'B2', 'B1'],
   ];
   for (const column of columns) {
